@@ -30,6 +30,28 @@ import { assertPrivateOutputDir } from './lib/private-path.mjs';
 
 const FLAGS = ['source', 'target', 'expect_project_ref', 'out', 'help'];
 
+export const REQUIRED_SOURCE_HEADERS = [
+  'Company', 'Division', 'Item #', 'Matched Level',
+  'Proposed MG01', 'Proposed MG02', 'Proposed MG03',
+];
+
+/**
+ * A header that does not match is NOT an empty result. Every row would abstain
+ * as NOT_LEVEL_3 and the operator would get a healthy-looking zero-candidate
+ * manifest, so the header set is proved before a single row is mapped.
+ */
+export function assertSourceHeaders(rows) {
+  const present = new Set(Object.keys(rows[0] ?? {}));
+  const missing = REQUIRED_SOURCE_HEADERS.filter((h) => !present.has(h));
+  if (!rows.length) throw new Error('REFUSED: the source export has no data rows');
+  if (missing.length) {
+    throw new Error(
+      `REFUSED: the source export is missing required column(s): ${missing.join(', ')}`,
+    );
+  }
+  return true;
+}
+
 function mapSourceRow(r) {
   return {
     company: r.Company,
@@ -47,6 +69,7 @@ function mapSourceRow(r) {
 }
 
 export async function buildManifest({ client, sourceRows, sourceDigest, cutoff = HISTORICAL_CUTOFF_ISO }) {
+  assertSourceHeaders(sourceRows);
   // The CLI cannot pass a cutoff, but this function is exported: a direct caller
   // could otherwise widen the SELECT bound and only be refused later, per row, by
   // qualifyCandidate. Refuse here, before any statement is issued.

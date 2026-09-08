@@ -37,7 +37,19 @@ function gitTopLevel(dir) {
     return execFileSync('git', ['-C', dir, 'rev-parse', '--show-toplevel'], {
       encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
-  } catch { return null; }
+  } catch (err) {
+    // "not a repository" is a real answer and returns null. A MISSING or
+    // unrunnable git binary is not an answer at all: swallowing it turned the
+    // guard into an allow-all on any machine without git on PATH.
+    if (err && (err.code === 'ENOENT' || err.code === 'EACCES' || err.errno === -4058)) {
+      throw new Error(
+        'REFUSED: git could not be run, so it is impossible to prove the output '
+        + 'directory is outside a git working tree; install git or choose an '
+        + 'explicitly ignored destination',
+      );
+    }
+    return null;
+  }
 }
 
 function gitIgnores(top, dir) {
@@ -64,7 +76,19 @@ export function assertPrivateOutputDir(candidate, deps = {}) {
   }
   const dir = resolve(candidate);
   const probeFrom = (deps.nearestExistingAncestor ?? nearestExistingAncestor)(dir);
-  const top = (deps.topLevel ?? gitTopLevel)(probeFrom);
+  // The classification lives here so an injected probe is judged the same way
+  // the real one is: only "not a repository" may return null.
+  let top;
+  try {
+    top = (deps.topLevel ?? gitTopLevel)(probeFrom);
+  } catch (err) {
+    if (err && typeof err.message === 'string' && err.message.startsWith('REFUSED:')) throw err;
+    throw new Error(
+      'REFUSED: git could not be run, so it is impossible to prove the output '
+      + 'directory is outside a git working tree; install git or choose an '
+      + 'explicitly ignored destination',
+    );
+  }
   if (top === null) return dir; // outside any git working tree
   const ignored = (deps.ignores ?? gitIgnores)(top, dir);
   if (!ignored) {

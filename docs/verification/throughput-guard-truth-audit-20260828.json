@@ -645,11 +645,39 @@
       "reason": "This discovered shell guard keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": "scripts/historical-item-mg-reclassification/build-manifest.mjs:47",
+      "semantic_key": "scripts/historical-item-mg-reclassification/build-manifest.mjs:32f88a3b3183e197eaa5ac7707cbaef8d6b3f10525cf802e98d3b397f3b5c3a3:1",
+      "line_sha256": "32f88a3b3183e197eaa5ac7707cbaef8d6b3f10525cf802e98d3b397f3b5c3a3",
+      "disposition": "excluded",
+      "reason": "Guard branch of the new source-header proof; it refuses a mismatched export rather than emitting throughput."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/build-manifest.mjs:45",
+      "semantic_key": "scripts/historical-item-mg-reclassification/build-manifest.mjs:6d403170ce1b398dac734927e8e96312a1b7fb05c19ea031f9d9b7ac9bb9a4bd:1",
+      "line_sha256": "6d403170ce1b398dac734927e8e96312a1b7fb05c19ea031f9d9b7ac9bb9a4bd",
+      "disposition": "excluded",
+      "reason": "Computes the list of missing source columns for the new header proof; it is the input to a refusal, not a throughput message of its own."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/build-manifest.mjs:49",
+      "semantic_key": "scripts/historical-item-mg-reclassification/build-manifest.mjs:e741a15e3f6317fa60bd735d0a0b99440b8deb73b261293ea7bbd893098bd440:1",
+      "line_sha256": "e741a15e3f6317fa60bd735d0a0b99440b8deb73b261293ea7bbd893098bd440",
+      "disposition": "enriched",
+      "reason": "Refusal text naming the missing source columns; enriched by construction because it names the exact columns that failed."
+    },
+    {
       "site": "scripts/historical-item-mg-reclassification/lib/manifest.mjs:115",
       "semantic_key": "scripts/historical-item-mg-reclassification/lib/manifest.mjs:383930d550f6ebb301f15bc25209f14376bb43fd21a3046f3cbfbbf31e2b2fdc:1",
       "line_sha256": "383930d550f6ebb301f15bc25209f14376bb43fd21a3046f3cbfbbf31e2b2fdc",
       "disposition": "excluded",
       "reason": "Documentation comment on the new manifest-to-target binder; it explains a refusal and emits no throughput message of its own."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:41",
+      "semantic_key": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:082fdaffe5a5641fabb0a73e0df56fced4ffbc2c34e745e9d82e77cec66ca98e:1",
+      "line_sha256": "082fdaffe5a5641fabb0a73e0df56fced4ffbc2c34e745e9d82e77cec66ca98e",
+      "disposition": "excluded",
+      "reason": "Documentation comment distinguishing a missing git binary from a non-repository answer; it emits nothing at run time."
     },
     {
       "site": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:20",
@@ -1842,7 +1870,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 261,
-  "call_site_sha256": "8ea0ef34594d93f2bc8709b0a3c0e9f4ffef31d3871d1b77b8be4f815b57f7d2",
+  "call_site_count": 265,
+  "call_site_sha256": "3e52eb648e38ce50633161e68f8cc1b4cb12d4fb592135556042c2210820a442",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

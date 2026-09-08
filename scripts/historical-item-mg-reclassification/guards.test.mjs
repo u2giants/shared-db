@@ -659,3 +659,47 @@ test('25b: a not-yet-existing --out path is still checked against real git, neve
     rmSync(join(repoRoot, '.private', `${stamp}-ignored`), { recursive: true, force: true });
   }
 });
+
+// 26 ------------------------------------------------------------------------
+
+test('26: an unrunnable git binary fails closed instead of allowing the write', async () => {
+  const { assertPrivateOutputDir } = await import('./lib/private-path.mjs');
+  const enoent = () => { const e = new Error('spawn git ENOENT'); e.code = 'ENOENT'; throw e; };
+  assert.throws(
+    () => assertPrivateOutputDir('C:/repo/out', { topLevel: enoent, ignores: () => false }),
+    /git could not be run/,
+  );
+  // "not a repository" is still a real answer and is still allowed
+  assert.equal(
+    assertPrivateOutputDir('C:/elsewhere/out', { topLevel: () => null, ignores: () => false }),
+    resolve('C:/elsewhere/out'),
+  );
+});
+
+// 27 ------------------------------------------------------------------------
+
+test('27: a source export whose headers do not match is refused, not silently empty', async () => {
+  const { assertSourceHeaders } = await import('./build-manifest.mjs');
+  const good = { Company: 'EH', Division: 'EH001', 'Item #': 'SYN-0001', 'Matched Level': '3',
+    'Proposed MG01': 'A', 'Proposed MG02': 'B', 'Proposed MG03': 'C' };
+  assert.equal(assertSourceHeaders([good]), true);
+  const { 'Matched Level': _drop, ...renamed } = good;
+  assert.throws(() => assertSourceHeaders([{ ...renamed, 'Match Level': '3' }]),
+    /missing required column\(s\): Matched Level/);
+  assert.throws(() => assertSourceHeaders([]), /no data rows/);
+});
+
+// 28 ------------------------------------------------------------------------
+
+test('28: a well-formed source export really does produce candidates end to end', async () => {
+  const { buildManifest } = await import('./build-manifest.mjs');
+  const { parseCsv } = await import('./lib/csv.mjs');
+  const csv = 'Company,Division,Item #,Matched Level,Proposed MG01,Proposed MG02,Proposed MG03,'
+    + 'Match Basis,Evidence Support,Evidence Total,Evidence Share\r\n'
+    + 'EH,EH001,SYN-0001,3,A,B,C,synthetic,9,10,0.9\r\n';
+  const out = await buildManifest({
+    client: fakeClient([item()]), sourceRows: parseCsv(csv), sourceDigest: 'x'.repeat(64),
+  });
+  assert.equal(out.manifest.candidates.length, 1, 'a valid header row must yield a candidate');
+  assert.equal(out.manifest.candidates[0].evidence.level, 3);
+});

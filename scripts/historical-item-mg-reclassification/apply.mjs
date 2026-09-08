@@ -13,7 +13,7 @@
 // not authorize running it. For production an authorization artifact naming the
 // exact manifest digest is additionally required by lib/manifest.mjs.
 
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { WRITABLE_FIELDS } from './lib/constants.mjs';
 import { assertManifestBoundToTarget, manifestDigest } from './lib/manifest.mjs';
@@ -102,7 +102,15 @@ async function main() {
         const backup = buildBackup(toChange, {
           target: args.target, digest, projectRef, cluster: identity.system_identifier,
         });
-        const backupPath = join(dir, `backup-${digest.slice(0, 12)}.json`);
+        // One file per RUN, never one per manifest. Re-running the same
+        // manifest plans zero changes, and a shared filename replaced the
+        // real before-state with an empty backup, silently destroying the
+        // only rollback artifact this tooling produces.
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-');
+        const backupPath = join(dir, `backup-${digest.slice(0, 12)}-${stamp}.json`);
+        if (existsSync(backupPath)) {
+          throw new Error(`REFUSED: ${backupPath} already exists; a backup is never overwritten`);
+        }
         writeFileSync(backupPath, JSON.stringify(backup, null, 2) + "\n");
         console.error(`before-state backup written (${backup.rows.length} rows)`);
       },

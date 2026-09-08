@@ -125,6 +125,10 @@ export function fakeClient(rows, { merchGroups = MERCH_GROUPS, divisions = DIVIS
         }
         return { rows: [], rowCount: changed };
       }
+      // The builder's cutoff-bounded sweep: every historical row, no id list.
+      if (t.includes('created_time_date is not null')) {
+        return { rows: [...table.values()].map((r) => ({ ...r })) };
+      }
       if (t.includes('from dflow."itemHeader"')) {
         const ids = (params?.[0] ?? []).map(Number);
         const negated = t.includes('not (item_id_pk');
