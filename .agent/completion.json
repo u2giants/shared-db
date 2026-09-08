@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2550/7",
   "contract_sha256": "af995209a6a7ed1599294cfcb9b8802fb4c835fbbfde1996e4b9c20d6578fab6",
-  "head_sha": "629e349dbbd8da5effe7bd8692fc4cc40e797bc5",
+  "head_sha": "eb0c3593cd29ea242e88e368f46175c3dec91da6",
   "files_changed": [".agent/completion.json", ".agent/contract.json", "config/orchestrator-global-invalidators-v1.json", "docs/agents/section-4-anti-collision-rules.md", "docs/verification/reviewer-assignment-api-budget-2026-08-28.md", "docs/verification/throughput-guard-truth-audit-20260828.json", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
   "db_reads": [],
   "db_writes": [],
