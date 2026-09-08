@@ -1,19 +1,64 @@
 {
   "schema_version": 1,
-  "work_issue": 2188,
+  "work_issue": 2356,
   "outcome": "ready-for-merge",
-  "pr": 2560,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2188/4",
-  "contract_sha256": "ebf2fc17e07a06347fe3217386c595d3f597035cc39ca175a1a749cc17ae5e3e",
-  "head_sha": "036b59f8bbf71f8fb43484be3038056a35aa10f9",
-  "files_changed": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "db_reads": [],
-  "db_writes": [],
-  "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "477 tests passed; 0 failed, skipped, cancelled, or todo."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+  "pr": 2523,
+  "migration_versions": [
+    "20260907152838"
   ],
-  "assumptions_resolved": ["Bare-number and optional Issue claim titles normalize to the same exact issue identity; supersession and merged reissue have direct acceptance, wrong-issue, compound-workstream, and wrong-version tests."],
+  "contract_ref": "refs/db-contracts/2356/1",
+  "contract_sha256": "79621c37bfa4c5e397fc846ee8f71cc084eb749f778759676aec1c6206458f5b",
+  "head_sha": "ccad4177dceda3b687bf03b2372db1a6aa66f2a7",
+  "files_changed": [
+    "supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql",
+    "supabase/tests/dam_asset_freshness_current_state_contracts.sql"
+  ],
+  "db_reads": [
+    "table core.taxonomy_source_ref",
+    "table supabase_migrations.schema_migrations"
+  ],
+  "db_writes": [
+    "table dam.asset",
+    "column dam.asset.first_seen_at",
+    "column dam.asset.last_seen_at",
+    "column dam.asset.missing_since",
+    "constraint dam_asset_seen_order on dam.asset",
+    "constraint dam_asset_missing_after_first_seen on dam.asset",
+    "function dam.enforce_asset_freshness",
+    "trigger dam_asset_freshness_guard on dam.asset"
+  ],
+  "checks": [
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors after normal integration of current main 8d64a75812beec85d2f8b2c78669e5e17635359d."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static guards passed after current-main integration; live-ledger input was not configured, so this is not ledger acceptance."
+    },
+    {
+      "command": "python3 -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification",
+      "exit_code": 0,
+      "evidence": "229 tests passed with no failures or skips; refreshed locally with the installed Python interpreter in 8.741 seconds."
+    },
+    {
+      "command": "docker exec -i orch-2536-2356-proof psql -U postgres -v ON_ERROR_STOP=1 -q",
+      "exit_code": 0,
+      "evidence": "Original isolated PostgreSQL 17 proof remains valid for unchanged SQL bytes. Fresh equivalent execution on retained synthetic PostgreSQL 17 database case2356runtime passed the full 257-line lifecycle contract and rolled back; no shared database was contacted."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo after current-main integration."
+    }
+  ],
+  "assumptions_resolved": [
+    "Migration SHA256 remains 6c04610f8e63d7d67b5c74610a69e219f912fa1b7fb520d7839ab8a81d77e022 and contract-test SHA256 remains 2c67a0a82424fd4eb648700d0bd663bf866477b81c21cc454da2c31f3e2e942a.",
+    "Version 20260907152838 and claim 2521 remain protected; no current live-ledger or deployment claim is made.",
+    "Prior head e6c5b786c961fc1c868e5a965a3bfe720a91ab14 has one durable GLM slot-2 approval at verdict object 0927bb73fb67715f6d831f9c029bfb1258383ac7. Slot 1 ended in governed failure object 559d4e5b49fd8c89cb17c9f68a1aedd8e4258983 with no verdict artifact; substantive text is non-authorizing. Neither old-head state applies to this refreshed head.",
+    "Fresh exact-head CI remains pending. No reviewer, preview, merge, production, claim-release or application acceptance is asserted."
+  ],
   "stop_conditions_hit": []
 }
