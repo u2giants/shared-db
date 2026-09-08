@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
 import { pathToFileURL } from 'node:url'
 import { recordReviewVerdict, reviewerExecutionPreflight, resolveCommandPath } from './manage-migration-author-lanes.mjs'
 import { lineOpensWithVerdictWord, isVerdictFor } from './lib/review-verdict.mjs'
@@ -93,8 +94,81 @@ export function neutraliseVerdictLine(body,reason){
 // standard output. The caller must not have to remember that, and a caller that
 // passes the wrong head must not be silently accepted, so the flag is injected
 // here from the head this review is actually recording against.
+export function wrapperBaseName(wrapper){
+  return String(wrapper??'').split(/[\\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
+}
+
+// `ai-codex-review` (issue #2244) speaks a verdict grammar this runner cannot
+// record and CANNOT BE TALKED OUT OF IT: it takes no prompt argument, so there is
+// no way to hand it the runner's output contract the way `--governed-verdict`
+// does for `ai-gemini`. What it does do is publish a complete report to
+// `.ai/reviews/codex-<mode>-<runid>.md` and print THAT PATH as its final line of
+// standard output. The report carries the reviewer's whole findings under a
+// `## Result` heading and closes with the wrapper's own final two-line
+// `## Verdict` / `<APPROVE|REJECT|BLOCKED>` section.
+//
+// So the bridge is TRANSCRIPTION, not relaxation. Nothing about the runner's own
+// rules moves: the recorded verdict is still the single terminal
+// `VERDICT: <DECISION> <head>` line, the head still comes ONLY from
+// `options.headSha` and never from reviewer text, the transcribed findings still
+// go through `extraVerdictLines` before anything is posted, and the auto-void
+// path is untouched. Two checks are ADDED rather than removed: the report must
+// declare the same reviewed commit the runner is recording against, and the path
+// the wrapper printed must have the wrapper's own published shape.
+export const CODEX_WRAPPER='ai-codex-review'
+export const CODEX_REPORT_BASENAME=/^codex-[a-z][a-z-]*-\d{8}T\d{6}-\d+-\d+\.md$/
+
+// The path is READ FROM WRAPPER OUTPUT, so it is untrusted: it selects a file this
+// process will read. Only the wrapper's own published shape is accepted -- a
+// `.ai/reviews/` parent and a `codex-<mode>-<runid>.md` basename -- so a mangled
+// or injected line cannot point the runner at an arbitrary file.
+export function codexReportPath(stdout){
+  const lines=String(stdout??'').split(/\r?\n/).map((line)=>line.trim()).filter(Boolean)
+  const candidate=lines.at(-1)
+  if(!candidate)throw new Error('the codex wrapper printed no report path')
+  const parts=candidate.replace(/\\/g,'/').split('/')
+  const base=parts.pop()??''
+  if(!CODEX_REPORT_BASENAME.test(base))throw new Error('the codex wrapper final line is not a published report path')
+  if(parts.slice(-2).join('/').toLowerCase()!=='.ai/reviews')throw new Error('the codex report path is not inside the wrapper report directory')
+  return candidate
+}
+
+// Turns one published codex report into a body this runner can record. It THROWS
+// rather than guessing whenever the report is not the exact shape the wrapper
+// publishes, so a partial or unexpected report refuses the round instead of
+// producing a verdict nobody wrote.
+export function codexGovernedBody(report,headSha,reportName='the codex report'){
+  const head=String(headSha??'').toLowerCase()
+  if(!/^[0-9a-f]{40}$/.test(head))throw new Error('the head under review is not a commit sha')
+  const lines=String(report??'').split(/\r?\n/).map((line)=>line.replace(/\s+$/,''))
+  // The head binding NEVER comes from the report. This check only REFUSES a report
+  // that reviewed a different commit than the one being recorded against; it can
+  // never supply the head.
+  const reviewed=lines.map((line)=>/^\|\s*reviewed commit\s*\|\s*`?([0-9a-f]{40})`?\s*\|$/i.exec(line)).find(Boolean)
+  if(!reviewed)throw new Error('the codex report does not declare the commit it reviewed')
+  if(reviewed[1].toLowerCase()!==head)throw new Error('the codex report reviewed a different commit than the head under review')
+  const headings=lines.map((line,index)=>index).filter((index)=>/^##\s*Verdict$/i.test(lines[index]))
+  if(headings.length!==1)throw new Error('the codex report does not carry exactly one verdict section')
+  const heading=headings[0]
+  const decision=(lines.slice(heading+1).find((line)=>line.trim())??'').trim().toUpperCase()
+  if(decision==='BLOCKED')throw new Error('the codex reviewer returned BLOCKED, which is not a recordable decision')
+  if(!['APPROVE','REJECT'].includes(decision))throw new Error('the codex verdict section does not carry a recordable decision')
+  // `## Result` is written by the wrapper immediately before the provider text, so
+  // the FIRST occurrence is always the wrapper's own heading and a reviewer who
+  // happens to write the same heading cannot destroy its own review.
+  const result=lines.findIndex((line)=>/^##\s*Result$/i.test(line))
+  if(result<0)throw new Error('the codex report does not carry a result section')
+  const findings=lines.slice(result+1,heading).join('\n').trim()
+  if(!findings)throw new Error('the codex report carries no findings to record')
+  // Only the findings are carried over. The wrapper's header table is left behind
+  // on purpose: its `source digest` is a 64-character hex value whose first 40
+  // characters read as a foreign commit sha to `unambiguouslyTiedToHead`, which
+  // would make the posted comment ambiguous about the head it belongs to.
+  return `Transcribed from the codex wrapper report ${reportName}, which declares the same reviewed commit as the head under review. The wrapper publishes its decision as a two-line \`## Verdict\` section carrying no head; this runner restates that decision as its own terminal verdict line, bound to the head it pinned.\n\n${findings}\n\nVERDICT: ${decision} ${head}`
+}
+
 export function wrapperVerdictContractArgs(wrapper,args,headSha){
-  const name=String(wrapper??'').split(/[\\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
+  const name=wrapperBaseName(wrapper)
   if(name!=='ai-gemini')return args
   const list=[...args],head=String(headSha??'').toLowerCase()
   // EVERY spelling of the flag is checked, not the first one found: `--x value`,
@@ -136,14 +210,26 @@ export function wrapperFailureReason(run){
   if(/already active|already in progress|held for reconciliation|retained/i.test(stderr))reasons.push('the wrapper reported retained or active work; inspect that exact session')
   return reasons.join('; ')||(stderr?'wrapper stderr was present but its reason was not recognized; inspect the exact wrapper session':'the wrapper supplied no recognized diagnostic')
 }
-export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath}){
+export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath,readReport:(path)=>readFileSync(path,'utf8')}){
   const skipDoctor=options.skipDoctor===true||options.skipDoctor==='true'
   deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha,skipDoctor})
   const resolved=(deps.resolve??resolveCommandPath)(options.wrapper)
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
   const plan=wrapperSpawnPlan(resolved,wrapperVerdictContractArgs(options.wrapper,options.wrapperArgs,options.headSha))
   const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
-  const rawBody=String(run.stdout??'').trim(),verdict=verdictFromOutput(rawBody,options.headSha)
+  let rawBody=String(run.stdout??'').trim()
+  // Issue #2244: the codex wrapper's verdict lives in its published report, not on
+  // standard output. Transcribe it into this runner's grammar BEFORE parsing, and
+  // only for a run that actually succeeded -- a failed run keeps the ordinary
+  // refusal, so a stale report left by an earlier run can never be picked up.
+  if(!run.error&&run.status===0&&wrapperBaseName(options.wrapper)===CODEX_WRAPPER){
+    try{
+      const path=codexReportPath(rawBody)
+      const read=deps.readReport??((file)=>readFileSync(file,'utf8'))
+      rawBody=codexGovernedBody(read(path),options.headSha,path.replace(/\\/g,'/').split('/').pop())
+    }catch(error){throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'}): ${sanitizeVoidReason(error.message)}`)}
+  }
+  const verdict=verdictFromOutput(rawBody,options.headSha)
   if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'}): ${wrapperFailureReason(run)}`)
   // CLOSE THE ORDERING HOLE AT THE ONLY POINT WHERE IT CAN BE CLOSED.
   // Recording BEFORE posting is impossible: `recordReviewVerdict` binds the
