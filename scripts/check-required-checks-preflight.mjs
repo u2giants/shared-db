@@ -72,6 +72,10 @@ export function observedStates({ statuses = [], checkRuns = [] }) {
 export const REQUIRED_CHECKS_MIRROR = 'docs/verification/main-required-status-checks.json'
 export const MIRROR_BOOTSTRAP_MAIN_SHA = 'e0532e3c974a199f623f160f56416bdef4037461'
 export const PINNED_REQUIRED_CONTEXTS = Object.freeze([
+  // 'Agent work contract' joined the required list on 2026-09-08, the Switch 1
+  // action of issue #1403, one day after enforced mode was activated. The pin only
+  // ever defends against SHRINKING, so growth is recorded here deliberately.
+  'Agent work contract',
   'Cancelled work guard', 'Cross-PR object collision', 'Domain ownership',
   'Handoff contract', 'Intake pointer guard', 'Migration author lease',
   'Migration guarded merge authorization', 'Orchestrator marker guard',
