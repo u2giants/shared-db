@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import preview_instance_text, api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_bound_mainline_post_merge_original, prove_historical_original_apply_runs, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
+from production_business_risk_gate import preview_instance_text, api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_bound_mainline_post_merge_original, prove_historical_original_apply_runs, prove_registered_historical_restoration_provenance, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
 
 
 def tree_ref(endpoint):
@@ -88,6 +88,46 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             with temp, mock.patch.dict(GOVERNED_ORIGINAL_RECONCILIATION, {"artifact_digest": digest}), self.subTest(mutation), self.assertRaises(RiskGateError if mutation != "version" else AssertionError):
                 accepted = prove_governed_original_reconciliation(**kwargs)
                 if not accepted: raise AssertionError("wrong tuple must not enter the governed path")
+
+    def test_exact_2509_restoration_satisfies_registered_producer_provenance(self):
+        version = "20260907131728"
+        digest = "03648ecbbee473f539c27f929a248c503c18d5fb906efe1409d11593cfdb5d7e"
+        prove_registered_historical_restoration_provenance(
+            version=version, run_id=34157812748,
+            run_head="4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+            original_commit="bcc2603977678db73b4ca12d3ed1312a1bff64e2",
+            source_pr=2513,
+            merge_sha="c5f85ad3a98b7a5598e8c81a56735473d5bb5487",
+            texts={"migration-content-manifest.json": json.dumps({version: digest})},
+            repo_root=Path.cwd(),
+        )
+
+    def test_2509_registered_producer_provenance_refuses_wrong_identity_or_digest(self):
+        version = "20260907131728"
+        exact = {
+            "version": version,
+            "run_id": 34157812748,
+            "run_head": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+            "original_commit": "bcc2603977678db73b4ca12d3ed1312a1bff64e2",
+            "source_pr": 2513,
+            "merge_sha": "c5f85ad3a98b7a5598e8c81a56735473d5bb5487",
+            "texts": {"migration-content-manifest.json": json.dumps({
+                version: "03648ecbbee473f539c27f929a248c503c18d5fb906efe1409d11593cfdb5d7e"
+            })},
+            "repo_root": Path.cwd(),
+        }
+        for field, value in (
+            ("version", "20260907131729"),
+            ("run_id", 34157812749),
+            ("run_head", "d" * 40),
+            ("original_commit", "a" * 40),
+            ("source_pr", 2512),
+            ("merge_sha", "b" * 40),
+            ("texts", {"migration-content-manifest.json": json.dumps({version: "c" * 64})}),
+        ):
+            with self.subTest(field=field), self.assertRaises(RiskGateError):
+                prove_registered_historical_restoration_provenance(**{**exact, field: value})
+
     def test_risk_gate_sources_have_no_invalid_escape_sequences(self):
         """Compile both risk-gate sources with Python's own warning detector."""
         scripts_dir = Path(__file__).parent
