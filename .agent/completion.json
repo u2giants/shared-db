@@ -1,68 +1,81 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 2535,
   "outcome": "ready-for-merge",
-  "pr": 2447,
+  "pr": 2584,
   "migration_versions": [
-    "20260908195056"
+    "20260908202651"
   ],
-  "contract_ref": "refs/db-contracts/2439/2",
-  "contract_sha256": "10702cb98c01f2b6630d527fc7f0bf68288371c183b90d457863240a8a2888f4",
-  "head_sha": "9242a95531f2df824fa614f56728dd9928d2bcdd",
+  "contract_ref": "refs/db-contracts/2535/3",
+  "contract_sha256": "2be835268b52fcaa9d2fd2f41b4ecc1bbdaaed92e01b7305b58498c8be2fd751",
+  "head_sha": "4b176008cdef373822d20aaeddc9c9b46f11375a",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260908195056_bulk_operation_runs_history.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql"
+    "supabase/migrations/20260908202651_hts_rag_dual_model_debate_audit.sql",
+    "supabase/tests/hts_rag_dual_model_debate_contracts.sql"
   ],
   "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
+    "table public.hts_rag_determinations",
+    "table public.hts_rag_provider_responses",
+    "table public.hts_rag_review_events",
+    "function app.set_updated_at"
   ],
   "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
+    "table public.hts_rag_debate_runs",
+    "column public.hts_rag_precedents.promotion_basis",
+    "column public.hts_rag_precedents.promotion_policy_version",
+    "column public.hts_rag_precedents.promotion_source_determination_id",
+    "column public.hts_rag_precedents.promotion_debate_run_id",
+    "column public.hts_rag_precedents.promotion_gate_result",
+    "function public.enforce_hts_rag_precedent_promotion_gate_immutable",
+    "trigger hts_rag_precedents_promotion_gate_immutable on public.hts_rag_precedents",
+    "trigger set_updated_at on public.hts_rag_debate_runs",
+    "index public.hts_rag_debate_runs_claim_idx",
+    "index public.hts_rag_debate_runs_source_determination_idx",
+    "index public.hts_rag_debate_runs_precedent_idx",
+    "policy hts_rag_debate_runs_backend_read on public.hts_rag_debate_runs",
+    "policy hts_rag_debate_runs_backend_insert on public.hts_rag_debate_runs",
+    "policy hts_rag_debate_runs_backend_update on public.hts_rag_debate_runs",
+    "table public.hts_rag_precedents"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static/recency passed; live-ledger subcheck skipped without token and not claimed as clearance."
+      "evidence": "Static migration guards passed against origin/main fbd49fe; no shared live-ledger input was configured, so this is not preview or production acceptance."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Mandatory and changed sidecars passed; no dynamic markers in new migration."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "255 audited sites, unchanged discovery."
+      "evidence": "Contract generation 3 validated and its immutable published hash is 2be835268b52fcaa9d2fd2f41b4ecc1bbdaaed92e01b7305b58498c8be2fd751."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors were reported for the implementation delta."
     },
     {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f role-test-wrapper.sql",
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
       "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable local server ran the unchanged guarded migration and real JWT-aware app role helpers in one rolled-back transaction. Administrator read passed; ordinary-user query returned zero rows; anonymous read, administrator browser insert, and service_role truncate were denied. Failure retention, duplicate-run, unexplained-failure, update, and delete negative controls also passed."
+      "evidence": "44 tests passed with zero failures, cancellations, skips, or todos."
+    },
+    {
+      "command": "python -m unittest scripts.test_migration_derivation scripts.test_production_catalog_verification",
+      "exit_code": 0,
+      "evidence": "229 tests passed with no failures."
+    },
+    {
+      "command": "psql disposable PostgreSQL 18 from-empty/upgrade and focused contract rehearsal",
+      "exit_code": 0,
+      "evidence": "Migration applied in two local disposable databases; a pre-migration precedent remained legacy_unspecified; focused catalog, same-connection FK, service-only access, no-DELETE, immutability, and fail-closed state tests passed and rolled back. The local server was stopped and removed."
     }
   ],
   "assumptions_resolved": [
-    "Guarded supersession retained original version 20260906143443 and superseded version 20260907200137 as permanently reserved, and now uses protected version 20260908195056. The migration blob is byte-identical apart from the one comment line naming its reserved version.",
-    "Preserved test-only commit bd349eaa integrated before a normal merge of main 8d64a758; original claim identifiers remain unchanged.",
-    "PostgreSQL 17 role tests use the repository's real JWT-aware app helper definitions and Supabase-equivalent service_role BYPASSRLS.",
-    "Independent review, CI, preview and production live structural acceptance remain pending behind issue 2449. Consumer worker appends and alert consumption belong to PopDAM; no claim of application completion."
+    "Production read-only catalog proof identified project qsllyeztdwjgirsysgai and confirmed the referenced public HTS tables and foreign keys are in one Postgres database.",
+    "No durable row-specific evidence was used to infer human_review; the migration contains no data backfill and the disposable upgrade row remained legacy_unspecified.",
+    "The debate table grants service_role only SELECT, INSERT, and bounded column UPDATE; browser roles and DELETE remain unavailable.",
+    "The migration does not make RAG operative, alter duty fields, enable automatic Apply, or change DesignFlow application code."
   ],
   "stop_conditions_hit": []
 }
