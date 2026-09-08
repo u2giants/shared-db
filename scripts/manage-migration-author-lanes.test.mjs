@@ -3,6 +3,8 @@ import test from 'node:test'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { REVIEW_VERDICT_REF_PREFIX } from './lib/review-verdict-artifact.mjs'
+import { readyRecord } from './orchestrator-flow/reconcile.mjs'
+import { canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
@@ -822,7 +824,7 @@ test('complete replacement stays inside the real wire-attempt budget',()=>{
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),result)
   const retryMutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
   assert.notEqual(retryMutexAt,-1,`retry mutex acquisition was not observed: ${labels.join(',')}`)
-  assert.equal(retryMutexAt,10,'the idempotent path spends 10 requests before its mutex gate (issue #2075 added the durable-verdict listing)')
+  assert.equal(retryMutexAt,9,'the idempotent path spends 9 requests before its mutex gate because its predecessor failure ref rides in the fixed-record batch')
   assert.equal(labels.length-retryMutexAt,10,`idempotent replacement success path costs exactly 10 requests after mutex acquisition: ${labels.slice(retryMutexAt).join(',')}`)
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
   assert.match(source,/requireReviewWireCapacity\(11\);acquireReviewMutex\(ownerSha,io\);mutexAcquired=true/,'the idempotent reserve changed without re-derivation')
@@ -854,6 +856,7 @@ test('merged-head replacement reuses the bounded target snapshot instead of rere
   io.getIssueComments=()=>{throw new Error('separate verdict read is forbidden')}
   io.getPrReviews=()=>{throw new Error('separate review read is forbidden')}
   io.mergeCommitInMain=(sha)=>sha===mergeSha
+  io.refs.delete(reviewActiveRef('grok-4.6'))
   io.readActiveReviewLeases=()=>new Map()
   io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{
     issue:{state:'closed'},
@@ -898,11 +901,11 @@ test('a busy rotation slot advances to the next free active reviewer',()=>{
   const {io,heads}=busyIo()
   // Muse's PR is merged, so muse is free again -- and free means rotation, even
   // though the sequence would otherwise land elsewhere.
-  const musePr=600+ACTIVE_REVIEWERS.findIndex((r)=>r.name==='muse-spark-1.2-contributor')
+  const musePr=600+ACTIVE_REVIEWERS.findIndex((r)=>r.name==='muse-spark-1.3-contributor')
   const openPr=io.getPr
   io.getPr=(number)=>Number(number)===musePr?{number:musePr,state:'closed',head:{sha:heads.get(musePr)}}:openPr(number)
-  assert.ok(!findBusyReviewers(io).has('muse-spark-1.2-contributor'))
-  assert.equal(pickReviewer(1,io).name,'muse-spark-1.2-contributor')
+  assert.ok(!findBusyReviewers(io).has('muse-spark-1.3-contributor'))
+  assert.equal(pickReviewer(1,io).name,'muse-spark-1.3-contributor')
 })
 
 test('a recorded verdict and a moved head both free the reviewer that held them',()=>{
@@ -951,7 +954,7 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   // instruction after its account usage limit stayed exhausted for a full
   // session. Its row stays in REVIEWERS so durable artifacts naming it resolve.
   // kimi-k3 was unpaused on 2026-09-07 (owner instruction, PR #2483).
-  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','qwen-3.8-max','muse-spark-1.2-contributor','gemini-3.8-flash-high'])
+  assert.deepEqual(ACTIVE_REVIEWERS.map((r)=>r.name),['grok-4.6','glm-5.3','kimi-k3','qwen-3.8-max','muse-spark-1.3-contributor','gemini-3.8-flash-high'])
   assert.ok(RETIRED_REVIEWERS.includes('codex-gpt-5.6-sol'),'codex-gpt-5.6-sol must stay out of the rotation')
   assert.equal(reviewerReadsRepository('codex-gpt-5.6-sol'),true,'retiring the account must not invalidate the verdicts it already recorded')
   assert.deepEqual(OVERFLOW_REVIEWERS,[])
@@ -959,6 +962,9 @@ test('the active rotation is exactly the current models, in a stable order',()=>
   assert.equal(REVIEWERS.find((r)=>r.name==='codex-gpt-5.6-sol').wrapper,'ai-codex-review')
   assert.equal(REVIEWERS.find((r)=>r.name==='glm-5.3').wrapper,'ai-glm')
   assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.2-contributor').wrapper,'ai-muse')
+  assert.ok(RETIRED_REVIEWERS.includes('muse-spark-1.2-contributor'),'the historical Muse 1.2 identity must remain readable but never receive new work')
+  assert.ok(!ACTIVE_REVIEWERS.some((r)=>r.name==='muse-spark-1.2-contributor'),'the retired Muse 1.2 identity must never receive new work')
+  assert.equal(REVIEWERS.find((r)=>r.name==='muse-spark-1.3-contributor').wrapper,'ai-muse')
   assert.equal(REVIEWERS.find((r)=>r.name==='deepseek-chat').wrapper,'ai-deepseek-agent')
   // Qwen is NOT retired (owner instruction, 2026-09-04) and must not be named as
   // retired anywhere. Its quarantine was lifted on 2026-09-07 after a live
@@ -1465,7 +1471,7 @@ test('three terminal providers do not grow replacement preflight past the fixed 
   io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
   io.atomicReviewRefs=(changes)=>{wire(1,'atomicReviewRefs');for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
   io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
-  io.readReviewRecords=(refs,prefix)=>{wire(prefix?2:1,'readReviewRecords');const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[];const result=new Map(reviewRecordRefs(refs,matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:matching});return result}
+  io.readReviewRecords=(refs,prefix,dependentFailurePrefix)=>{wire(prefix?2:1,'readReviewRecords');const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[];const dependent=dependentFailurePrefix?matching.flatMap(({ref})=>{const suffix=ref.startsWith(`${prefix}-`)?ref.slice(prefix.length+1):'';return /^\d+$/.test(suffix)?[`${dependentFailurePrefix}-${suffix}`]:[]}):[];const result=new Map(reviewRecordRefs([...refs,...dependent],matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}));Object.defineProperty(result,'matching',{value:matching});return result}
   for(const name of ['readRef','getCommit','createRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
   const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');return make(message)}
   const first=replaceFailedReviewer(replacementRequest,io)
@@ -1474,13 +1480,94 @@ test('three terminal providers do not grow replacement preflight past the fixed 
   const third=replaceFailedReviewer({...replacementRequest,failedSequence:second.sequence},io)
   assert.ok(third.reviewer)
   const mutexAt=labels.indexOf(`createRef:${MUTEX_REF}`)
-  assert.equal(mutexAt,11,`third terminal-provider replacement pre-mutex accounting drifted: ${labels.join(',')}`)
+  assert.equal(mutexAt,9,`third terminal-provider replacement pre-mutex accounting drifted: ${labels.join(',')}`)
   assert.equal(labels.length-mutexAt,10,`third terminal-provider replacement post-mutex accounting drifted: ${labels.join(',')}`)
-  assert.equal(attempts,21,`third terminal-provider replacement wire accounting drifted: ${labels.join(',')}`)
+  assert.equal(attempts,19,`third terminal-provider replacement wire accounting drifted: ${labels.join(',')}`)
   assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`third terminal-provider replacement used ${attempts} wire attempts`)
   const source=readFileSync(new URL('./manage-migration-author-lanes.mjs',import.meta.url),'utf8')
-  assert.match(source,/const allRefs=reviewRecordRefs\(refs,matches\)/,'the production batch must include every immutable matching replacement and verdict ref')
+  assert.match(source,/const allRefs=reviewRecordRefs\(\[\.\.\.refs,\.\.\.dependentFailures\],matches\)/,'the production batch must include every immutable matching replacement, predecessor failure and verdict ref')
   assert.match(source,/record\?\.sha===row\.sha&&record\?\.commit\?\.message\?record\.commit:undefined/,'matching replacement rows may reuse a batched commit only after exact SHA and message validation')
+})
+
+test('released slot-2 replacement with slot-1 approval and a reinstated reviewer fits the 25-request budget (#2550)',()=>{
+  const io=doctoredIo(),request={issue:2550,pr:2551,headSha:'25'.repeat(20)}
+  // Reproduce the live eligibility history: Grok was excluded as terminally
+  // unavailable, then returned to this PR only through fresh wrapper-doctor
+  // proof. The original exclusion remains immutable beside its reinstatement.
+  const excluded=excludeFor(io,{issue:request.issue,pr:request.pr,reason:'terminal-unavailable'})
+  assert.equal(excluded.reviewer,'grok-4.6')
+  const reinstated=reinstateReviewerExclusion({issue:request.issue,pr:request.pr,reviewer:excluded.reviewer},io)
+  assert.equal(io.refs.get(reviewReinstatementRef({issue:request.issue,pr:request.pr,reviewer:excluded.reviewer})),reinstated.sha)
+
+  const busyPr=9550,busyHead='9'.repeat(40)
+  io.getPr=(number)=>Number(number)===busyPr?{state:'open',head:{sha:busyHead}}:{state:'open',head:{sha:request.headSha}}
+  const slotOne=assignNextReviewer(request,io)
+  const slotTwo=assignNextReviewer({...request,slot:2},io)
+  assert.equal(slotOne.reviewer,'glm-5.3')
+  assert.equal(slotTwo.reviewer,'kimi-k3')
+  giveVerdict(io,{...request,slot:1})
+  const firstReplacement=replaceFailedReviewer({...request,slot:2,failedSequence:slotTwo.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  assert.equal(firstReplacement.reviewer,'qwen-3.8-max')
+  // Reproduce the live #2509 chain exactly: the predecessor was assigned while
+  // Muse 1.2 was drawable, then that catalogued name retired. Its active ref now
+  // belongs to unrelated work, so replacement must carry the historical row in
+  // the one lease snapshot without making Muse 1.2 eligible for a new draw.
+  const retiredName='muse-spark-1.2-contributor'
+  const retiredPredecessorSha=io.makeOwnerCommit(io.getCommit(firstReplacement.replacementSha).message.replace(`reviewer=${firstReplacement.reviewer}`,`reviewer=${retiredName}`))
+  io.refs.set(firstReplacement.assignmentRef,retiredPredecessorSha)
+  io.refs.set(`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${slotTwo.sequence}`,retiredPredecessorSha)
+  io.refs.delete(reviewActiveRef(firstReplacement.reviewer))
+  io.refs.set(reviewActiveRef(retiredName),retiredPredecessorSha)
+  const releasedRequest={...request,slot:2,failedSequence:firstReplacement.sequence,failureCode:'local_dependency_unavailable',failingCheck:'review-wrapper-no-explicit-base-packet',confirmLocalDependencyUnfixable:true,confirmNoVerdict:true,confirmNoArtifact:true}
+  const released=releaseFailedReviewer(releasedRequest,io)
+  assert.equal(io.refs.get(reviewActiveRef(retiredName))??null,null)
+
+  // The next rotation candidate is busy elsewhere, making the freshly
+  // reinstated Grok record materially necessary to the successful draw.
+  const busyReviewers=['muse-spark-1.3-contributor','gemini-3.8-flash-high']
+  for(const [index,name] of busyReviewers.entries()){
+    const busySha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${name} issue=9550 pr=${busyPr} head=${busyHead} sequence=${9550+index}`)
+    io.refs.set(reviewActiveRef(name),busySha)
+  }
+  const unrelatedRetiredSha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${retiredName} issue=${busyPr} pr=${busyPr} head=${busyHead} sequence=9549`)
+  io.refs.set(reviewActiveRef(retiredName),unrelatedRetiredSha)
+
+  let attempts=0;const labels=[],batched=[];const rawGetCommit=io.getCommit
+  const wire=(n=1,label='wire')=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;labels.push(label);return '{}'}})}
+  io.getRateLimit=()=>{wire(2,'quota');return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
+  io.readActiveReviewLeases=()=>{wire(1,'active');return new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:rawGetCommit(sha)}]))}
+  io.readReviewStates=(leases)=>{wire(1,'states');return new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.pr===busyPr?busyHead:request.headSha}},evidence:[]}]))}
+  io.readReviewRefs=(refs)=>{wire(1,'readReviewRefs');return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
+  io.atomicReviewRefs=(changes)=>{wire(1,'atomicReviewRefs');for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha)io.refs.set(change.ref,change.sha);else io.refs.delete(change.ref)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  io.readReviewRecords=(refs,prefix,dependentFailurePrefix)=>{
+    wire(prefix?2:1,'readReviewRecords')
+    const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[]
+    const dependent=dependentFailurePrefix?matching.flatMap(({ref})=>{const suffix=ref.startsWith(`${prefix}-`)?ref.slice(prefix.length+1):'';return /^\d+$/.test(suffix)?[`${dependentFailurePrefix}-${suffix}`]:[]}):[]
+    batched.push(...dependent)
+    const result=new Map(reviewRecordRefs([...refs,...dependent],matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}))
+    Object.defineProperty(result,'matching',{value:matching});return result
+  }
+  for(const name of ['readRef','listRefs','getCommit','createRef']){const fn=io[name];io[name]=(...args)=>{wire(1,`${name}:${String(args[0])}`);return fn(...args)}}
+  const make=io.makeOwnerCommit;io.makeOwnerCommit=(message)=>{wire(1,'commit');return make(message)}
+
+  const replacement=replaceFailedReviewer(releasedRequest,io)
+  assert.equal(replacement.reviewer,'grok-4.6','the reinstated independent reviewer must be drawable again')
+  assert.equal(replacement.failureSha,released.failureSha,'the replacement must adopt the immutable release record')
+  assert.ok(batched.includes(`${REVIEW_FAILURE_REF_PREFIX}/${request.issue}-${request.pr}-${request.headSha}-${slotTwo.sequence}`),'the predecessor failure must ride in the fixed-record batch')
+  assert.equal(attempts,23,`released slot-2 replacement wire accounting drifted: ${labels.join(',')}`)
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`released slot-2 replacement used ${attempts} requests: ${labels.join(',')}`)
+  assert.equal(labels.some((label)=>label.startsWith(`readRef:${REVIEW_FAILURE_REF_PREFIX}/`)),false,'batched predecessor evidence must not be reread individually')
+  assert.equal(labels.includes(`readRef:${reviewActiveRef(retiredName)}`),false,'catalogued retired reviewer lease must reuse the complete snapshot')
+  assert.equal(labels.includes(`getCommit:${unrelatedRetiredSha}`),false,'catalogued retired reviewer lease commit must reuse the complete snapshot')
+  assert.equal(io.refs.get(reviewActiveRef(retiredName)),unrelatedRetiredSha,'the unrelated retired-reviewer lease must remain unchanged')
+  assert.equal(io.refs.get(replacement.assignmentRef),replacement.replacementSha,'the exact replacement assignment ref must read back')
+
+  attempts=0;labels.length=0;batched.length=0
+  assert.deepEqual(replaceFailedReviewer(releasedRequest,io),replacement)
+  assert.equal(attempts,22,`released slot-2 idempotent retry wire accounting drifted: ${labels.join(',')}`)
+  assert.ok(attempts<=REVIEW_OPERATION_REQUEST_LIMIT,`idempotent retry used ${attempts} requests: ${labels.join(',')}`)
+  assert.equal(labels.some((label)=>label.startsWith(`readRef:${REVIEW_FAILURE_REF_PREFIX}/`)),false,'idempotent retry must reuse the same fixed evidence snapshot')
 })
 
 test('replacement retry releases its lease after an exact-head verdict',()=>{
@@ -2308,8 +2395,20 @@ test('reviewer replacement rejects a substantive exact-head verdict',()=>{
 test('reviewer replacement retry rejects mismatched failure sequence and missing evidence',()=>{
   const io=failedReviewIo(), done=replaceFailedReviewer(replacementRequest,io)
   assert.throws(()=>replaceFailedReviewer({...replacementRequest,failedSequence:99},io),/does not match/)
+  // Use the production-shaped fixed-record batch and forbid a fallback read so
+  // both negative controls exercise the optimized path itself.
+  const rawGetCommit=io.getCommit,rawReadRef=io.readRef
+  io.readReviewRecords=(refs,prefix,dependentFailurePrefix)=>{
+    const matching=prefix?[...io.refs.entries()].filter(([ref])=>ref.startsWith(prefix)).map(([ref,sha])=>({ref,sha,commit:rawGetCommit(sha)})):[]
+    const dependent=dependentFailurePrefix?matching.flatMap(({ref})=>{const suffix=ref.startsWith(`${prefix}-`)?ref.slice(prefix.length+1):'';return /^\d+$/.test(suffix)?[`${dependentFailurePrefix}-${suffix}`]:[]}):[]
+    const result=new Map(reviewRecordRefs([...refs,...dependent],matching).map((ref)=>{const sha=io.refs.get(ref);return [ref,sha?{sha,commit:rawGetCommit(sha)}:null]}))
+    Object.defineProperty(result,'matching',{value:matching});return result
+  }
+  io.readRef=(ref)=>{if(ref.startsWith(`${REVIEW_FAILURE_REF_PREFIX}/`))throw new Error('individual failure-ref reread is forbidden');return rawReadRef(ref)}
   const failureRef=[...io.refs.keys()].find((ref)=>ref.startsWith('refs/db-review-failures/'));io.refs.delete(failureRef)
   assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing/)
+  io.refs.set(failureRef,io.makeOwnerCommit('unrelated immutable record'))
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/evidence is missing or changed/)
   assert.ok(done.replacementSha)
 })
 
@@ -4793,24 +4892,21 @@ test('cutover activation backfills a slot-2 live review, not just slot 1',()=>{
 // merged commit, then promote. Before this test the lane only ever looked at
 // `state=open` pulls and hardcoded merged:false, so the POST_MERGE_REHEARSAL route
 // was unreachable and every merged claim was stranded without rehearsal proof.
-function mergedRehearsalIo(){
-  const version='20260828232207'
-  const migration=`supabase/migrations/${version}_wwe.sql`
-  const claim={number:1805,title:'CLAIM: #1769 wwe tables',body:[
-    '```db-claim','version: '+version,'objects:','  - table plm.wwe_property','```','',
-    '```db-author-lease','owner: agent/issue-1769','branch: issue-1769-wwe-tables',
+function mergedRehearsalIo({version='20260828232207',migration=`supabase/migrations/${version}_wwe.sql`,workIssue=1769,claimNumber=1805,prNumber=1809,branch='issue-1769-wwe-tables',head='a'.repeat(40),mergeSha='b'.repeat(40),mainSha='d'.repeat(40),migrationBody='create table plm.wwe_property();',writes=['table plm.wwe_property']}={}){
+  const claim={number:claimNumber,title:`CLAIM: #${workIssue} migration`,body:[
+    '```db-claim','version: '+version,'objects:',...writes.map((value)=>`  - ${value}`),'```','',
+    '```db-author-lease',`owner: agent/issue-${workIssue}`,`branch: ${branch}`,
     'worktree: C:/repos/x','expires_at: 2099-01-01T00:00:00Z','```'].join('\n')}
-  const head='a'.repeat(40), mergeSha='b'.repeat(40), mainSha='d'.repeat(40)
-  const files={[migration]:'create table plm.wwe_property();','config/orchestrator-global-invalidators-v1.json':'{"schema_version":1,"files":[]}'}
+  const files={[migration]:migrationBody,'config/orchestrator-global-invalidators-v1.json':'{"schema_version":1,"files":[]}'}
   return {head,mergeSha,mainSha,version,io:{
     openClaims:()=>[claim],
     openPulls:()=>[],
-    branchPulls:(branch)=>branch==='issue-1769-wwe-tables'?[{number:1809,head:{ref:branch,sha:head},base:{sha:'c'.repeat(40)},merged_at:'2026-08-29T00:32:19Z',merge_commit_sha:mergeSha}]:[],
+    branchPulls:(candidate)=>candidate===branch?[{number:prNumber,head:{ref:branch,sha:head},base:{sha:'c'.repeat(40)},merged_at:'2026-08-29T00:32:19Z',merge_commit_sha:mergeSha}]:[],
     mergeCommitInMain:(sha)=>sha===mergeSha,
     getPrFiles:()=>[{filename:migration,status:'added'}],
     getFileAt:(file)=>{if(!(file in files))throw new LaneError(`missing ${file}`);return files[file]},
     treeFiles:()=>[migration],
-    getIssue:()=>({body:['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 1','writes:','  - table plm.wwe_property','```'].join(String.fromCharCode(10))}),
+    getIssue:()=>({body:['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 1','writes:',...writes.map((value)=>`  - ${value}`),'```'].join(String.fromCharCode(10))}),
     previewGateProof:()=>({full_ci_success:true,review_approved:true,dependency_closure_complete:true}),
     mainSha:()=>mainSha,
     previewLedger:()=>({versions:[]}),
@@ -4825,6 +4921,21 @@ function immutablePreviewApplyIo({sourcePr=1809,artifactRunId='33308168016',merg
       run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:headSha},
       artifacts:{total_count:1,artifacts:[{name:`preview-migration-apply-${headSha}`,digest:`sha256:${'d'.repeat(64)}`,expired:false,workflow_run:{id:Number(artifactRunId),head_sha:headSha}}]},
       logs:[`Bounded apply ${JSON.stringify({allowlist:[version],appliedCommit:headSha,mergeCommitSha,previewProjectRef:'mvpkijzfmfcxhnzqogzs',rehearsalMode:'merged-main-rehearsal',runId:Number(runId),schema:'shared-db-preview-instance-binding/v1',sourcePr})}`,`preview\tReport the preview ledger delta\t2026-08-30T00:00:00Z ### Preview ledger delta`,`preview\tReport the preview ledger delta\t2026-08-30T00:00:00Z - added: ${version}`,'preview\tReport the preview ledger delta\t2026-08-30T00:00:00Z - removed: (none)'].join('\n'),
+    }),
+  }
+}
+
+function pinnedHistoricalClaimApplyIo({runId='34157812748',appliedCommit='bcc2603977678db73b4ca12d3ed1312a1bff64e2',previewProject='mvpkijzfmfcxhnzqogzs',migrationBody=null}={}){
+  const dispatchHead='4f093e3d4c97e4272d147d38e7243ec57d3c08f1',version='20260907131728'
+  const migration='supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql'
+  const body=migrationBody??readFileSync(migration,'utf8')
+  return {
+    issueComments:()=>[{body:`Authoritative original preview application: https://github.com/u2giants/shared-db/actions/runs/${runId}`}],
+    getFileAt:(file)=>{if(file!==migration)throw new LaneError(`missing ${file}`);return body},
+    previewApplyRun:()=>( {
+      run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:dispatchHead},
+      artifacts:{total_count:1,artifacts:[{name:`preview-migration-apply-${appliedCommit}`,digest:'sha256:3fcd874602c5c52293448a83fdb27c126a8f0cf78e63e24af0d2a10a03128a6b',expired:false,workflow_run:{id:Number(runId),head_sha:dispatchHead}}]},
+      logs:[`Bounded apply ${JSON.stringify({allowlist:[version],appliedCommit,previewProjectRef:previewProject,rehearsalMode:'claim',runId:Number(runId),schema:'shared-db-preview-instance-binding/v1'})}`,`preview\tReport the preview ledger delta\t2026-09-07T20:03:31Z ### Preview ledger delta`,`preview\tReport the preview ledger delta\t2026-09-07T20:03:31Z - added: ${version}`,'preview\tReport the preview ledger delta\t2026-09-07T20:03:31Z - removed: (none)'].join('\n'),
     }),
   }
 }
@@ -4864,6 +4975,57 @@ test('immutable original preview-apply evidence validates only the exact run',()
   assert.throws(()=>validateOriginalPreviewApplyEvidence(input,noDigest),/found 0/)
 })
 
+test('the exact byte-pinned #2509 claim apply is valid immutable historical-rebind evidence',()=>{
+  const input={issue:2509,pr:2513,versions:['20260907131728'],mergeCommitSha:'c5f85ad3a98b7a5598e8c81a56735473d5bb5487'}
+  assert.deepEqual(validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo()),{type:'preview-apply',run_id:'34157812748'})
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({runId:'34157812749'})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({appliedCommit:'a'.repeat(40)})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({previewProject:'wrong-preview'})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,pinnedHistoricalClaimApplyIo({migrationBody:'select 1;\n'})),/found 0/)
+  assert.throws(()=>validateOriginalPreviewApplyEvidence({...input,versions:['20260907131729']},pinnedHistoricalClaimApplyIo()),/found 0/)
+})
+
+function historicalTerminalIo(overrides={}){
+  const manifest={target:'preview',preview_allowlist:'20260907131728',claim_pr:'2513',claim_head_sha:'1be8f325dbf1ff035bd5039638dc47c14a3eb155',commit_sha:'c5f85ad3a98b7a5598e8c81a56735473d5bb5487',historical_preview_source_pr:'2513',historical_preview_original_run_map:'20260907131728:34157812748'}
+  const record=readyRecord({issue:2509,pr:2513,head_sha:manifest.claim_head_sha,bundle_id:'7e75bf09d81bc26fd310797c9db658629871b3ed186ee4788dfce4a6ac13b42b',route:'historical_rebind',route_context:manifest.commit_sha,manifest}),refs=new Map()
+  refs.set(`refs/db-preview-ready/${record.ready_id}`,{digest:sha256(canonicalJson(record)),record})
+  const runId='34211013201',artifactId='10049835085',artifactDigest=`sha256:${'4'.repeat(64)}`
+  const evidence={
+    run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:manifest.commit_sha},
+    artifacts:{total_count:1,artifacts:[{id:Number(artifactId),name:`preview-migration-apply-${manifest.commit_sha}`,digest:artifactDigest,expired:false,workflow_run:{id:Number(runId),head_sha:manifest.commit_sha}}]},
+    logs:[`preview\tProve historical preview recovery source\t2026-09-08T09:38:33Z ORIGINAL_RUN_MAP: ${manifest.historical_preview_original_run_map}`,`preview\tProve historical preview recovery source\t2026-09-08T09:38:33Z SOURCE_PR: ${manifest.historical_preview_source_pr}`,`preview\tProve historical preview recovery source\t2026-09-08T09:38:33Z MAIN_SHA: ${manifest.commit_sha}`,`preview\tAssert the target project ref is PREVIEW\t2026-09-08T09:38:30Z PREVIEW_ALLOWLIST: ${manifest.preview_allowlist}`,'preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - rows before: 626','preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - rows after:  626','preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - added: (none)','preview\tReport the preview ledger delta\t2026-09-08T09:38:53Z - removed: (none)'].join('\n'),
+  }
+  const flow={resolveMarker:()=>({live:true,task:'route',calling_task:'route'}),readRef:(ref)=>refs.get(ref)??null,createRef:(ref,digest,value)=>{if(refs.has(ref))return false;refs.set(ref,{digest,record:value});return true}}
+  return {record,runId,artifactId,artifactDigest,refs,evidence,io:{orchestratorFlowAdapter:()=>flow,previewApplyRun:()=>evidence},...overrides}
+}
+
+function historicalTerminalArgs(fixture){return ['--terminalize-historical-preview-ready',fixture.record.ready_id,'--issue','2509','--run-id',fixture.runId,'--artifact-id',fixture.artifactId,'--artifact-digest',fixture.artifactDigest,'--manifest-digest',fixture.record.manifest_digest]}
+
+test('the GitHub-backed CLI terminalizes the exact no-write historical recovery once with immutable readback',()=>{
+  const fixture=historicalTerminalIo(),printed=[],log=console.log;console.log=(line)=>printed.push(line)
+  try{assert.equal(main(historicalTerminalArgs(fixture),NOW,fixture.io),0);assert.equal(main(historicalTerminalArgs(fixture),NOW,fixture.io),0)}finally{console.log=log}
+  const ref=`refs/db-preview-ready-outcomes/${fixture.record.ready_id}`,outcome=fixture.refs.get(ref)
+  assert.equal(outcome.digest,'dispatched');assert.equal(outcome.record.outcome,'dispatched');assert.deepEqual(outcome.record.proof,{positive:true,mode:'apply',run_id:fixture.runId,artifact_id:fixture.artifactId,artifact_digest:fixture.artifactDigest,manifest_digest:fixture.record.manifest_digest,ledger_rows:626})
+  assert.equal(JSON.parse(printed[0]).ref,ref)
+})
+
+test('historical recovery terminalization fails closed on every mismatched live proof',()=>{
+  const cases=[
+    (f,a)=>{a[1]='f'.repeat(64)},
+    (f,a)=>{a[a.indexOf('--run-id')+1]='34211013202'},
+    (f,a)=>{a[a.indexOf('--artifact-id')+1]='10049835086'},
+    (f,a)=>{a[a.indexOf('--artifact-digest')+1]=`sha256:${'5'.repeat(64)}`},
+    (f,a)=>{a[a.indexOf('--manifest-digest')+1]='6'.repeat(64)},
+    (f)=>{f.evidence.run.conclusion='failure'},
+    (f)=>{f.evidence.logs=f.evidence.logs.replace('- rows after:  626','- rows after:  627')},
+    (f)=>{f.evidence.logs=f.evidence.logs.replace('ORIGINAL_RUN_MAP: 20260907131728:34157812748','ORIGINAL_RUN_MAP: 20260907131728:34157812749')},
+  ]
+  const error=console.error;console.error=()=>{}
+  try{for(const mutate of cases){const fixture=historicalTerminalIo(),args=historicalTerminalArgs(fixture);mutate(fixture,args);assert.equal(main(args,NOW,fixture.io),2);assert.equal(fixture.refs.has(`refs/db-preview-ready-outcomes/${fixture.record.ready_id}`),false)}}finally{console.error=error}
+  const occupied=historicalTerminalIo(),outcomeRef=`refs/db-preview-ready-outcomes/${occupied.record.ready_id}`;occupied.refs.set(outcomeRef,{digest:'dispatched',record:{outcome:'dispatched',proof:{positive:true,mode:'apply'}}})
+  console.error=()=>{};try{assert.equal(main(historicalTerminalArgs(occupied),NOW,occupied.io),2)}finally{console.error=error}
+})
+
 test('immutable preview-ledger reconciliation evidence validates the renamed current version without replay',()=>{
   const input={issue:1722,pr:1748,versions:['20260830013942'],mergeCommitSha:'5'.repeat(40)}
   assert.deepEqual(validateOriginalPreviewApplyEvidence(input,immutablePreviewReconciliationIo()),{type:'preview-ledger-reconciliation',run_id:'33307904277',orphan_version:'20260828113920',replacement_version:'20260830013942'})
@@ -4883,6 +5045,28 @@ test('an already-applied merged claim receives validated evidence before route s
   assert.equal(candidate.route,'historical_rebind')
   assert.equal(candidate.route_context,mainSha)
   assert.equal(candidate.manifest.historical_preview_original_run_map,'20260828232207:33308168016')
+})
+
+test('#2509 emits only the existing no-write historical recovery manifest from its exact pinned apply',()=>{
+  const migration='supabase/migrations/20260907131728_popsg_preview_stats_indexed_categories.sql'
+  const mergeSha='c5f85ad3a98b7a5598e8c81a56735473d5bb5487',head='1be8f325dbf1ff035bd5039638dc47c14a3eb155'
+  const fixture=mergedRehearsalIo({
+    version:'20260907131728',migration,workIssue:2509,claimNumber:2511,prNumber:2513,branch:'codex/issue-2509-popsg-preview-stats',head,mergeSha,mainSha:mergeSha,
+    migrationBody:readFileSync(migration,'utf8'),
+    writes:['function public.get_sg_preview_stats','index public.idx_sgf_active_preview_category','table public.style_guide_files'],
+  })
+  const evidence=pinnedHistoricalClaimApplyIo();delete evidence.getFileAt
+  Object.assign(fixture.io,evidence)
+  fixture.io.previewLedger=()=>({versions:['20260907131728']})
+  const candidate=deriveLivePreviewCandidate(2509,fixture.io)
+  assert.equal(candidate.route,'historical_rebind')
+  assert.equal(candidate.route_context,mergeSha)
+  assert.deepEqual(candidate.manifest,{
+    target:'preview',preview_allowlist:'20260907131728',claim_pr:'2513',claim_head_sha:head,commit_sha:mergeSha,
+    historical_preview_source_pr:'2513',historical_preview_original_run_map:'20260907131728:34157812748',
+  })
+  assert.equal('merged_preview_source_pr' in candidate.manifest,false)
+  assert.equal('production_allowlist' in candidate.manifest,false)
 })
 
 test('a merged claim still reaches the post-merge rehearsal route instead of being stranded',()=>{
