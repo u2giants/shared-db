@@ -4,8 +4,8 @@
   "outcome": "ready-for-merge",
   "pr": 2606,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/1868/1",
-  "contract_sha256": "8aaa1bf54ba0bed2bc905b6fc5616d3d537967342fa925a085e7a2d6959395fa",
+  "contract_ref": "refs/db-contracts/1868/2",
+  "contract_sha256": "3ea1e80fee89f39a9ff07f0ff9ecb31026989f3c0e105891beb171cd1e8fc0c9",
   "head_sha": "3e7d200385977fb1b3d1ea18d633fcc8344ca6f8",
   "files_changed": [
     ".agent/completion.json",
@@ -20,12 +20,12 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; published as refs/db-contracts/1868/1 at f23fffb2."
+      "evidence": "Contract is valid; generation 2 published as refs/db-contracts/1868/2 at 8b4f5b3d. Generation 2 corrects the claim assumption the governed review disproved: collision-gate db-claim bodies carry no worktree or branch field."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 1 pinned by hash 8aaa1bf5."
+      "evidence": "Report satisfies contract generation 2 pinned by hash 3ea1e80f."
     },
     {
       "command": "node --test scripts/reap-merged-worktrees.test.mjs",
@@ -71,6 +71,11 @@
       "command": "governed review of PR 2606 at head 1c695d57, reviewer grok-4.6",
       "exit_code": 0,
       "evidence": "VERDICT: REVISE. One finding at merge-stopping weight: blockedByLiveOrchestrator read `markers.length > 0` while main() set `markers` to [] on a FAILED read, so unreadable markers plus unreadable claims did not refuse. Two lesser findings: --idle-hours accepted any positive number including 0.001, and several new guarantees were asserted only positively. All three are fixed in commit 3e7d2003 and each has a known-dirty test. Durable verdict refs/db-review-verdicts/1868-2606-1c695d57432fe61533a1f43ac8c32a0ba21496fa at 587aa827."
+    },
+    {
+      "command": "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha <base> --pr-head-sha <head>",
+      "exit_code": 0,
+      "evidence": "Run against PR base 0f22de12 and the pull request head. The reported file list matches Git exactly, and the only commit after the implementation head is the pair of .agent evidence files."
     }
   ],
   "assumptions_resolved": [

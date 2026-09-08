@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 1868,
-  "generation": 1,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Repair the worktree reaper so it can run while an orchestrator is live, by replacing the blanket whole-run refusal with per-worktree liveness evidence the repo already publishes: open database claims naming an exact worktree path or branch, the reap's own working directory, and recent filesystem activity inside each worktree's git administrative directory. Then run the reap that issue #1868 asked for.",
@@ -31,7 +31,8 @@
     "Do not treat an unmeasurable worktree as idle; unknown activity counts as live.",
     "Do not let --force override a positive database claim, uncommitted changes, unpushed commits, a lock, or a detached head.",
     "Do not let a failed read of the markers or the claims relax any guard.",
-    "Do not remove a worktree that is dirty, unpushed, locked, detached, on an unmerged branch, or named by an open claim."
+    "Do not remove a worktree that is dirty, unpushed, locked, detached, on an unmerged branch, or named by an open claim.",
+    "Do not let the whole-run refusal read the marker LIST; it must read the liveness bit, because an unreadable marker list is an empty list and is live."
   ],
   "required_checks": [
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -39,10 +40,11 @@
     "node --test scripts/reap-merged-worktrees.test.mjs",
     "node scripts/check-throughput-truth-audit.mjs",
     "node scripts/check-github-transport-conformance.mjs",
-    "git diff --check"
+    "git diff --check",
+    "node scripts/agent-work-contract-git-evidence.mjs --contract-file .agent/contract.json --report-file .agent/completion.json --pr-base-sha <base> --pr-head-sha <head>"
   ],
   "assumptions": [
-    "Every dispatched agent holds an open db-claim issue whose fenced block names its exact worktree path and branch, so a claim is a positive liveness signal that does not depend on guessing from git alone.",
+    "A db-claim or db-author-lease issue whose fenced block names an exact worktree path or branch is a positive liveness signal that does not depend on guessing from git alone. This is NOT true of every open db-claim issue: the collision-gate bodies written by scripts/check-dispatch-collision.mjs carry no worktree or branch field at all, so those agents are protected by the idle window and the unmerged-branch refusal rather than by a claim. Corrected in generation 2 after the governed review of PR #2606.",
     "A worktree an agent is working in has recent mtimes on its own index, HEAD, logs/HEAD or ORIG_HEAD.",
     "The git administrative DIRECTORY's own mtime is not a usable signal, because any git command anywhere in the repository refreshes it for every worktree at once."
   ],
