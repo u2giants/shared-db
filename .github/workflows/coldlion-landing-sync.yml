@@ -1,0 +1,82 @@
+# Scheduled ColdLion history sync.
+#
+# Re-reads the most recent grid windows every run. A window already proven loaded
+# is skipped; a window that is not is completed. Trailing more than one window is
+# deliberate — an order edited days after it was written falls in an older window,
+# and a sync that only ever looked at the current week would never see it.
+#
+# This workflow WRITES to the shared database. Two rules follow from that:
+#   1. It is never triggered by a pull request or a push. Schedule and manual
+#      dispatch only, so a branch cannot make it run.
+#   2. The offline contract tests run first, in the same job, immediately before
+#      the write. If they are red nothing is fetched and nothing is written.
+
+name: ColdLion Landing Sync
+
+on:
+  schedule:
+    # 05:20 UTC daily — after the vendor's own overnight processing, and off the
+    # hour so it does not contend with everything else scheduled on the hour.
+    - cron: '20 5 * * *'
+  workflow_dispatch:
+    inputs:
+      windows:
+        description: 'How many recent 7-day windows to re-read'
+        required: false
+        default: '3'
+      dry_run:
+        description: 'Report outstanding work without fetching or writing'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+# Never let two runs load the same window at once. A second run would be refused
+# by the ledger rather than corrupt anything, but a queued run is the honest
+# outcome, so cancel-in-progress stays off.
+concurrency:
+  group: coldlion-landing-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Sync recent history windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prove psql is present
+        run: psql --version
+
+      - name: Run the offline contract tests before touching anything
+        run: node --test tools/coldlion-landing-history.test.mjs
+
+      - name: Refuse to run without an explicit target
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+        run: |
+          set -euo pipefail
+          # Named, not defaulted. A loader that guesses its own target is a loader
+          # that can write to the wrong database while reporting success.
+          [ -n "${DATABASE_URL:-}" ] || { echo "::error::SUPABASE_DB_URL_PRODUCTION is not set."; exit 1; }
+          [ -n "${COLDLION_API_KEY:-}" ] || { echo "::error::COLDLION_API_KEY is not set."; exit 1; }
+
+      - name: Sync
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+          WINDOWS: ${{ github.event.inputs.windows || '3' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          ARGS=(--windows "$WINDOWS")
+          if [ "${DRY_RUN:-false}" = "true" ]; then ARGS+=(--dry-run); fi
+          node tools/coldlion-landing/sync-history.mjs "${ARGS[@]}"
