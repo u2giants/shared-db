@@ -2830,6 +2830,17 @@ test('--assign-reviewer refuses to draw a database reviewer for a documents-only
   assert.match(refused.stderr,/Rulebook files/)
 })
 
+test('--assign-reviewer preserves the documents-only lane with required agent evidence (#2590)',()=>{
+  const evidence=[{filename:'.agent/contract.json'},{filename:'.agent/completion.json'}]
+  const prose=assignReviewerRun([{filename:'HANDOFF.d/2026-09-08T1735Z-note.md'},...evidence])
+  assert.equal(prose.code,2)
+  assert.match(prose.stderr,/documents-only change/)
+  for(const path of ['AGENTS.md','scripts/fix.mjs']){
+    const guarded=assignReviewerRun([{filename:'docs/notes.md'},{filename:path},...evidence])
+    assert.doesNotMatch(guarded.stderr,/documents-only change/,path)
+  }
+})
+
 test('--assign-reviewer still draws for a rulebook file, a migration, and a migration renamed to a document (#2102)',()=>{
   // Each of these must get PAST the guard. The draw then fails on the stub io,
   // which is the point: the failure is anything EXCEPT the documents-only refusal.

@@ -12,6 +12,35 @@ test('prose documents are documents-only', () => {
   assert.equal(verdict.other.length, 0)
 })
 
+test('required agent evidence does not defeat an otherwise prose-only change (#2590)', () => {
+  const verdict = classifyChangedPaths([
+    'HANDOFF.d/2026-09-08T1735Z-queue-handoff.md',
+    '.agent/contract.json',
+    '.agent/completion.json',
+  ])
+  assert.equal(verdict.documentsOnly, true)
+  assert.deepEqual(verdict.documents, ['HANDOFF.d/2026-09-08T1735Z-queue-handoff.md'])
+  assert.deepEqual(verdict.evidence, ['.agent/contract.json', '.agent/completion.json'])
+  assert.match(verdict.reason, /required agent evidence pair/)
+})
+
+test('agent evidence is exempt only as the exact complete pair accompanying substantive prose (#2590)', () => {
+  for (const paths of [
+    ['docs/notes.md', '.agent/contract.json'],
+    ['docs/notes.md', '.agent/completion.json'],
+    ['.agent/contract.json', '.agent/completion.json'],
+    ['docs/notes.md', '.agent/contract.json', '.agent/contract.json', '.agent/completion.json'],
+    ['docs/notes.md', '.agent/contract.json', '.agent/completion.json', '.agent/extra.json'],
+  ]) assert.equal(classifyChangedPaths(paths).documentsOnly, false, JSON.stringify(paths))
+})
+
+test('agent evidence never exempts a rulebook or code change (#2590)', () => {
+  const evidence = ['.agent/contract.json', '.agent/completion.json']
+  for (const path of ['AGENTS.md', 'plan_guard.md', 'scripts/fix.mjs', 'supabase/migrations/20260908000000_fix.sql']) {
+    assert.equal(classifyChangedPaths(['docs/notes.md', path, ...evidence]).documentsOnly, false, path)
+  }
+})
+
 // RULEBOOK FILES. These are prose by extension and instructions by function: a
 // bad edit to one of them steers every later session, so they keep the full
 // treatment. This is the test that must fail if the exclusion list is dropped.

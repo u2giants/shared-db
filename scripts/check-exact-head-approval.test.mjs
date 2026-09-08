@@ -503,6 +503,21 @@ test('a documents-only pull request authorizes with no reviewer assignment at al
   assert.equal(result.assignments, 0)
 })
 
+test('the merge gate ignores only the complete agent evidence pair for a prose change (#2590)', () => {
+  const evidence = ['.agent/contract.json', '.agent/completion.json']
+  const result = evaluateExactHeadApproval({
+    pr: 2590, headSha: NEW, assignments: [], verdicts: [],
+    changedFiles: ['HANDOFF.d/2026-09-08T1735Z-note.md', ...evidence],
+  })
+  assert.equal(result.approved, true)
+  assert.equal(result.documents_only, true)
+  for (const path of ['AGENTS.md', 'scripts/fix.mjs']) {
+    assert.throws(() => evaluateExactHeadApproval({
+      pr: 2590, headSha: NEW, assignments: [], verdicts: [], changedFiles: ['docs/notes.md', path, ...evidence],
+    }), /no reviewer was ever assigned head/)
+  }
+})
+
 // The exclusions are the safety of the whole rule. Each of these keeps the full
 // treatment, so with no assignment the gate must still refuse.
 for (const path of ['AGENTS.md', '.claude/skills/shared-db-change/SKILL.md', 'skills/claude/shared-db-orchestrator/SKILL.md', 'plan_reviewer_lease_capacity_truth.md']) {

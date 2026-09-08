@@ -35,6 +35,13 @@ const RULEBOOK_BASENAME_PATTERN = /^plan_.*\.md$/
 // not an oversight, and the safe default for an unlisted one is "not a document".
 const DOCUMENT_EXTENSIONS = new Set(['.md', '.markdown', '.txt', '.rst'])
 
+// Every enforced PR must carry this exact evidence pair. These files describe
+// the work already represented by the substantive diff; they do not turn an
+// otherwise prose-only PR into code. The exemption is deliberately all-or-
+// nothing: one file alone, extra `.agent` files, or a pair with no substantive
+// change remains non-document and therefore keeps the reviewer gate.
+const AGENT_WORK_EVIDENCE = new Set(['.agent/contract.json', '.agent/completion.json'])
+
 function normalize(path) {
   return String(path ?? '').trim().replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
 }
@@ -69,18 +76,26 @@ export function isDocumentPath(path) {
 // previous name of every rename -- a file renamed out of `supabase/migrations/`
 // into a `.md` is a migration change wearing a document's name.
 export function classifyChangedPaths(paths) {
-  if (!Array.isArray(paths)) return { documentsOnly: false, reason: 'the changed-file list could not be read', documents: [], rulebook: [], other: [] }
+  if (!Array.isArray(paths)) return { documentsOnly: false, reason: 'the changed-file list could not be read', documents: [], rulebook: [], other: [], evidence: [] }
   if (paths.some((path) => typeof path !== 'string' || !normalize(path))) {
-    return { documentsOnly: false, reason: 'the changed-file list contains an unreadable entry', documents: [], rulebook: [], other: [] }
+    return { documentsOnly: false, reason: 'the changed-file list contains an unreadable entry', documents: [], rulebook: [], other: [], evidence: [] }
   }
-  if (!paths.length) return { documentsOnly: false, reason: 'no changed files were reported; an unknown change is never documents-only', documents: [], rulebook: [], other: [] }
+  if (!paths.length) return { documentsOnly: false, reason: 'no changed files were reported; an unknown change is never documents-only', documents: [], rulebook: [], other: [], evidence: [] }
 
-  const rulebook = paths.filter((path) => isRulebookPath(path))
-  const documents = paths.filter((path) => isDocumentPath(path))
-  const other = paths.filter((path) => !isRulebookPath(path) && !isDocumentPath(path))
-  if (rulebook.length) return { documentsOnly: false, reason: `rulebook file(s) changed, which are never documents for this purpose: ${rulebook.join(', ')}`, documents, rulebook, other }
-  if (other.length) return { documentsOnly: false, reason: `non-document file(s) changed: ${other.join(', ')}`, documents, rulebook, other }
-  return { documentsOnly: true, reason: `all ${documents.length} changed file(s) are prose documents`, documents, rulebook, other }
+  const evidence = paths.filter((path) => AGENT_WORK_EVIDENCE.has(normalize(path)))
+  const evidenceNames = new Set(evidence.map(normalize))
+  const completeEvidencePair = evidence.length === AGENT_WORK_EVIDENCE.size && evidenceNames.size === AGENT_WORK_EVIDENCE.size
+  const substantivePaths = completeEvidencePair
+    ? paths.filter((path) => !AGENT_WORK_EVIDENCE.has(normalize(path)))
+    : paths
+  const rulebook = substantivePaths.filter((path) => isRulebookPath(path))
+  const documents = substantivePaths.filter((path) => isDocumentPath(path))
+  const other = substantivePaths.filter((path) => !isRulebookPath(path) && !isDocumentPath(path))
+  if (!substantivePaths.length) return { documentsOnly: false, reason: 'the agent evidence pair has no substantive changed file; an unknown change is never documents-only', documents, rulebook, other, evidence }
+  if (rulebook.length) return { documentsOnly: false, reason: `rulebook file(s) changed, which are never documents for this purpose: ${rulebook.join(', ')}`, documents, rulebook, other, evidence }
+  if (other.length) return { documentsOnly: false, reason: `non-document file(s) changed: ${other.join(', ')}`, documents, rulebook, other, evidence }
+  const evidenceNote = completeEvidencePair ? ' plus the required agent evidence pair' : ''
+  return { documentsOnly: true, reason: `all ${documents.length} substantive changed file(s) are prose documents${evidenceNote}`, documents, rulebook, other, evidence }
 }
 
 export function isDocumentsOnlyChange(paths) {
