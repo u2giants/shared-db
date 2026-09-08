@@ -5,6 +5,21 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2493. The protected version and exact migration bytes were authored on
+  // PR #2526 before 20260907200221 reached main. This entry permits only those
+  // exact bytes to survive the backdated-version guard; it does not mark the
+  // migration preview-only or otherwise change its production eligibility.
+  '20260907154543': Object.freeze({
+    filename: 'supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql',
+    name: 'source_resolution_new_kind_read_parity',
+    statementBytes: 6091,
+    statementSha256: '4464c6d21a734cdebca6d61113c7e6383944fdb8e75dede41a2654e9e3b22244',
+    fileSha256: '7cff10dcf68d2ba8993201790e8c276d517fd2410efa049e3e2026504abf6c50',
+    objects: Object.freeze([
+      'function plm.source_resolution_target_missing',
+      'view api.source_resolution',
+    ]),
+  }),
   // #2356. The protected version and exact migration bytes were authored on
   // PR #2523 before 20260907200221 reached main. This entry permits only those
   // exact bytes to survive the backdated-version guard; it does not mark the
