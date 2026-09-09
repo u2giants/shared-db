@@ -13,11 +13,12 @@ declare
       'region','North America','branch','Lucas','lob','200','submission_type','Standard',
       'template_id','462','workflow_id','50','source_sha256',repeat('2',64),
       'property_count',2,'character_count',2,'relationship_count',2,
-      'relationship_sha256','30ffb0bba815c7d926de76417687c0f8f2b335c66fc1a08d70f5c89bfd9ec92a'));
-  v_totals jsonb := '{"unique_property_count":3,"unique_character_count":4,"scope_membership_count":4,"cross_scope_property_count":1}';
+      'relationship_sha256','dfd3e0e250673988db545b188f75f4e8bdfab99b5e427d7a146ad629a47f561a'));
+  v_totals jsonb := '{"unique_property_count":3,"unique_character_count":3,"scope_membership_count":4,"cross_scope_property_count":1}';
   v_d1 jsonb := '[{"licensed_property_id":"1","property_name":"ZZTEST Disney One","option_source_id":"1007","character_id":"10","character_name":"ZZTEST Character Ten","brand_property_id":"101"}]';
   v_d2 jsonb := '[{"licensed_property_id":"2","property_name":"ZZTEST Shared","option_source_id":"1007","character_id":"20","character_name":"ZZTEST Character Twenty","brand_property_id":"202"}]';
-  v_l jsonb := '[{"licensed_property_id":"2","property_name":"ZZTEST Shared","option_source_id":"1007","character_id":"21","character_name":"ZZTEST Character Twenty One","brand_property_id":"202"},{"licensed_property_id":"3","property_name":"ZZTEST Lucas Three","option_source_id":"1007","character_id":"30","character_name":"ZZTEST Character Thirty","brand_property_id":"303"}]';
+  v_l jsonb := '[{"licensed_property_id":"2","property_name":"ZZTEST Shared","option_source_id":"1007","character_id":"20","character_name":"ZZTEST Character Twenty","brand_property_id":"202"},{"licensed_property_id":"3","property_name":"ZZTEST Lucas Three","option_source_id":"1007","character_id":"30","character_name":"ZZTEST Character Thirty","brand_property_id":"303"}]';
+  v_property_only jsonb := '[{"licensed_property_id":"9","property_name":"ZZTEST Property Only","option_source_id":"1007"}]';
   v_id uuid;
   v_bad uuid;
   v_result jsonb;
@@ -33,18 +34,24 @@ begin
     'a2a9f355791c754bebf946550c6e30b3a752111b468b69dc4153572c23d9ef7e',repeat('c',64),v_d1,false);
   if v_result->>'status'<>'identical_retry' then raise exception 'A2 FAILED: identical retry %',v_result; end if;
   v_result:=plm.load_opa_capture_chunk(v_id,'disney_home_standard','d2',
+    '81cd7ba540228e25d033c1745671e132fbad8305bfea6f7038610941669ccfbd',repeat('c',64),v_d2,false);
+  if v_result->>'status'<>'loaded' then raise exception 'A3 FAILED: Disney final chunk load %',v_result; end if;
+  v_result:=plm.load_opa_capture_chunk(v_id,'disney_home_standard','d2',
     '81cd7ba540228e25d033c1745671e132fbad8305bfea6f7038610941669ccfbd',repeat('c',64),v_d2,true);
-  if v_result->>'status'<>'scope_complete' then raise exception 'A3 FAILED: Disney finish %',v_result; end if;
+  if v_result->>'status'<>'scope_complete' then raise exception 'A4 FAILED: Disney finish retry %',v_result; end if;
+  v_result:=plm.load_opa_capture_chunk(v_id,'disney_home_standard','d2',
+    '81cd7ba540228e25d033c1745671e132fbad8305bfea6f7038610941669ccfbd',repeat('c',64),v_d2,true);
+  if v_result->>'status'<>'scope_complete' then raise exception 'A5 FAILED: completed finish retry %',v_result; end if;
   v_result:=plm.load_opa_capture_chunk(v_id,'lucas_home_standard','l1',
-    '30ffb0bba815c7d926de76417687c0f8f2b335c66fc1a08d70f5c89bfd9ec92a',repeat('d',64),v_l,true);
-  if v_result->>'status'<>'scope_complete' then raise exception 'A4 FAILED: Lucas finish %',v_result; end if;
+    'dfd3e0e250673988db545b188f75f4e8bdfab99b5e427d7a146ad629a47f561a',repeat('d',64),v_l,true);
+  if v_result->>'status'<>'scope_complete' then raise exception 'A6 FAILED: Lucas cross-scope-pair finish %',v_result; end if;
   v_result:=plm.finalize_opa_capture(v_id);
-  if v_result->>'status'<>'complete' then raise exception 'A5 FAILED: finalize %',v_result; end if;
+  if v_result->>'status'<>'complete' then raise exception 'A7 FAILED: finalize %',v_result; end if;
   if not exists(select 1 from plm.opa_capture where id=v_id and status='complete'
-    and observed_unique_property_count=3 and observed_unique_character_count=4
+    and observed_unique_property_count=3 and observed_unique_character_count=3
     and observed_scope_membership_count=4 and observed_cross_scope_property_count=1
     and observed_relationship_count=4 and observed_duplicate_pair_count=0) then
-    raise exception 'A6 FAILED: coherent aggregate was not recorded';
+    raise exception 'A8 FAILED: coherent aggregate was not recorded';
   end if;
 
   -- Authentication failure is terminal and loads nothing.
@@ -78,6 +85,17 @@ begin
     '3a77b293fc55c3270529365805f403c62aec34bd2c929671970573a0fe625607',repeat('c',64),v_d1||v_d1,false);
   if v_result->>'status'<>'rejected' or v_result#>>'{failure,code}'<>'duplicate_pair' then
     raise exception 'D FAILED: duplicate pair %',v_result;
+  end if;
+
+  -- A property-only duplicate across chunks is a guarded collision, not a raw unique violation.
+  v_bad:=plm.begin_opa_capture('ZZTEST-null-pair','repo',repeat('a',40),repeat('0',64),'2099-04-02Z',v_scopes,v_totals,'ZZTEST');
+  v_result:=plm.load_opa_capture_chunk(v_bad,'disney_home_standard','property-only-1',
+    '52b7d9e41ab1ec0a4a1f1fa36da42ef573dd44d058d4d88e71f9063adaf08525',repeat('c',64),v_property_only,false);
+  if v_result->>'status'<>'loaded' then raise exception 'D2 FAILED: property-only first chunk %',v_result; end if;
+  v_result:=plm.load_opa_capture_chunk(v_bad,'disney_home_standard','property-only-2',
+    '52b7d9e41ab1ec0a4a1f1fa36da42ef573dd44d058d4d88e71f9063adaf08525',repeat('c',64),v_property_only,false);
+  if v_result->>'status'<>'rejected' or v_result#>>'{failure,code}'<>'pair_collision' then
+    raise exception 'D2 FAILED: property-only collision was not guarded %',v_result;
   end if;
 
   -- A short final scope is rejected by its count/hash reconciliation.

@@ -282,13 +282,14 @@ declare
   v_character_count bigint;
   v_relationship_count bigint;
   v_relationship_hash text;
+  v_identical_retry boolean := false;
   v_failure jsonb;
 begin
   select * into v_capture from plm.opa_capture where id=p_capture_id for update;
   select * into v_scope from plm.opa_capture_scope
     where capture_id=p_capture_id and scope_key=p_scope_key for update;
   if v_capture.id is null or v_scope.capture_id is null or v_capture.status<>'loading'
-     or v_scope.status<>'pending' then
+     or v_scope.status not in ('pending','complete') then
     raise exception 'load_opa_capture_chunk: capture/scope is missing or not loading';
   end if;
   if p_authentication_evidence_sha256 is null
@@ -362,16 +363,25 @@ begin
     where capture_id=p_capture_id and scope_key=p_scope_key and chunk_key=p_chunk_key;
     if v_existing_count>0 then
       if v_existing_count=v_row_count and v_existing_chunk=p_chunk_sha256 then
-        return jsonb_build_object('status','identical_retry','row_count',v_existing_count);
+        if v_scope.status='complete' then
+          return jsonb_build_object('status',case when p_finish_scope then 'scope_complete' else 'identical_retry' end,
+            'row_count',v_existing_count);
+        elsif not p_finish_scope then
+          return jsonb_build_object('status','identical_retry','row_count',v_existing_count);
+        end if;
+        v_identical_retry:=true;
+      else
+        v_failure:=jsonb_build_object('code','changed_chunk_retry','scope_key',p_scope_key);
       end if;
-      v_failure:=jsonb_build_object('code','changed_chunk_retry','scope_key',p_scope_key);
+    elsif v_scope.status='complete' then
+      v_failure:=jsonb_build_object('code','scope_already_complete','scope_key',p_scope_key);
     elsif exists (
       select 1 from jsonb_array_elements(p_rows)r
       join plm.opa_property_character_capture o
         on o.capture_id=p_capture_id
+       and o.scope_key=p_scope_key
        and o.licensed_property_id=(r->>'licensed_property_id')::bigint
-       and o.character_id=nullif(r->>'character_id','')::bigint
-      where nullif(r->>'character_id','') is not null
+       and o.character_id is not distinct from nullif(r->>'character_id','')::bigint
     ) then
       v_failure:=jsonb_build_object('code','pair_collision','scope_key',p_scope_key);
     end if;
@@ -391,21 +401,23 @@ begin
     authenticated_at=coalesce(authenticated_at,clock_timestamp())
   where capture_id=p_capture_id and scope_key=p_scope_key;
 
-  insert into plm.opa_property_character_capture(
-    capture_id,scope_key,chunk_key,chunk_sha256,licensed_property_id,property_name,
-    option_source_id,character_id,character_name,brand_property_id,source_row_sha256)
-  select p_capture_id,p_scope_key,p_chunk_key,p_chunk_sha256,
-    (r->>'licensed_property_id')::bigint,r->>'property_name',(r->>'option_source_id')::bigint,
-    nullif(r->>'character_id','')::bigint,nullif(r->>'character_name',''),
-    nullif(r->>'brand_property_id','')::bigint,
-    encode(extensions.digest(
-      convert_to(r->>'licensed_property_id','UTF8')||decode('00','hex')||
-      convert_to(r->>'property_name','UTF8')||decode('00','hex')||
-      convert_to(r->>'option_source_id','UTF8')||decode('00','hex')||
-      convert_to(coalesce(r->>'character_id',''),'UTF8')||decode('00','hex')||
-      convert_to(coalesce(r->>'character_name',''),'UTF8')||decode('00','hex')||
-      convert_to(coalesce(r->>'brand_property_id',''),'UTF8'),'sha256'),'hex')
-  from jsonb_array_elements(p_rows)r;
+  if not v_identical_retry then
+    insert into plm.opa_property_character_capture(
+      capture_id,scope_key,chunk_key,chunk_sha256,licensed_property_id,property_name,
+      option_source_id,character_id,character_name,brand_property_id,source_row_sha256)
+    select p_capture_id,p_scope_key,p_chunk_key,p_chunk_sha256,
+      (r->>'licensed_property_id')::bigint,r->>'property_name',(r->>'option_source_id')::bigint,
+      nullif(r->>'character_id','')::bigint,nullif(r->>'character_name',''),
+      nullif(r->>'brand_property_id','')::bigint,
+      encode(extensions.digest(
+        convert_to(r->>'licensed_property_id','UTF8')||decode('00','hex')||
+        convert_to(r->>'property_name','UTF8')||decode('00','hex')||
+        convert_to(r->>'option_source_id','UTF8')||decode('00','hex')||
+        convert_to(coalesce(r->>'character_id',''),'UTF8')||decode('00','hex')||
+        convert_to(coalesce(r->>'character_name',''),'UTF8')||decode('00','hex')||
+        convert_to(coalesce(r->>'brand_property_id',''),'UTF8'),'sha256'),'hex')
+    from jsonb_array_elements(p_rows)r;
+  end if;
 
   if p_finish_scope then
     select count(distinct licensed_property_id),count(distinct character_id),
