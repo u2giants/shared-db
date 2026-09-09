@@ -11,6 +11,8 @@
   "head_sha": "f5826e5255f2b56b6c2dfecb9f7c60b0f2229105",
   "evidence_note": "The repair head individually pins the existing hash-bound verification sidecar in the preview producer set. The migration SQL and sidecar bytes are unchanged. No preview or promotion was performed.",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/production-verification-sidecars/20260909084253.json",
     "scripts/production_business_risk_gate.py",
     "supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql"
