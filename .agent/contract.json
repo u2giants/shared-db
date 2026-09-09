@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generation": 12,
+  "generation": 13,
   "work_issue": 2506,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Preserve exact authorized PopSG Files and Guides search results, facets and filters while meeting the existing bounded preview response budget.",
-  "base_sha": "1ac67600e56e75b79fe2c4eb697b541773504a51",
+  "base_sha": "d883dc0cc64e6847260f2e5357c45446f23b6153",
   "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
   "worker": "claude pr2542-green successor under orchestrator marker 2597",
   "branch": "codex/issue-2506-search-performance",
