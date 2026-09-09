@@ -4,8 +4,8 @@
   "outcome": "ready-for-merge",
   "pr": 2649,
   "migration_versions": ["20260909220101"],
-  "contract_ref": "refs/db-contracts/2644/7",
-  "contract_sha256": "c1ed8ed95afe8930b3d7fd8a57dd7ab933fb50e72e163b69f42e0927d25602de",
+  "contract_ref": "refs/db-contracts/2644/8",
+  "contract_sha256": "086433aac94c56aabc5ec1b04ca16c5393ef2bf3e8a3b3c99ce7dda7a637be9f",
   "head_sha": "d848d6fc36435074b37a60857d1b63ec1108c43f",
   "evidence_note": "Implementation head d848d6fc is refreshed from current main 7fc819f9 and uses reserved migration version 20260909220101 without changing its SQL. It adds a PopDAM-owned canonical item state table, atomic admin/service-role dismissal RPC, the unchanged 21-column serving projection, non-destructive canonical identity for category predictions, and focused proof for missing, duplicate, and ambiguous identity refusal plus both legacy ERP-row and canonical item retirement history preservation. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2649.",
   "files_changed": [

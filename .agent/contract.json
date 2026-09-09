@@ -41,7 +41,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 7,
+  "generation": 8,
   "goal": "Give PopDAM durable canonical item dismissal state and preserve category prediction history before the frozen ERP tables are retired.",
   "prohibited_actions": [
     "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
