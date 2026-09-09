@@ -35,7 +35,7 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL checks passed under Git Bash against origin/main 5874305e; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."
+      "evidence": "Static SQL checks passed under Git Bash against current origin/main e4725924; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
