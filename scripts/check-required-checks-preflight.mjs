@@ -72,11 +72,47 @@ export function observedStates({ statuses = [], checkRuns = [] }) {
 export const REQUIRED_CHECKS_MIRROR = 'docs/verification/main-required-status-checks.json'
 export const MIRROR_BOOTSTRAP_MAIN_SHA = 'e0532e3c974a199f623f160f56416bdef4037461'
 export const PINNED_REQUIRED_CONTEXTS = Object.freeze([
+  // 'Agent work contract' joined the required list on 2026-09-08, the Switch 1
+  // action of issue #1403, one day after enforced mode was activated. The pin only
+  // ever defends against SHRINKING, so growth is recorded here deliberately.
+  'Agent work contract',
   'Cancelled work guard', 'Cross-PR object collision', 'Domain ownership',
   'Handoff contract', 'Intake pointer guard', 'Migration author lease',
   'Migration guarded merge authorization', 'Orchestrator marker guard',
   'Promotion contract tests (offline)', 'SQL migration guards', 'Tools offline tests',
 ])
+
+export const PREFLIGHT_SOURCE_PATH = 'scripts/check-required-checks-preflight.mjs'
+
+// The floor the origin/main mirror is judged against must come from origin/main too.
+// Reading it from the PROPOSED HEAD deadlocked the first time the pin grew: guarded
+// merge checks out the head, so the head's larger pin was compared against main's
+// not-yet-updated mirror and refused the one commit that would have updated it --
+// and that refusal lands on the only merge path there is. It was also the last place
+// a proposed head could influence the list used to judge itself, which the comment on
+// readRequiredChecksMirror already said must never happen. Reading main's own pin
+// fixes both. Growth stays one-directional: the head's pin must still contain every
+// name main's pin has, so a head cannot quietly drop a floor entry.
+export function parsePinnedFloor(source, where) {
+  const withoutComments = String(source).replace(/\/\/.*/g, '')
+  const block = /PINNED_REQUIRED_CONTEXTS\s*=\s*Object\.freeze\(\[([\s\S]*?)\]\)/.exec(withoutComments)
+  if (!block) throw new PreflightError(`${PREFLIGHT_SOURCE_PATH} on ${where} carries no readable PINNED_REQUIRED_CONTEXTS, so the pinned floor is unknown`)
+  const names = [...block[1].matchAll(/'([^']*)'/g)].map((m) => m[1])
+  if (names.length === 0) throw new PreflightError(`PINNED_REQUIRED_CONTEXTS in ${PREFLIGHT_SOURCE_PATH} on ${where} is empty, which is not the same as "nothing is required"`)
+  return names
+}
+
+export function readPinnedFloor(root = process.cwd(), run = execFileSync) {
+  let raw
+  try { raw = run('git', ['show', `origin/main:${PREFLIGHT_SOURCE_PATH}`], { encoding: 'utf8', cwd: root, maxBuffer: 8 * 1024 * 1024 }) }
+  catch (e) {
+    throw new PreflightError(`the trusted origin/main copy of ${PREFLIGHT_SOURCE_PATH} is missing or unreadable (${sanitize(e.message)}), so the pinned floor is unknown`)
+  }
+  const floor = parsePinnedFloor(raw, 'origin/main')
+  const dropped = floor.filter((context) => !PINNED_REQUIRED_CONTEXTS.includes(context))
+  if (dropped.length) throw new PreflightError(`this head drops contexts origin/main still pins: ${dropped.join(', ')}. The pin may only grow.`)
+  return floor
+}
 
 export function parseMirror(raw, where) {
   let parsed
@@ -107,7 +143,7 @@ export function readRequiredChecksMirror(root = process.cwd(), run = execFileSyn
   if (contexts.filter((c) => c !== SELF_CONTEXT).length === 0) {
     throw new PreflightError(`${REQUIRED_CHECKS_MIRROR} names no context other than ${SELF_CONTEXT}, so the mirror would test nothing`)
   }
-  const missingPinned = PINNED_REQUIRED_CONTEXTS.filter((context) => !contexts.includes(context))
+  const missingPinned = readPinnedFloor(root, run).filter((context) => !contexts.includes(context))
   if (missingPinned.length) throw new PreflightError(`the trusted origin/main mirror is a stale subset; missing pinned contexts: ${missingPinned.join(', ')}`)
   return contexts
 }
