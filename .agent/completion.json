@@ -4,11 +4,13 @@
   "outcome": "ready-for-merge",
   "pr": 2651,
   "migration_versions": ["20260909194231"],
-  "contract_ref": "refs/db-contracts/2622/1",
-  "contract_sha256": "9f922e1e8dbfe79709a1fc43f364efd0548616a2008fcb973d20133e6b297ce2",
-  "head_sha": "3ab77257488c0930a878b7351fcefae288979373",
-  "evidence_note": "Implementation head 3ab77257 is based on current PR base b7f14140 and changes only the ColdLion merchandise-group detail identity plus its structural tests. It refuses null categories, duplicate five-part identities, unexpected prior keys, and incoming dependent foreign keys; preserves the existing header relationship; and proves category/type separation, exact uniqueness, required category, and header integrity. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2651.",
+  "contract_ref": "refs/db-contracts/2622/2",
+  "contract_sha256": "9d40e5928a6323f0c6647dd93adb8c81089d2f2414e3812d2e5e1cb39ba5417b",
+  "head_sha": "fd5bd41123f7d7dbedc80338073b430c3a0ea831",
+  "evidence_note": "Current-main implementation head fd5bd411 includes the completed #2580 main tip e4725924 and changes only the ColdLion merchandise-group detail identity plus its structural tests. It refuses null categories, duplicate five-part identities, unexpected prior keys, and incoming dependent foreign keys; preserves the existing header relationship; and proves category/type separation, exact uniqueness, required category, and header integrity. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2651.",
   "files_changed": [
+    ".agent/contract.json",
+    ".agent/completion.json",
     "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
     "supabase/tests/coldlion_master_landing_contracts.sql",
     "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql"
@@ -26,7 +28,7 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "Status OK; all 44 existing sidecars validated and this migration contains no dynamic verification marker requiring a new sidecar."
+      "evidence": "Status OK; all 45 existing sidecars validated and this migration contains no dynamic verification marker requiring a new sidecar."
     },
     {
       "command": "node scripts/check-migration-pr-lease.mjs",

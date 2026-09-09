@@ -12,7 +12,7 @@
     "No dependent foreign key may rely on the obsolete four-column primary key.",
     "Existing rows must remain intact; null categories or duplicate five-part identities make the migration fail closed."
   ],
-  "base_sha": "b7f141400a5ccab99527b96ab41ab53421bdf88b",
+  "base_sha": "e472592446826f1410449b23ab14adada69b514f",
   "branch": "codex/issue-2622-merch-group-detail-key",
   "db_reads": [],
   "db_writes": [
@@ -26,7 +26,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 1,
+  "generation": 2,
   "goal": "Preserve all ColdLion merchandise-group detail rows by making category part of their durable identity without weakening the header relationship.",
   "prohibited_actions": [
     "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
