@@ -11,6 +11,7 @@
   "head_sha": "77ef444d29ea7977bd988b56101cc007665a19cd",
   "evidence_note": "The atomically reissued claim now has a fresh migration whose normalized content and Git blob exactly match the stranded original. The original version is permanently refused by the production guard and classified as retired by ledger drift reporting. No preview, production, reviewer, or merge action was performed.",
   "files_changed": [
+    ".agent/completion.json",
     ".agent/contract.json",
     "scripts/check-migration-ledger-drift.test.mjs",
     "scripts/production_migration_guard.py",
