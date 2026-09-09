@@ -8,8 +8,8 @@
   ],
   "contract_ref": "refs/db-contracts/2580/2",
   "contract_sha256": "4a61da14dc9ccc92e4f1732d2782c662d14d1f010c318572fa9df8b457127108",
-  "head_sha": "8716e03abc04c82bbffe7cd1bc149cee45304675",
-  "evidence_note": "The main-refreshed implementation head preserves the migration and hash-bound sidecar bytes and individually pins that sidecar in the preview producer set. No preview or promotion was performed.",
+  "head_sha": "2f9966368de6c36b92061f944666bdf1462ab403",
+  "evidence_note": "The main-refreshed implementation head preserves the migration and hash-bound sidecar bytes and individually pins that sidecar in the preview producer set. This evidence-only commit refreshes both required evidence files. No preview or promotion was performed.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
