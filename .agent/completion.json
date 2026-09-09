@@ -6,9 +6,11 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2318/3",
   "contract_sha256": "d9b72330ca85ff03b8773de03f06431a2751f5c3a654af13edb3c916a18d66d7",
-  "head_sha": "a6fd30fafae8996fd4bbc6b56d0f475105ea8c48",
-  "evidence_note": "Generation 3. Re-points the report at head a6fd30fa, the first update from main (origin/main after PR #2633 merged as e149bd0b). The .agent conflict against main was resolved in favour of this lane's own evidence pair; every non-.agent file is byte-identical to generation 2 at b0381830. Generation 2 added the throughput truth-audit dispositions for the three new source lines matching its `missing` pattern, which failed the Tools Offline Tests lane at generation 1 (run 34367211675). No SQL, no migration, no database access of any kind.",
+  "head_sha": "985dadb73a3d3f8492d6f6b445dd28ec59581283",
+  "evidence_note": "Generation 4. The git-evidence checker compares files_changed against the whole PR diff including .agent/*, so the evidence pair itself is listed. Re-points the report at head a6fd30fa, the first update from main (origin/main after PR #2633 merged as e149bd0b). The .agent conflict against main was resolved in favour of this lane's own evidence pair; every non-.agent file is byte-identical to generation 2 at b0381830. Generation 2 added the throughput truth-audit dispositions for the three new source lines matching its `missing` pattern, which failed the Tools Offline Tests lane at generation 1 (run 34367211675). No SQL, no migration, no database access of any kind.",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/check-orchestrator-marker.mjs",
