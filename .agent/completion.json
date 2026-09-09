@@ -8,7 +8,7 @@
   ],
   "contract_ref": "refs/db-contracts/2493/1",
   "contract_sha256": "55661be14b88cad817ec6f62e3b51ca5463863ffa1386e059b6a7344e92ec736",
-  "head_sha": "e5834ff07d8b6736725ae15cd498caee7232915d",
+  "head_sha": "acfcaf37f113ece24829b4965bf45611e0e016d1",
   "files_changed": [
     "scripts/production-verification-sidecars/20260907154543.json",
     "scripts/production_business_risk_gate.py",
@@ -34,12 +34,12 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors after normal integration of current main 8d64a75812beec85d2f8b2c78669e5e17635359d."
+      "evidence": "No whitespace errors after normal integration of current main fe5fa74db889652768029116e636f8cbe69b955e."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs",
       "exit_code": 0,
-      "evidence": "Hash-bound sidecar validation succeeded: status OK, 43 sidecars."
+      "evidence": "Hash-bound sidecar validation succeeded: status OK, 45 sidecars."
     },
     {
       "command": "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
