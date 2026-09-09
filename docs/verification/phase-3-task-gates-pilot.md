@@ -2,13 +2,12 @@
 
 ## Scope and routing measurement
 
-Measured from `origin/main` at `71fe95d64a7e` on 2026-09-09. The router was
-not trimmed: this pilot adds only the local declaration, its focused fixture,
-and this evidence. Before and after therefore remain equal.
+Measured from `origin/main` at `71fe95d64a7e` on 2026-09-09. No existing router
+text was trimmed; the one router change is a short route to the installed gate.
 
 | Surface | Before | After | Headings | SHA-256 |
 |---|---:|---:|---:|---|
-| `AGENTS.md` | 123,361 bytes / 1,618 lines | 123,361 bytes / 1,618 lines | 61 | `ab8ceed1b6bb32ddbcc6e5ead542c8ef2cb0b8c114357a2dcefa194dc974413d` |
+| `AGENTS.md` | 123,361 bytes / 1,618 lines | 123,683 bytes / 1,625 lines | 62 | before `ab8ceed1b6bb32ddbcc6e5ead542c8ef2cb0b8c114357a2dcefa194dc974413d`; after `d0c075c9f3347b05652f3658821e45e38e29dc4d56908d161297feb8f9340917` |
 | `CLAUDE.md` | absent | absent | 0 | n/a |
 | `HANDOFF.md` | 3,256 bytes / 70 lines | 3,256 bytes / 70 lines | 7 | `d2cf8d4a2813d904af59300ef518e8b19627fb3bfd12b68cbf8f466ec161f348` |
 | `README.md` | 8,539 bytes / 135 lines | 8,539 bytes / 135 lines | 9 | `0440b702bc3cf8de3ed1cd8aa998a714db6b6fe17df94c421a4be5643fc89d90` |
@@ -16,11 +15,12 @@ and this evidence. Before and after therefore remain equal.
 ## No-loss ledger
 
 Every heading in the three existing router surfaces is assigned exactly once.
-All are `keep`; hashes and heading counts above prove the files did not change.
+The original headings are `keep`; one `Task declaration` heading is added.
 
 | Surface | Ledger items | Disposition | Reason |
 |---|---:|---|---|
-| `AGENTS.md` | all 61 headings | keep | Complete shared-db operating, safety, ownership, and delivery contract |
+| `AGENTS.md` original headings | all 61 headings | keep | Complete shared-db operating, safety, ownership, and delivery contract |
+| `AGENTS.md` Task declaration | 1 heading | add | Routes future sessions through the installed gate before protected actions |
 | `HANDOFF.md` | all 7 headings | keep | Active-work routing and concurrency-safe continuation contract |
 | `README.md` | all 9 headings | keep | Public purpose, workflow, setup, and usage routes |
 | `CLAUDE.md` | no file | not applicable | No surface exists to migrate or remove |

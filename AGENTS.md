@@ -8,6 +8,13 @@
 
 # AGENTS.md — cross-app coordination playbook
 
+## Task declaration
+
+Before starting work, run `ai-task-gates start --class <class>`. The command
+rechecks the real change set before review, waiting, shipping, or deployment;
+if scope reaches a protected class, redeclare at that class and satisfy its
+proofs because acknowledgement or owner-request flags cannot bypass it.
+
 ## Companywide business rules
 
 Business logic is organized by business topic, not by application. Before

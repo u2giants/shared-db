@@ -23,6 +23,8 @@ jobs:
     steps:
       - name: Check out shared-db
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Check out accepted task-gate engine
         uses: actions/checkout@v4
@@ -30,6 +32,7 @@ jobs:
           repository: popcre/ai-devops
           ref: 4d83f9a5dc400f87408663eddac872b9074c18ed
           path: .task-gates-toolkit
+          persist-credentials: false
 
       - name: Install task-gate commands on the runner path
         shell: bash
