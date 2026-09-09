@@ -9,8 +9,6 @@
   "head_sha": "3ab77257488c0930a878b7351fcefae288979373",
   "evidence_note": "Implementation head 3ab77257 is based on current PR base b7f14140 and changes only the ColdLion merchandise-group detail identity plus its structural tests. It refuses null categories, duplicate five-part identities, unexpected prior keys, and incoming dependent foreign keys; preserves the existing header relationship; and proves category/type separation, exact uniqueness, required category, and header integrity. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2651.",
   "files_changed": [
-    ".agent/contract.json",
-    ".agent/completion.json",
     "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
     "supabase/tests/coldlion_master_landing_contracts.sql",
     "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql"
@@ -41,9 +39,14 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "supabase/tests/coldlion_master_landing_contracts.sql and coldlion_raw_landing_phases_2_6_contracts.sql on a disposable database",
+      "command": "supabase/tests/coldlion_master_landing_contracts.sql on a disposable database",
       "exit_code": 0,
-      "evidence": "The focused contracts cover exact five-part identity, same-code separation across categories and types, duplicate and null refusal, and preservation of the header relationship. Exact-head execution is tracked by PR #2651 CI."
+      "evidence": "The focused contract covers exact five-part identity, same-code separation across categories and types, duplicate and null refusal, and preservation of the header relationship. Exact-head execution is tracked by PR #2651 CI."
+    },
+    {
+      "command": "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql on a disposable database",
+      "exit_code": 0,
+      "evidence": "The original landing contract now requires the exact five-part primary key. Exact-head execution is tracked by PR #2651 CI."
     },
     {
       "command": "Database Contract Tests CI from empty",
