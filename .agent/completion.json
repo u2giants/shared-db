@@ -6,8 +6,8 @@
   "migration_versions": ["20260909202801"],
   "contract_ref": "refs/db-contracts/2439/4",
   "contract_sha256": "46dc3616a8a0e543f97619e2d0162622ca311867866ca9dedae628cf94dfbab0",
-  "head_sha": "77ef444d29ea7977bd988b56101cc007665a19cd",
-  "evidence_note": "The atomically reissued claim now has a fresh migration whose normalized content and Git blob exactly match the stranded original. The original version is permanently refused by the production guard and classified as retired by ledger drift reporting. No preview, production, reviewer, or merge action was performed.",
+  "head_sha": "d48b82b2d2ac3324090ac49b8c7205560b29481a",
+  "evidence_note": "The atomically reissued claim has a fresh migration whose normalized content and Git blob exactly match the stranded original. Current main dceb584b was merged after an external landing invalidated the earlier review; only the single-slot .agent pair conflicted and was resolved to this PR's evidence, while all substantive main changes were retained. Fresh local proof passed at that merge commit. The original version remains permanently refused and classified retired. No preview, production, reviewer, or PR merge action was performed.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -35,7 +35,7 @@
     {"command": "node --test scripts/check-migration-ledger-drift.test.mjs", "exit_code": 0, "evidence": "30 tests passed; the stranded original is classified retired with the exact successor and issue/claim reason."},
     {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL guards passed; the fresh version sorts after current main and introduces no forbidden verification read."},
     {"command": "node scripts/check-migration-pr-lease.mjs", "exit_code": 0, "evidence": "Claim #2443 and reserved version 20260909202801 verified for PR #2654."},
-    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "Truth audit passed across 269 call sites."},
+    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "Truth audit passed across 272 call sites after integrating current main."},
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
     {"command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Completion report reconciles with immutable contract refs/db-contracts/2439/4."}
   ],
