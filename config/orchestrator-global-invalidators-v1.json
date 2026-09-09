@@ -13,6 +13,7 @@
     "scripts/check-pr-object-collisions.mjs",
     "scripts/db-coordination-events.mjs",
     "scripts/gh-read.mjs",
+    "scripts/historical-migration-restorations.mjs",
     "scripts/lib/documents-only-change.mjs",
     "scripts/lib/exclusive-lease.mjs",
     "scripts/lib/github-transport.mjs",

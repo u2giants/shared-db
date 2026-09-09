@@ -126,8 +126,19 @@ jobs:
         run: bash scripts/check-sql.sh
       - name: Validate hash-bound production verification sidecars
         run: node scripts/check-production-verification-sidecars.mjs --base "origin/${GITHUB_BASE_REF:-main}"
+      # ISSUE #2037. Nothing mechanically refused a push that REWROTE a migration
+      # already applied to preview, so 20260831234750 was edited eight minutes
+      # after its own preview rehearsal and merged. The guard reads the ledgers
+      # ONLY when the diff actually touches an existing migration file, so an
+      # ordinary pull request makes no network call here at all; when it does
+      # look, an unreadable ledger is exit 2 and fails the job.
+      - name: Refuse edits to migrations that were already applied
+        env:
+          # Read-only use: one constant SELECT, exactly as the drift check runs.
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+        run: node scripts/check-applied-migration-edit.mjs --base "origin/${GITHUB_BASE_REF:-main}"
       - name: Test SQL migration guards
-        run: node --test scripts/check-sql.test.mjs
+        run: node --test scripts/check-sql.test.mjs scripts/check-applied-migration-edit.test.mjs
       # The rehearsal runner opens a database connection, so its refusals are a
       # gate only if CI runs them (issue #1356, external review grok-4.6).
       - name: Test preview rehearsal transaction safety

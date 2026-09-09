@@ -1,0 +1,116 @@
+# Manual ColdLion history backfill.
+#
+# Walks the fixed 7-day grid oldest-first from the given start date, loading every
+# window that the ledger does not already prove loaded. It is resumable BY
+# EVIDENCE: if a run is interrupted, cancelled or times out, the next run
+# continues from where the page evidence stops, with no note to keep and no
+# window to re-do by hand.
+#
+# Manual dispatch only. A backfill is a decision about how far back to reach, and
+# it is not something a schedule or a merge should start.
+#
+# The per-run limit exists so a multi-year backfill is a series of bounded runs
+# rather than one run racing a job timeout. Re-dispatch until "outstanding" is 0.
+
+name: ColdLion History Backfill
+
+on:
+  workflow_dispatch:
+    inputs:
+      from:
+        description: 'Earliest date to reach back to (YYYY-MM-DD)'
+        required: true
+      to:
+        description: 'Latest date (YYYY-MM-DD). Clamped to the newest CLOSED window.'
+        required: false
+      limit:
+        description: 'Maximum window/scope pairs to load in this run'
+        required: false
+        default: '40'
+      endpoint:
+        description: 'Restrict to one endpoint'
+        type: choice
+        required: false
+        default: 'all'
+        options: ['all', '/orderHistory', '/prodHistory']
+      stage:
+        description: 'Restrict to one production stage'
+        type: choice
+        required: false
+        default: 'all'
+        options: ['all', 'ISS', 'INTRAN', 'REC']
+      dry_run:
+        description: 'Report outstanding work without fetching or writing'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+# Shares its group with the scheduled sync: both load windows into the same
+# tables, and a backfill running under a sync is a race with no upside.
+concurrency:
+  group: coldlion-landing-sync
+  cancel-in-progress: false
+
+jobs:
+  backfill:
+    name: Backfill history windows
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Prove psql is present
+        run: psql --version
+
+      - name: Run the offline contract tests before touching anything
+        run: node --test tools/coldlion-landing-history.test.mjs
+
+      - name: Check the inputs before spending an hour on them
+        env:
+          FROM: ${{ github.event.inputs.from }}
+          TO: ${{ github.event.inputs.to }}
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "${DATABASE_URL:-}" ] || { echo "::error::SUPABASE_DB_URL_PRODUCTION is not set."; exit 1; }
+          [ -n "${COLDLION_API_KEY:-}" ] || { echo "::error::COLDLION_API_KEY is not set."; exit 1; }
+          printf '%s' "$FROM" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+            || { echo "::error::from must be YYYY-MM-DD."; exit 1; }
+          if [ -n "${TO:-}" ]; then
+            printf '%s' "$TO" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' \
+              || { echo "::error::to must be YYYY-MM-DD."; exit 1; }
+          fi
+          # The grid is anchored at 2019-01-01 and the database refuses anything before it.
+          if [[ "$FROM" < "2019-01-01" ]]; then
+            echo "::error::from is before the 2019-01-01 grid anchor."; exit 1
+          fi
+        shell: bash
+
+      - name: Backfill
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai
+          COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
+          FROM: ${{ github.event.inputs.from }}
+          TO: ${{ github.event.inputs.to }}
+          LIMIT: ${{ github.event.inputs.limit }}
+          ENDPOINT: ${{ github.event.inputs.endpoint }}
+          STAGE: ${{ github.event.inputs.stage }}
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -euo pipefail
+          ARGS=(--from "$FROM" --limit "${LIMIT:-40}")
+          if [ -n "${TO:-}" ]; then ARGS+=(--to "$TO"); fi
+          if [ "${ENDPOINT:-all}" != "all" ]; then ARGS+=(--endpoint "$ENDPOINT"); fi
+          if [ "${STAGE:-all}" != "all" ]; then ARGS+=(--stage "$STAGE"); fi
+          if [ "${DRY_RUN:-false}" = "true" ]; then ARGS+=(--dry-run); fi
+          node tools/coldlion-landing/backfill-history.mjs "${ARGS[@]}"
