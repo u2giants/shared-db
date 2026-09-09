@@ -1,6 +1,6 @@
 {
   "schema_version" : 1,
-  "work_issue": 2543,
+  "work_issue" : 2543,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "generation": 1,
