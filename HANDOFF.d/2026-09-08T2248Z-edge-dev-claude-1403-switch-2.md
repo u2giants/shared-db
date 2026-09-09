@@ -76,7 +76,22 @@ that is the one open item this file exists for — see section 6.
 ## 6. What comes next — Switch 2, exactly
 
 **Goal:** retire the `objects:` alias in migration-author claim blocks so
-`db_objects:` is the only accepted spelling.
+`writes:` / `reads:` are the only accepted spellings. (Corrected 2026-09-08T23:55Z:
+an earlier draft of this file said `db_objects:`, which is not a key the parser
+knows. The parser carries three list keys — `objects:`, `writes:`, `reads:` — and
+already refuses a block that mixes the legacy list with the new pair.)
+
+**Gate status, re-measured 2026-09-08T23:55Z.** The gate in issue #1403 has three
+conditions, and two are now met:
+
+- zero open **work issues** using `objects:` — was 29 on 2026-08-23, now **0** across 107 open issues. MET.
+- at least 14 days of docs and examples using `writes:`/`reads:` — landed 2026-08-23 in `docs/agents/section-4-anti-collision-rules.md` (`a1d6bbb0`), so **16 days**. MET.
+- zero open **claims** using `objects:` — still **1**, claim #2418. NOT MET.
+
+The lease clock on #2418 is not the gate. Expiry is an audit warning and never a
+release; the claim stays authoritative until released explicitly. Switch 2
+unblocks when **PR #2425 merges and that claim is released** — as of
+2026-09-08T23:53Z #2425 is open and CONFLICTING, and belongs to another session.
 
 **The gate, and it is a real one:** the alias is still read as a WRITE by the
 claim parser. Claim **#2418** (`CLAIM: #2403 create empty hts_rag_split schema
@@ -97,14 +112,13 @@ number, it is still blocked — say so and stop; do not "just update" the block.
 
 **Then the work itself:** remove the `objects:` branch from the claim-block
 parser in `scripts/manage-migration-author-lanes.mjs`, make an `objects:` line
-a hard refusal that names `db_objects:` as the fix, update the tests, and update
+a hard refusal that names `writes:`/`reads:` as the fix, update the tests, and update
 whatever documentation still shows the old spelling (`AGENTS.md` and the
 orchestrator skill both do). Normal governed route: contract + completion pair
 as the LAST commit, governed review, guarded merge.
 
-**As of 2026-09-08T22:48Z the lease on #2418 runs to 2026-09-09T02:53:18Z**, so
-the earliest realistic window is after that, and only if the claim is actually
-released rather than renewed.
+**Do not treat the lease expiry (2026-09-09T02:53:18Z) as the unblocking event.**
+It is an audit warning only. Watch PR #2425 instead.
 
 ## 7. Blocked on
 
