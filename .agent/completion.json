@@ -6,8 +6,8 @@
   "migration_versions": [
     "20260909084253"
   ],
-  "contract_ref": "refs/db-contracts/2580/1",
-  "contract_sha256": "6e15b37508e1a006b234190e377bb74b1c0d04e55e013304e7b5252a4a736110",
+  "contract_ref": "refs/db-contracts/2580/2",
+  "contract_sha256": "4a61da14dc9ccc92e4f1732d2782c662d14d1f010c318572fa9df8b457127108",
   "head_sha": "f5826e5255f2b56b6c2dfecb9f7c60b0f2229105",
   "evidence_note": "The repair head individually pins the existing hash-bound verification sidecar in the preview producer set. The migration SQL and sidecar bytes are unchanged. No preview or promotion was performed.",
   "files_changed": [
