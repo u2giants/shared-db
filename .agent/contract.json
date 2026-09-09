@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2318,
-  "generation": 1,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Close the gap that let unauthorized orchestrator marker #2312 pass every check on 2026-09-04: nothing anywhere asked on what grounds the orchestrator role had been taken. Add an `authorization:` field to the orchestrator routing block with exactly two admissible grounds (owner authorization in the current chat, or an owner-authorized handover naming the marker actually being continued), refuse by name each inference that produced #2312, fail closed on unrecognised free text, and wire it into check-orchestrator-marker.mjs so a marker without admissible grounds resolves as INVALID rather than routable. Document it in AGENTS.md.",
@@ -21,12 +21,14 @@
     "`authorization` is deliberately NOT in REQUIRED_FIELDS. Adding it there would fail every marker opened before admission existed, including live marker #2629 which opened 2026-09-09, after CONTRACT_EFFECTIVE_DATE 2026-08-27 grandfathers. validateAdmission enforces it under its own later cutoff, AUTHORIZATION_EFFECTIVE_DATE 2026-09-10.",
     "Grandfathering covers a MISSING field only. A marker opened before the cutoff that writes a refused ground still fails, and an unreadable creation date is treated as in force rather than grandfathered. Every ambiguity resolves away from the role.",
     "An unauthorized marker resolves as INVALID, not NONE. Per the AGENTS.md exit table those are opposite answers: NONE means nobody is running, INVALID means somebody may be running and unreachable. Neither is permission to dispatch, and neither is permission to take the role. Path A either way.",
-    "The routing block renderer emits the field blank on a new marker rather than omitting it, and blank is refused -- which is the intended outcome for a session with no grounds."
+    "The routing block renderer emits the field blank on a new marker rather than omitting it, and blank is refused -- which is the intended outcome for a session with no grounds.",
+    "The throughput truth-audit guard binds every source line matching its `missing`/`not applied` pattern to a reviewed disposition. Three new lines match it -- two refusal/warning strings about a missing `authorization:` field and one source comment -- and all three are recorded as `excluded`: they are about a routing-block field, not about a database object being missing or unapplied, which is the audit's subject."
   ],
   "required_checks": [
     "node --test scripts/lib/orchestrator-admission.test.mjs",
     "node --test scripts/check-orchestrator-marker.test.mjs",
     "node --test scripts/lib/orchestrator-routing.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
     "git diff --check"
   ],
   "prohibited_actions": [
@@ -43,7 +45,8 @@
     "scripts/lib/orchestrator-routing.mjs",
     "scripts/check-orchestrator-marker.mjs",
     "scripts/check-orchestrator-marker.test.mjs",
-    "AGENTS.md"
+    "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "allowed_paths": [
     "scripts/lib/orchestrator-admission.mjs",
@@ -53,6 +56,7 @@
     "scripts/check-orchestrator-marker.test.mjs",
     "AGENTS.md",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ]
 }

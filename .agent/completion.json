@@ -4,12 +4,13 @@
   "outcome": "ready-for-merge",
   "pr": 2636,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2318/1",
-  "contract_sha256": "514d374378bac46f0c2fa3eac00dc4d204b05b6cf0a3afbd3cc80f26df8055c7",
-  "head_sha": "dd57b1dd94bd1a523891d335de0901fad68a4a0c",
-  "evidence_note": "Generation 1. Branch is level with origin/main 71fe95d6 (the merge from main reported Already up to date). No SQL, no migration, no database access of any kind. The change is the marker guard, its two libraries, their tests, and AGENTS.md.",
+  "contract_ref": "refs/db-contracts/2318/2",
+  "contract_sha256": "f795cafae3ae4bd2441e36c2cbcb28b411e2cb7508f89e5a4fe2489f750f4139",
+  "head_sha": "07ba358e8bfc59c1370d382e4deacaa4af9056ea",
+  "evidence_note": "Generation 2. Branch is level with origin/main 71fe95d6. No SQL, no migration, no database access of any kind. Generation 2 adds the throughput truth-audit dispositions for the three new source lines that match its `missing` pattern, which failed the Tools Offline Tests lane at generation 1 (run 34367211675, 'found 272, recorded 269').",
   "files_changed": [
     "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/check-orchestrator-marker.mjs",
     "scripts/check-orchestrator-marker.test.mjs",
     "scripts/lib/orchestrator-admission.mjs",
@@ -43,13 +44,19 @@
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors. Only CRLF advisory warnings from the repository's line-ending configuration."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "'truth audit OK: call_sites=272'. Three new call sites were reviewed and recorded as `excluded`, each with its own reason: two are refusal/warning strings about a missing `authorization:` routing-block field and one is a source comment about emitting that field blank. None asserts anything about a database object being missing or not applied, which is the audit's subject. The recorded count and semantic digest were regenerated from the discovered inventory, not hand-edited."
     }
   ],
   "assumptions_resolved": [
     "Admission cannot prevent a marker being opened, and the module header says so in its own words. What it does is make the grounds a required, typed, published field. The value is verified by the tests, not asserted: each of the four inferences that produced #2312 is proven to fail the guard.",
     "authorization is NOT in REQUIRED_FIELDS. Verified by the test that the live pre-admission marker still routes with a warning: adding the field to REQUIRED_FIELDS would have failed live marker #2629, which opened 2026-09-09 and is therefore NOT grandfathered by CONTRACT_EFFECTIVE_DATE 2026-08-27. The separate cutoff AUTHORIZATION_EFFECTIVE_DATE 2026-09-10 is what makes the change safe to land while an orchestrator is live.",
     "Grandfathering covers a missing field only. Verified by a dedicated test: a pre-cutoff marker declaring `db-work` still fails, and an unreadable createdAt is treated as in force.",
-    "An unauthorized marker is INVALID, not NONE. Verified by resolving the target from the evaluated markers and asserting the refusing state, so the two opposite answers in the AGENTS.md exit table are not collapsed."
+    "An unauthorized marker is INVALID, not NONE. Verified by resolving the target from the evaluated markers and asserting the refusing state, so the two opposite answers in the AGENTS.md exit table are not collapsed.",
+    "The truth-audit dispositions are `excluded`, not `enriched`: these lines are prose about orchestrator admission and carry no throughput or verification claim. Verified by re-running the guard to a clean pass at 272 sites."
   ],
   "stop_conditions_hit": []
 }
