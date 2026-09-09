@@ -1,93 +1,34 @@
 {
   "schema_version": 1,
-  "work_issue": 2403,
+  "work_issue": 2624,
   "outcome": "ready-for-merge",
-  "pr": 2425,
-  "migration_versions": [
-    "20260909121403"
-  ],
-  "contract_ref": "refs/db-contracts/2403/5",
-  "contract_sha256": "81e394f5682d8fa403c5232c5a5e874131b8babd181694864476b0747ed01273",
-  "head_sha": "2c432e69edfb367365087c1782ce0e316f63204b",
+  "pr": 2639,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2624/2",
+  "contract_sha256": "d9dc11b51769a5f17cfb629e498142c05b709906552b06bd41fd8ab8f6e5fb0b",
+  "head_sha": "108a5e026de48681268285b4836223aa39876d49",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql"
+    "scripts/reap-merged-worktrees.mjs",
+    "scripts/reap-merged-worktrees.test.mjs"
   ],
-  "db_reads": [
-    "table public.hts_rag_determinations",
-    "table public.hts_rag_extraction_jobs",
-    "table public.hts_rag_precedent_rulings",
-    "table public.hts_rag_precedents",
-    "table public.hts_rag_product_examples",
-    "table public.hts_rag_product_family_allowlist",
-    "table public.hts_rag_provider_responses",
-    "table public.hts_rag_review_events",
-    "table public.hts_rag_rulings"
-  ],
-  "db_writes": [
-    "schema hts_rag_split",
-    "table hts_rag_split.hts_rag_determinations",
-    "table hts_rag_split.hts_rag_extraction_jobs",
-    "table hts_rag_split.hts_rag_precedent_rulings",
-    "table hts_rag_split.hts_rag_precedents",
-    "table hts_rag_split.hts_rag_product_examples",
-    "table hts_rag_split.hts_rag_product_family_allowlist",
-    "table hts_rag_split.hts_rag_provider_responses",
-    "table hts_rag_split.hts_rag_review_events",
-    "table hts_rag_split.hts_rag_rulings",
-    "index hts_rag_split.hts_rag_determinations_comparison_category_idx",
-    "index hts_rag_split.hts_rag_determinations_comparison_review_idx",
-    "index hts_rag_split.hts_rag_determinations_family_created_idx",
-    "index hts_rag_split.hts_rag_extraction_jobs_idempotency_idx",
-    "index hts_rag_split.hts_rag_extraction_jobs_pending_claim_idx",
-    "index hts_rag_split.hts_rag_precedent_rulings_relationship_idx",
-    "index hts_rag_split.hts_rag_precedent_rulings_ruling_idx",
-    "index hts_rag_split.hts_rag_precedents_extraction_idempotency_idx",
-    "index hts_rag_split.hts_rag_precedents_family_review_idx",
-    "index hts_rag_split.hts_rag_product_examples_family_idx",
-    "index hts_rag_split.hts_rag_provider_responses_determination_idx",
-    "index hts_rag_split.hts_rag_review_events_subject_created_idx",
-    "index hts_rag_split.hts_rag_rulings_operationally_revoked_idx",
-    "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node --test scripts/reap-merged-worktrees.test.mjs",
       "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: Guard B confirmed reserved version 20260909121403 sorts after base version 20260909005945; static, expected-count, verification-cost and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: status OK, 44 sidecars checked; version 20260909121403 has no dynamic-execution markers and requires no sidecar."
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d with PR_NUMBER=2425: migration claim #2418 and reserved version 20260909121403 verified."
+      "evidence": "33 tests passed, 0 failed. Real temporary Git repositories prove a clean merged branch with exactly one commit ahead of its upstream is kept, and a clean merged branch with no upstream is kept. All pre-existing cleanup and refusal tests remain green."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: no whitespace errors."
-    },
-    {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
-      "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable server applied the migration and its built-in catalog/emptiness assertions successfully before the guarded pure filename supersession. The SQL blob is unchanged, so this evidence binds to implementation head 6d65afc9."
-    },
-    {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f verify.sql",
-      "exit_code": 0,
-      "evidence": "All nine hts_rag_split tables remained empty while one sentinel row in each of the nine public.hts_rag_* positive-control tables remained unchanged. The SQL blob is unchanged by main integration and guarded filename supersession, so this evidence binds to implementation head 6d65afc9."
+      "evidence": "No whitespace errors in the implementation diff; only advisory line-ending warnings were printed."
     }
   ],
   "assumptions_resolved": [
-    "DesignFlow owner acknowledgement comment 5577130097 confirms shared-db owns the governed migration and exact consolidated non-production target route.",
-    "Guarded supersession evidence permanently preserves versions 20260906040010 and 20260908022407; supersession ref ac5f3475dff31b9f331b18a95212bf9344fac7b6 reserves current version 20260909121403.",
-    "Original and superseded migration paths resolve to identical Git blob 3f2e7f44a6dfb30fc879449c684f260863c5fc10; only the filename changed.",
-    "Origin/main fe5fa74db889652768029116e636f8cbe69b955e was integrated at implementation head 2c432e69edfb367365087c1782ce0e316f63204b; the only conflicts were the single-slot .agent/contract.json and .agent/completion.json evidence pair, which must describe THIS pull request, so this branch's evidence was retained and refreshed. The migration SQL blob remains unchanged from its earlier implementation. No preview, production apply, claim release, issue closure, or inherited cleanup occurred."
+    "The immutable contract records that implementation commit 108a5e026de48681268285b4836223aa39876d49 was created locally before publication; the remote branch was verified absent until contract generation 1 was published, and generation 2 changed only the circular CI requirement before this evidence pair.",
+    "The integration fixture creates one clean local commit after pushing its upstream, measures exactly one commit ahead, and the planner returns KEEP with that count in the reason.",
+    "The second integration fixture creates a clean local branch with no upstream, measures that state explicitly, and the planner returns KEEP with a no-upstream reason."
   ],
   "stop_conditions_hit": []
 }
