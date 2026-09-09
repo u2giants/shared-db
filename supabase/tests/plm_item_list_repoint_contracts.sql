@@ -6,6 +6,7 @@ do $$
 declare
   v_run uuid;
   v_item uuid;
+  v_duplicate uuid;
   v_legacy uuid;
   v_licensor uuid;
   v_property uuid;
@@ -30,9 +31,11 @@ begin
   end if;
 
   select pg_get_viewdef('api.plm_item_list'::regclass, true) into v_viewdef;
-  if v_viewdef not like '%plm.item i%'
+  if v_viewdef not like '%plm.item item%'
      or v_viewdef not like '%core.licensor%'
-     or v_viewdef not like '%core.property%' then
+     or v_viewdef not like '%core.property%'
+     or lower(v_viewdef) not like '%row_number() over%'
+     or v_viewdef not like '%legacy_rank%' then
     raise exception '#2466: api.plm_item_list does not carry its canonical item/attribution joins';
   end if;
 
@@ -117,6 +120,21 @@ begin
   end if;
 
   insert into plm.item (item_number, description, source_system, source_id, raw)
+  values ('ZZ2466ITEM', 'ZZ2466 SAME NUMBER OTHER DIVISION', 'coldlion',
+          'ZZCO|ZZ002|ZZ2466ITEM',
+          '{"companyCode":"ZZCO","divisionCode":"ZZ002","itemNo":"ZZ2466ITEM"}')
+  returning id into v_duplicate;
+  select count(*) into v_count
+  from api.plm_item_list
+  where source_id = 'ZZ2466ITEM'
+    and id in (v_legacy, v_duplicate);
+  if v_count <> 2
+     or (select count(*) from api.plm_item_list where source_id = 'ZZ2466ITEM') <> 2
+     or (select count(distinct id) from api.plm_item_list where source_id = 'ZZ2466ITEM') <> 2 then
+    raise exception '#2466: cross-division item numbers did not retain exactly one legacy UUID and unique row IDs';
+  end if;
+
+  insert into plm.item (item_number, description, source_system, source_id, raw)
   values ('ZZ2466NULL', 'ZZ2466 UNRESOLVED', 'coldlion', 'ZZCO|ZZ001|ZZ2466NULL',
           '{"companyCode":"ZZCO","divisionCode":"ZZ001","itemNo":"ZZ2466NULL"}')
   returning id into v_item;
@@ -140,8 +158,8 @@ begin
   execute 'set local role authenticated';
   select count(*) into v_count from api.plm_item_list where source_id in ('ZZ2466ITEM','ZZ2466NULL');
   execute 'set local role none';
-  if v_count <> 2 then
-    raise exception '#2466: authenticated serving-view read returned % fixture rows, expected 2', v_count;
+  if v_count <> 3 then
+    raise exception '#2466: authenticated serving-view read returned % fixture rows, expected 3', v_count;
   end if;
 
   raise notice '#2466 PASSED: 21 columns, protected authenticated serving, legacy identity, canonical mappings, direct prepacks, source filter, null attribution and dismissed state.';
