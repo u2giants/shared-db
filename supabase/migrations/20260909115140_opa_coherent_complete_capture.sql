@@ -640,11 +640,12 @@ with latest as (
       -- specific arms ahead of the broader mutable OPA current-snapshot family.
       when c.relname = 'opa_capture' then
         case when l.opa_capture_id is null then null else 1::bigint end
-      when c.relname in ('opa_capture_scope', 'opa_property_character_capture')
-           and l.opa_capture_id is not null then
-        (xpath('/row/cnt/text()', query_to_xml(format(
-          'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
-          c.relname, l.opa_capture_id::text), false, true, '')))[1]::text::bigint
+      when c.relname in ('opa_capture_scope', 'opa_property_character_capture') then
+        case when l.opa_capture_id is null then null else
+          (xpath('/row/cnt/text()', query_to_xml(format(
+            'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
+            c.relname, l.opa_capture_id::text), false, true, '')))[1]::text::bigint
+        end
 
       -- OPA tables are deliberately upserted current state, not retained captures.
       when c.relname like 'opa\_%' then

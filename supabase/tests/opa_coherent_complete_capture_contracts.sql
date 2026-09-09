@@ -24,6 +24,21 @@ declare
   v_result jsonb;
   v_inventory record;
 begin
+  -- Before the first complete root, append-only capture tables must report an
+  -- unknown latest-complete count, never zero or a retained loading/rejected mix.
+  select * into v_inventory from api.source_capture_inventory_exact('opa_capture_scope');
+  if v_inventory.latest_complete_row_count is not null
+     or v_inventory.latest_complete_status is not null
+     or v_inventory.count_basis<>'latest_complete' then
+    raise exception 'A0 FAILED: scope inventory invented first-capture coverage: %',row_to_json(v_inventory);
+  end if;
+  select * into v_inventory from api.source_capture_inventory_exact('opa_property_character_capture');
+  if v_inventory.latest_complete_row_count is not null
+     or v_inventory.latest_complete_status is not null
+     or v_inventory.count_basis<>'latest_complete' then
+    raise exception 'A0 FAILED: relationship inventory invented first-capture coverage: %',row_to_json(v_inventory);
+  end if;
+
   -- Two-scope success plus identical chunk idempotency.
   v_id:=plm.begin_opa_capture('ZZTEST-complete','u2giants/licensor-source-data',repeat('a',40),repeat('b',64),
     '2099-01-01Z',v_scopes,v_totals,'ZZTEST');
