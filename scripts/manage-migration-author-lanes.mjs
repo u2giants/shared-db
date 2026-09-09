@@ -2108,7 +2108,8 @@ export function recordReviewVerdict(options,io=githubIo){
   // formatted output can satisfy it.
   if(!reviewerReadsRepository(assignment.reviewer))throw new LaneError(`reviewer ${assignment.reviewer} runs through a wrapper that has no access to the repository under review -- it never reads the diff, only the text of the brief, so its verdict describes the change as DESCRIBED rather than as WRITTEN. Refusing to record a code-review verdict from it. This is a property of the wrapper: no retry and no re-run can satisfy it. Draw a reviewer that reads the code with the exact command: ${nonReadingReviewerReplacementCommand({issue,pr,headSha,slot},assignment.sequence)}`)
   const activeRef=reviewActiveRef(assignment.reviewer)
-  if(io.readRef(activeRef)!==assignmentSha)throw new LaneError('reviewer does not hold the exact active lease; late or conflicting verdict refused')
+  const activeLeaseSha=io.readRef(activeRef)
+  if(activeLeaseSha!==assignmentSha)throw new LaneError(`reviewer does not hold the exact active lease; late or conflicting verdict refused${reviewActiveLeaseCause(assignment.reviewer,activeLeaseSha,{issue,pr,headSha},io)}`)
   const live=io.getPr(pr)
   if(String(live?.state??'').toLowerCase()!=='open'||String(live?.head?.sha??'').toLowerCase()!==headSha)throw new LaneError('review target is no longer the exact open PR head')
   try{assertFindingsRefForPr(findingsRef,pr)}catch(error){throw new LaneError(error.message)}
@@ -3644,10 +3645,39 @@ function reviewIssueEligible(issue,pr,io){
   return issue?.state==='open'||(issue?.state==='closed'&&pr?.state!=='open'&&reviewTargetEligible(pr,io))
 }
 
+// #2311. These refusals used to name three possible causes at once and leave the
+// caller to guess which one fired; a closed work issue with an open PR read as a
+// head change that had not happened. Report only what the already-fetched issue,
+// PR and requested head prove. Never issue a fresh wire read from an error path:
+// the request budget is fixed and a failing call would replace the real cause.
+function reviewEligibilityCause(request,issue,pr){
+  const parts=[]
+  const issueState=String(issue?.state??'unreadable'),prState=String(pr?.state??'unreadable')
+  if(issueState!=='open'&&prState==='open')parts.push(`work issue #${request.issue} is ${issueState} while PR #${request.pr} is still open -- a reviewer needs an open work issue, or a pull request already merged into main. Reopen issue #${request.issue}, or merge the pull request first. If #${request.issue} is an orchestrator marker rather than the work issue, re-run with the work issue number`)
+  else if(issueState!=='open')parts.push(`work issue #${request.issue} is ${issueState} and PR #${request.pr} (${prState}) is not proven merged into main`)
+  const head=String(pr?.head?.sha??'')
+  if(!head)parts.push(`PR #${request.pr} head could not be read`)
+  else if(request.headSha&&head!==request.headSha)parts.push(`PR #${request.pr} head is now ${head}, not the requested ${request.headSha}`)
+  if(!parts.length)parts.push(`the work issue is open and the head matches, so PR #${request.pr} (${prState}) failed the merge-eligibility check itself`)
+  return ` -- ${parts.join('; ')}`
+}
+
+// #2311. A verdict refused because the reviewer's active lease points elsewhere
+// used to name neither the lease it found nor the fix. Say what the lease holds.
+function reviewActiveLeaseCause(reviewer,activeSha,expected,io){
+  if(!activeSha)return ` -- reviewer ${reviewer} holds no active lease at all, so this verdict has nothing to record against; draw or replace the reviewer before recording a verdict`
+  let held=`a different assignment (${activeSha})`
+  try{
+    const cursor=parseReviewCursor(io.getCommit(activeSha))
+    held=`the assignment for issue #${cursor.issue}, PR #${cursor.pr}, head ${cursor.headSha}`
+  }catch{/* an unreadable lease commit still names the SHA above */}
+  return ` -- reviewer ${reviewer}'s active lease holds ${held}, but this verdict is for issue #${expected.issue}, PR #${expected.pr}, head ${expected.headSha}. Where the issue numbers differ you passed the wrong one: an orchestrator marker is not the work issue. Re-run against the issue the reviewer was actually assigned`
+}
+
 function assertReviewRequestEligible(request,states,io){
   if(!states)return null
   const state=states?.get(`${request.issue}:${request.pr}`),issue=state?.issue??io.getIssue(request.issue),pr=state?.pr??io.getPr(request.pr)
-  if(!reviewIssueEligible(issue,pr,io)||!reviewTargetEligible(pr,io)||pr?.head?.sha!==request.headSha)throw new LaneError('review assignment issue, PR head, or merge eligibility changed after mutex acquisition')
+  if(!reviewIssueEligible(issue,pr,io)||!reviewTargetEligible(pr,io)||pr?.head?.sha!==request.headSha)throw new LaneError(`review assignment issue, PR head, or merge eligibility changed after mutex acquisition${reviewEligibilityCause(request,issue,pr)}`)
   return state
 }
 
@@ -3887,7 +3917,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
         const freshStates=io.readReviewStates([{issue:request.issue,pr:request.pr,headSha:request.headSha},...(selectedStale?[selectedStale.assignment]:[])])
         const fresh=freshStates?.get(`${request.issue}:${request.pr}`)
         const freshVerdict=hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true,slot:request.slot})
-        if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||freshVerdict)throw new LaneError('review assignment issue, PR head, or verdict changed after mutex acquisition')
+        if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||freshVerdict)throw new LaneError(`review assignment issue, PR head, or verdict changed after mutex acquisition${freshVerdict?` -- a verdict for issue #${request.issue}, PR #${request.pr}, head ${request.headSha} already exists`:reviewEligibilityCause(request,fresh?.issue,fresh?.pr)}`)
         if(selectedStale){
           const revived=freshStates?.get(`${selectedStale.assignment.issue}:${selectedStale.assignment.pr}`)
           const verdict=hasVerdictForHead(selectedStale.assignment.issue,selectedStale.assignment.pr,selectedStale.assignment.headSha,io,leaseVerdictOptions(selectedStale.assignment,{fresh:true}))

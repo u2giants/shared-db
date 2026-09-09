@@ -1,54 +1,49 @@
 {
   "schema_version": 1,
-  "work_issue": 2635,
-  "generation": 1,
+  "work_issue": 2311,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Pilot the Issue 335 Phase 3 task-gate consumer contract in shared-db with protected structure paths, an operative rulebook route, CI enforcement, no-loss evidence, and a no-state rollback rehearsal.",
+  "goal": "Make the two lane-script refusals named in issue #2311 state the condition they actually failed on. A closed work issue with an open pull request was reported as a head change that had not happened, and a verdict recorded against an orchestrator-marker number was reported as a lease the reviewer did in fact hold. Append a specific cause to each, keeping the existing message prefixes so prior assertions and operator runbooks still match, and issue no fresh wire read from any error path.",
   "base_sha": "71fe95d64a7e6ff1e4d822145271853a31d82b2d",
-  "dispatcher": "Albert Hazan via the current Codex Issue 335 continuation",
-  "worker": "Codex root task 01a08610-e776-7ac2-9f76-d0e37782e6d2",
-  "branch": "codex/issue-335-phase3-task-gates-01a086",
-  "worktree": "C:/repos/shared-db-worktrees/issue-335-phase3-task-gates-01a086",
+  "dispatcher": "albert via claude session, repo-maintenance route (outside the structure/schema orchestrator, AGENTS.md 0.0-C)",
+  "worker": "claude repo-maintenance session working the five oldest unblocked non-orchestrator issues",
+  "branch": "claude/issue-2311-refusal-causes",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/cleanup-worktree-f356f1",
   "allowed_paths": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "No database read or write, migration author claim, preview apply, or production promotion",
-    "No direct push to main, required-check weakening, or merge before exact-head independent review",
-    "No change outside the seven named files"
+    "No database change of any kind: no migration, no schema edit, no preview apply, no production promotion",
+    "No change to any refusal CONDITION; only the text each refusal reports may change",
+    "No fresh GitHub wire read from an error path, which would spend the fixed 25-request review budget and could replace the real cause with its own",
+    "No weakening or deletion of an existing test or guard",
+    "No edit outside allowed_paths"
   ],
   "required_checks": [
-    "bash scripts/tests/test-task-gates.sh",
-    "git diff --check origin/main...HEAD",
-    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
+    "git diff --check"
   ],
   "assumptions": [
-    "popcre/ai-devops is the public source of truth for the central gate engine and commit 4d83f9a5 is immutable",
-    "The original 77 router headings remain reachable; the only router addition is the task declaration",
-    "Albert authorized this cross-repository pilot in the current ai-devops Issue 335 continuation; this immutable contract was added after exact-head review detected inherited metadata and before opening the pull request"
+    "scripts/manage-migration-author-lanes.mjs is a PROTECTED_SOURCE_PATH; no other open pull request touched it when this branch was cut, verified against all eight open PRs",
+    "The two named traps are the ones in issue #2311; both string sites were located on origin/main before editing and neither had been repaired",
+    "Appending to the message keeps the prefix intact, so the seven existing tests matching /changed after mutex acquisition/ remain valid coverage rather than being rewritten to fit",
+    "reviewTargetEligible costs wire requests through requireReviewWireCapacity, so the cause helpers deliberately re-inspect only already-fetched objects instead of re-asking",
+    "This is repo-maintenance under AGENTS.md 0.0-C, owned by a separately started repository session, not routed to the structure/schema orchestrator"
   ],
   "stop_conditions": [
-    "Any scope expands into a database, migration, application-row, infrastructure, or production mutation",
-    "The central engine commit is unavailable or the focused fixture fails",
-    "origin/main moves so the recorded base is no longer the pull request merge base",
-    "A required check or exact-head independent reviewer refuses the final source"
+    "Any existing test in scripts/manage-migration-author-lanes.test.mjs fails",
+    "Another open pull request begins touching scripts/manage-migration-author-lanes.mjs",
+    "A required refusal condition, not just its wording, would have to change to satisfy the issue"
   ]
 }
