@@ -1,75 +1,52 @@
 {
-
-  "schema_version": 1,
-  "generation": 4,
-  "work_issue": 2439,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Reissue the merged-stranded bulk-operation run-history migration at reserved version 20260909202801 with byte-identical executable SQL and permanently retire original version 20260908195056.",
-  "base_sha": "e472592446826f1410449b23ab14adada69b514f",
-  "dispatcher": "shared-db orchestrator marker #2629 route 01a085f2-a84f-7963-b474-e5770b149ecd",
-  "worker": "Codex reissue_2439",
-  "branch": "codex/issue-2439-bulk-operation-runs-reissue",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2439-production-reissue-01a085f2",
   "allowed_paths": [
-    "supabase/migrations/20260909202801_bulk_operation_runs_history_reissue.sql",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
-    "scripts/check-migration-ledger-drift.test.mjs",
-    "scripts/test_post_batch_app_verification.py",
+    "scripts/migration_derivation.py",
+    "scripts/test_migration_derivation.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     ".agent/contract.json",
     ".agent/completion.json"
-  ],
-  "file_writes": [
-    "supabase/migrations/20260909202801_bulk_operation_runs_history_reissue.sql",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
-    "scripts/check-migration-ledger-drift.test.mjs",
-    "scripts/test_post_batch_app_verification.py",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
-  ],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
-  "prohibited_actions": [
-    "No reviewer allocation, merge, preview dispatch, production action, or shared database write",
-    "Do not edit or delete the applied original migration 20260908195056",
-    "Do not change executable SQL semantics while reissuing the migration",
-    "Do not touch PopDAM application code or seed data"
-  ],
-  "required_checks": [
-    "python -m unittest scripts/test_*.py",
-    "node --test scripts/check-migration-ledger-drift.test.mjs",
-    "bash scripts/check-sql.sh",
-    "node scripts/check-migration-pr-lease.mjs",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "git diff --check",
-    "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json"
   ],
   "assumptions": [
-    "Claim #2443 has been atomically reissued to reserved version 20260909202801 while preserving its exact object locks",
-    "Original version 20260908195056 is applied on preview but cannot produce qualifying current-main producer evidence for production",
-    "The safe successor carries exactly the original executable SQL and the original becomes permanently unavailable to preview and production allowlists",
-    "Application history insertion and alert delivery remain separate PopDAM work"
+    "Migration 20260909005945 is already merged and its bytes must remain unchanged.",
+    "Its exact pinned header source describes a pre-adoption CI baseline rather than a migration-ledger version.",
+    "The local implementation began under the parent coordinator's direction before this contract was published; no branch, pull request, database, preview, production, or ref mutation occurred before publication."
   ],
+  "base_sha": "e472592446826f1410449b23ab14adada69b514f",
+  "branch": "codex/issue-2652-ledger",
+  "db_reads": [],
+  "db_writes": [],
+  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
+  "file_writes": [
+    "scripts/migration_derivation.py",
+    "scripts/test_migration_derivation.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "generation": 2,
+  "goal": "Restore preview-ledger parsing for exactly migration 20260909005945 without changing its merged bytes or weakening malformed-declaration refusal for any other migration, and record its one new fail-closed truth-audit call site.",
+  "prohibited_actions": [
+    "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
+    "Do not edit any SQL migration",
+    "Do not broaden the derivation parser to accept prose",
+    "Do not weaken existing malformed-declaration tests",
+    "No external review or merge"
+  ],
+  "required_checks": [
+    "python -m unittest scripts.test_migration_derivation -q",
+    "python -m unittest scripts.test_production_migration_guard -q",
+    "git diff --check"
+  ],
+  "route": "repo-session",
+  "schema_version": 1,
   "stop_conditions": [
-    "Claim #2443, reserved version 20260909202801, branch, worktree, or object locks change",
-    "Executable SQL equivalence cannot be proven",
-    "A required check refuses or scope widens",
-    "Another session modifies an owned file in this worktree"
-  ]
+    "The repair requires editing a merged SQL migration",
+    "The exception cannot be pinned to exactly one version and exact historical source text",
+    "A proposed change accepts malformed prose for a future migration",
+    "The main merge lane becomes available only after a separate coordinator instruction"
+  ],
+  "work_issue": 2652,
+  "work_type": "repo-maintenance",
+  "worker": "codex repo-maintenance agent for issue 2652",
+  "worktree": "C:/tmp/shared-db-issue-2652-ledger"
 }

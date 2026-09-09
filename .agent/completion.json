@@ -1,49 +1,29 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 2652,
   "outcome": "ready-for-merge",
-  "pr": 2654,
-  "migration_versions": ["20260909202801"],
-  "contract_ref": "refs/db-contracts/2439/4",
-  "contract_sha256": "46dc3616a8a0e543f97619e2d0162622ca311867866ca9dedae628cf94dfbab0",
-  "head_sha": "d48b82b2d2ac3324090ac49b8c7205560b29481a",
-  "evidence_note": "The atomically reissued claim has a fresh migration whose normalized content and Git blob exactly match the stranded original. Current main dceb584b was merged after an external landing invalidated the earlier review; only the single-slot .agent pair conflicted and was resolved to this PR's evidence, while all substantive main changes were retained. Fresh local proof passed at that merge commit. The original version remains permanently refused and classified retired. No preview, production, reviewer, or PR merge action was performed.",
+  "pr": 2653,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2652/2",
+  "contract_sha256": "c471aacba4aef7cf77542f37e855b9b429bb587fe4e65859f082558acf60417f",
+  "head_sha": "9068d98943b459702c7c0bd4aa1f805e44c40f8b",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "scripts/check-migration-ledger-drift.test.mjs",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
-    "scripts/test_post_batch_app_verification.py",
-    "supabase/migrations/20260909202801_bulk_operation_runs_history_reissue.sql"
+    "scripts/migration_derivation.py",
+    "scripts/test_migration_derivation.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
-  "db_reads": ["function app.has_any_role", "type app.app_role"],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
-    {"command": "python -m unittest scripts/test_*.py", "exit_code": 0, "evidence": "930 tests passed with 8 environment-dependent skips, including old-version refusal, successor allowlisting, normalized-content identity, and the complete retired-version registry contract."},
-    {"command": "node --test scripts/check-migration-ledger-drift.test.mjs", "exit_code": 0, "evidence": "30 tests passed; the stranded original is classified retired with the exact successor and issue/claim reason."},
-    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL guards passed; the fresh version sorts after current main and introduces no forbidden verification read."},
-    {"command": "node scripts/check-migration-pr-lease.mjs", "exit_code": 0, "evidence": "Claim #2443 and reserved version 20260909202801 verified for PR #2654."},
-    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "Truth audit passed across 272 call sites after integrating current main."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
-    {"command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Completion report reconciles with immutable contract refs/db-contracts/2439/4."}
+    {"command": "python -m unittest scripts.test_migration_derivation -q", "exit_code": 0, "evidence": "44 tests passed, including exact-version/source positive coverage and altered/future prose refusals."},
+    {"command": "python -m unittest scripts.test_production_migration_guard -q", "exit_code": 0, "evidence": "237 tests passed, exercising the production gate's derivation integration after current main was merged."},
+    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "273 reviewed semantic call sites passed; this PR's one new immutable-metadata refusal remains explicitly excluded as non-database state."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors before the evidence-only metadata commit."}
   ],
   "assumptions_resolved": [
-    "Claim #2443 remains bound to the exact original object locks and fresh reserved version 20260909202801.",
-    "The successor migration has the same filtered Git blob cd53c1b02fa719bf1041e1fb0cbc6c85316a17cb as original version 20260908195056.",
-    "Old version 20260908195056 cannot enter a preview or production allowlist, alone or with the successor.",
-    "The structural recovery remains separate from PopDAM insertion and alert-delivery acceptance."
+    "The exact six-line source in the merged migration is pinned; any alteration, removal, or added declaration fails closed.",
+    "The migration has no migration-ledger base because it derives from the pre-adoption CI baseline; the exception resolves only that historical case to an empty set.",
+    "No SQL migration, database, preview, production, or migration-ledger mutation was performed."
   ],
   "stop_conditions_hit": []
 }
