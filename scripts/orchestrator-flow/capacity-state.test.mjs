@@ -1,15 +1,46 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import {
-  MAX_AUTHOR_LANES, assertLaneAvailable, buildDynamicQueues, claimBody,
-  parseAuthorLease, relinquishAuthorLease, resumeAuthorLease,
+  MAX_AUTHOR_LANES, WORKTREE_STATES, assertLaneAvailable, buildDynamicQueues, claimBody,
+  main, parseAuthorLease, relinquishAuthorLease, resumeAuthorLease,
 } from '../manage-migration-author-lanes.mjs'
+import { readFileSync } from 'node:fs'
 
 const NOW=new Date('2026-08-28T12:00:00Z')
-const body=(number,{capacityState='active',blockedOn=null,expiresAt=new Date('2026-08-29T00:00:00Z')}={})=>claimBody({
+const body=(number,{capacityState='active',blockedOn=null,worktreeState=capacityState==='relinquished'?'clean':null,recoveryArtifact=null,expiresAt=new Date('2026-08-29T00:00:00Z')}={})=>claimBody({
   version:`20260828${String(number).padStart(6,'0')}`,
   objects:[`table test.t_${number}`],owner:`owner-${number}`,branch:`branch-${number}`,
-  worktree:`C:/work/${number}`,expiresAt,capacityState,blockedOn,
+  worktree:`C:/work/${number}`,expiresAt,capacityState,blockedOn,worktreeState,recoveryArtifact,
+})
+
+test('lease parser accepts the complete relinquishment tuple and rejects contradictory authority',()=>{
+  for(const worktreeState of WORKTREE_STATES){
+    const lease=parseAuthorLease(body(1,{capacityState:'relinquished',blockedOn:'issue:#900',worktreeState,recoveryArtifact:'artifact:'+'a'.repeat(40)}),NOW)
+    assert.equal(lease.worktreeState,worktreeState)
+    assert.equal(lease.recoveryArtifact,'artifact:'+'a'.repeat(40))
+  }
+  assert.throws(()=>body(1,{capacityState:'expired-unconfirmed'}),/capacityState must be one of/)
+  assert.throws(()=>body(1,{capacityState:'relinquished',blockedOn:'issue:#900',worktreeState:null}),/requires worktreeState/)
+  assert.throws(()=>body(1,{worktreeState:'clean'}),/only for relinquished/)
+  assert.throws(()=>body(1,{recoveryArtifact:'artifact:'+'a'.repeat(40)}),/only for relinquished/)
+  assert.throws(()=>body(1,{capacityState:'relinquished',blockedOn:'issue:#900',worktreeState:'unknown'}),/requires worktreeState/)
+  assert.throws(()=>body(1,{capacityState:'relinquished',blockedOn:'issue:#900',recoveryArtifact:'artifact:mutable',worktreeState:'clean'}),/immutable-url-or-hash/)
+  const active=body(1)
+  for(const line of [
+    'capacity_state: expired-unconfirmed',
+    'worktree_state: clean',
+    'recovery: artifact:'+'a'.repeat(40),
+    'mystery: value',
+  ]) assert.throws(()=>parseAuthorLease(active.replace('capacity_state: active',`capacity_state: active\n${line}`),NOW),/unreadable|capacity_state must be|only for relinquished|unknown field/)
+  assert.throws(()=>parseAuthorLease(active.replace('owner: owner-1','owner: owner-1\nowner: duplicate'),NOW),/unreadable/)
+})
+
+test('pre-Phase-A relinquished fences remain protected but are recovery blocked',()=>{
+  const legacyBody=body(1,{capacityState:'relinquished',blockedOn:'issue:#900'}).replace(/^worktree_state:.*\r?\n/m,'')
+  const lease=parseAuthorLease(legacyBody,NOW)
+  assert.equal(lease.capacityActive,false)
+  assert.equal(lease.worktreeState,'unknown-legacy')
+  assert.equal(lease.relinquishmentMetadataLegacy,true)
 })
 
 test('relinquished claims protect objects without consuming active capacity',()=>{
@@ -107,5 +138,90 @@ test('resume refuses ambiguous or version-mismatched self pull-request identity'
       identity==='ambiguous' ? /multiple open pull-request sources/ : /does not carry the permanent claim version/,
     )
     assert.equal(parseAuthorLease(io.issues.get(77).body,NOW).capacityState,'relinquished')
+  }
+})
+
+test('relinquishment records only matching worktree evidence states',()=>{
+  for(const state of WORKTREE_STATES){
+    const io=memoryIo()
+    io.localWorktreeState=()=>({state})
+    const options={claim:77,owner:'owner-77',blockedOn:'issue:#900'}
+    if(state!=='clean')options.worktreeState=state
+    const result=relinquishAuthorLease(options,NOW,io)
+    assert.equal(result.worktreeState,state)
+    assert.equal(parseAuthorLease(io.issues.get(77).body,NOW).worktreeState,state)
+  }
+  for(const state of ['dirty','absent','remote']){
+    const io=memoryIo();io.localWorktreeState=()=>({state})
+    assert.throws(()=>relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900'},NOW,io),new RegExp(`explicit --worktree-state ${state} is required`))
+  }
+  const io=memoryIo();io.localWorktreeState=()=>{throw new Error('access denied')}
+  assert.throws(()=>relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900',worktreeState:'absent'},NOW,io),/inspection is ambiguous/)
+})
+
+test('claim 2574 absent-worktree shape can relinquish only with explicit absent evidence',()=>{
+  const io=memoryIo();io.localWorktreeState=()=>({state:'absent'})
+  assert.throws(()=>relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900'},NOW,io),/explicit --worktree-state absent is required/)
+  const result=relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900',worktreeState:'absent'},NOW,io)
+  assert.equal(result.worktreeState,'absent')
+})
+
+test('idempotence binds blocker, worktree state, and recovery artifact',()=>{
+  const io=memoryIo();io.localWorktreeState=()=>({state:'dirty'})
+  const tuple={claim:77,owner:'owner-77',blockedOn:'issue:#900',worktreeState:'dirty',recoveryArtifact:'artifact:'+'b'.repeat(64)}
+  relinquishAuthorLease(tuple,NOW,io)
+  assert.equal(relinquishAuthorLease(tuple,NOW,io).idempotent,true)
+  assert.throws(()=>relinquishAuthorLease({...tuple,recoveryArtifact:'artifact:'+'c'.repeat(64)},NOW,io),/different blocker, worktree state, or recovery artifact/)
+})
+
+test('legacy relinquishment metadata must be reconciled before resume',()=>{
+  const io=memoryIo()
+  io.issues.get(77).body=body(77,{capacityState:'relinquished',blockedOn:'issue:#900'}).replace(/^worktree_state:.*\r?\n/m,'')
+  assert.throws(()=>resumeAuthorLease({claim:77,owner:'owner-77',leaseHours:12},NOW,io),/must be reconciled/)
+  const reconciled=relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900'},NOW,io)
+  assert.equal(reconciled.idempotent,false)
+  assert.equal(parseAuthorLease(io.issues.get(77).body,NOW).worktreeState,'clean')
+})
+
+test('resume from non-clean evidence requires current clean proof or immutable recovery',()=>{
+  for(const state of ['dirty','absent','remote']){
+    const io=memoryIo();io.localWorktreeState=()=>({state})
+    relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900',worktreeState:state},NOW,io)
+    assert.throws(()=>resumeAuthorLease({claim:77,owner:'owner-77',leaseHours:12},NOW,io),/requires a proven-clean worktree or --recovery-artifact/)
+    assert.equal(resumeAuthorLease({claim:77,owner:'owner-77',leaseHours:12,recoveryArtifact:'artifact:'+'d'.repeat(40)},NOW,io).capacityState,'active')
+  }
+  const recovered=memoryIo();recovered.localWorktreeState=()=>({state:'dirty'})
+  relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900',worktreeState:'dirty'},NOW,recovered)
+  recovered.localWorktreeState=()=>({state:'clean'})
+  assert.equal(resumeAuthorLease({claim:77,owner:'owner-77',leaseHours:12},NOW,recovered).capacityState,'active')
+})
+
+test('blocker TOCTOU and failed readback roll back without partial capacity write',()=>{
+  const changing=memoryIo(),get=changing.getIssue;let blockerReads=0
+  changing.getIssue=(number)=>{if(Number(number)===900&&++blockerReads>1)return{number:900,state:'closed',body:''};return get(number)}
+  assert.throws(()=>relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900'},NOW,changing),/not durably open/)
+  assert.equal(parseAuthorLease(changing.issues.get(77).body,NOW).capacityState,'active')
+
+  const badReadback=memoryIo(),read=badReadback.getIssue;let claimReads=0
+  badReadback.getIssue=(number)=>{const issue=read(number);if(Number(number)===77&&++claimReads===2)return{...issue,body:issue.body.replace('worktree_state: clean','worktree_state: dirty')};return issue}
+  assert.throws(()=>relinquishAuthorLease({claim:77,owner:'owner-77',blockedOn:'issue:#900'},NOW,badReadback),/readback failed/)
+  assert.equal(parseAuthorLease(badReadback.issues.get(77).body,NOW).capacityState,'active')
+})
+
+test('CLI accepts explicit worktree and recovery evidence flags',()=>{
+  const io=memoryIo();io.localWorktreeState=()=>({state:'absent'})
+  const originalLog=console.log;console.log=()=>{}
+  try{assert.equal(main(['--relinquish-author-lease','--claim-number','77','--owner','owner-77','--blocked-on','issue:#900','--worktree-state','absent','--recovery-artifact','artifact:'+'e'.repeat(40)],NOW,io),0)}finally{console.log=originalLog}
+  const lease=parseAuthorLease(io.issues.get(77).body,NOW)
+  assert.equal(lease.worktreeState,'absent')
+  assert.equal(lease.recoveryArtifact,'artifact:'+'e'.repeat(40))
+})
+
+test('capacity lifecycle never mutates worktree contents',()=>{
+  const source=readFileSync(new URL('../manage-migration-author-lanes.mjs',import.meta.url),'utf8')
+  for(const name of ['relinquishAuthorLease','resumeAuthorLease']){
+    const start=source.indexOf(`export function ${name}`),end=source.indexOf('\nfunction ',start)
+    const body=source.slice(start,end)
+    assert.doesNotMatch(body,/\b(?:delete|move|clean|reset|write|rename)(?:Sync)?\s*\(/i)
   }
 })
