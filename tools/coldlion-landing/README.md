@@ -104,12 +104,11 @@ stated cause.
 ## Tests
 
 `tools/coldlion-landing-history.test.mjs` covers the grid, the scopes, both
-vendor defects, both projections and the shape of the generated transaction.
-`tools/coldlion-landing-workflows.test.mjs` covers the two workflows: their
-triggers, the declared target beside every credential, the missing-secret
-refusals, the offline tests running before any write, and the serialisation.
-Both run offline with no secrets and no database, as part of the tools offline
-suite.
+vendor defects, both projections, the shape of the generated transaction, and
+the two workflows themselves: their triggers, the declared target beside every
+credential, the missing-secret refusals, the offline tests running before any
+write, and the serialisation. It runs offline with no secrets and no database,
+as part of the tools offline suite.
 
 No real ColdLion values appear in this directory. The fixtures are synthetic and
 the loaders print counts, scopes and window dates only — this repository is
