@@ -6,10 +6,10 @@
   "migration_versions": [
     "20260909084253"
   ],
-  "contract_ref": "refs/db-contracts/2580/2",
-  "contract_sha256": "4a61da14dc9ccc92e4f1732d2782c662d14d1f010c318572fa9df8b457127108",
-  "head_sha": "2f9966368de6c36b92061f944666bdf1462ab403",
-  "evidence_note": "The main-refreshed implementation head preserves the migration and hash-bound sidecar bytes and individually pins that sidecar in the preview producer set. This evidence-only commit refreshes both required evidence files. No preview or promotion was performed.",
+  "contract_ref": "refs/db-contracts/2580/4",
+  "contract_sha256": "e2a42979ba9cd27b7749f89cd2e6785ce91d5f3a3514deb00a322203418ebdaa",
+  "head_sha": "7a3af59348ffb537e3fa7597cc6c620ec7d89311",
+  "evidence_note": "The current-main implementation head preserves the migration and hash-bound sidecar bytes, individually pins that sidecar in the preview producer set, and now passes the exact historical-restoration guard merged through PR #2647. This evidence-only commit refreshes both required evidence files. No preview or production promotion was performed.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -46,7 +46,12 @@
     {
       "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "Claim #2626 and migration version 20260909084253 remain bound."
+      "evidence": "Claim #2626 and migration version 20260909084253 remain bound at PR #2627."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards passed and accepted version 20260909084253 only through its exact hash-, byte-, statement-, newline-, and object-bound historical restoration entry."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
@@ -57,7 +62,8 @@
   "assumptions_resolved": [
     "The implementation remains exactly within claim #2626 and migration 20260909084253.",
     "The sidecar hash matches the migration body and covers both dynamic marker lines.",
-    "The sidecar is now individually pinned as a preview producer, matching the repository's sanctioned evidence pattern.",
+    "The sidecar is individually pinned as a preview producer, matching the repository's sanctioned evidence pattern.",
+    "The exact historical-restoration registry entry merged through PR #2647 permits only these hash-bound migration bytes and objects.",
     "No preview or production promotion was performed."
   ],
   "stop_conditions_hit": []
