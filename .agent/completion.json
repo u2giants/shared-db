@@ -6,7 +6,7 @@
   "migration_versions": ["20260909115140"],
   "contract_ref": "refs/db-contracts/2543/1",
   "contract_sha256": "fc6e7c5911411351d4c68bd36e86db94b81a95eb36d1180f5bb0b50c8beff880",
-  "head_sha": "d424fdacd1d5d2916919dd9253949c08e3232f79",
+  "head_sha": "2fee6aaa18964d13b70f007ec904c294ef69e888",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -54,12 +54,12 @@
     {
       "command": "supabase/tests/opa_coherent_complete_capture_contracts.sql on a disposable database",
       "exit_code": 0,
-      "evidence": "PostgreSQL 18 disposable database returned BEGIN, DO, ROLLBACK: 19 behavioral assertions passed and 0 failed, covering two-scope success, idempotency, every required refusal, root isolation, and sanitized exposure."
+      "evidence": "GitHub run 34364684032 passed the focused opa_coherent_complete_capture_contracts.sql suite on a from-empty throwaway database, including cross-scope identical pairs, pending finish retry, completed finish retry, guarded nullable-character duplicate rejection, the existing refusal paths, root isolation, and sanitized exposure."
     },
     {
       "command": "Database Contract Tests CI from empty",
       "exit_code": 0,
-      "evidence": "GitHub run 34355261970 succeeded at implementation head d424fdac: 176 contract files executed, 163 passed, 0 non-quarantined failed, 1 quarantined test passed, and 12 quarantined tests failed without affecting the established lane contract."
+      "evidence": "GitHub run 34364684032 succeeded at repair implementation head 2fee6aaa: 176 contract files executed, 163 passed, 0 non-quarantined failed, 1 quarantined test passed, and 12 quarantined tests failed without affecting the established lane contract."
     }
   ],
   "assumptions_resolved": [
