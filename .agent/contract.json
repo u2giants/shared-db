@@ -59,6 +59,6 @@
   "route": "shared-db-orchestrator",
   "work_type": "structural",
   "work_issue": 2440,
-  "generation": 5,
+  "generation": 6,
   "schema_version": 1
 }

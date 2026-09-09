@@ -6,10 +6,10 @@
   "migration_versions": [
     "20260909005945"
   ],
-  "contract_ref": "refs/db-contracts/2440/5",
-  "contract_sha256": "70a50231c19d432ab915aabccbd365f1bc56f3b329db2493c319cf756672334a",
-  "head_sha": "aff94a2673de6dabb3806cbe00aba7d41d2695e0",
-  "evidence_note": "Generation 5 re-points the report at the merge head aff94a26; every non-.agent file is byte-identical to the reviewed implementation at 79a52394.",
+  "contract_ref": "refs/db-contracts/2440/6",
+  "contract_sha256": "5b59335aff105ccab9ff561a93fb2272af55d9fdd22bb37c576a05ebcaa08645",
+  "head_sha": "b30c2a68e68ae4573c71121b3b2487f4141e1dcd",
+  "evidence_note": "Generation 6 re-points the report at the merge head b30c2a68, the fourth update from main (origin/main 7f9c19f9). Every non-.agent file is byte-identical to the reviewed implementation at 79a52394; the .agent conflict against main was resolved in favour of this lane's own evidence pair.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
