@@ -453,3 +453,12 @@ test('#2318 a marker that is BOTH unroutable and unauthorized reports both cause
   assert.ok(result.problems.some((p) => /route_id/.test(p)), 'the routing cause must survive')
   assert.ok(result.problems.some((p) => /REFUSED/.test(p)), 'the admission cause must survive')
 })
+
+test('#2318 a routing-grandfathered marker still REPORTS its refused ground instead of dropping it', () => {
+  const result = evaluateRouting([
+    { number: 2312, body: ROUTING({ route_id: 'tbd', authorization: 'db-work' }), createdAt: '2026-08-20T09:00:00Z' },
+  ])
+  assert.deepEqual(result.problems, [], 'routing grandfathering still holds')
+  assert.ok(result.warnings.some((w) => /REFUSED/.test(w)), 'the refused ground must still be stated')
+  assert.equal(result.routing, null)
+})

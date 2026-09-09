@@ -1355,8 +1355,10 @@ that shape and nothing else — see the "what this does NOT do" note at the end 
 | `codex` | the Codex thread UUID from the session rollout `session_id` | `codex-reply` with that `threadId` |
 | `claude` | the Claude `sessionId`, e.g. `local_<uuid>` | a Claude cross-session message to that session |
 
-`handover_issue` is the predecessor marker, or `none` for a cold start. Every field is
-required; **blank is never a default** — state a value or `none`.
+`handover_issue` is the predecessor marker, or `none` for a cold start. Every ROUTING field is
+required; **blank is never a default** — state a value or `none`. `authorization` is not a routing
+field and has its own vocabulary (§11d): never write `none` there — a session with no grounds does
+not open a marker at all.
 
 ### Resolve the destination this way, and only this way
 
@@ -1470,7 +1472,10 @@ non-orchestrator session and queue the work.
 
 ⚠️ **Markers opened before 2026-09-10 are grandfathered for a MISSING field only, with a
 warning** — a live orchestrator must not be failed for a field that did not exist when it
-started. A pre-existing marker that writes a refused ground still fails. An unreadable creation
+started. A pre-existing marker that writes a refused ground still fails admission — except where the
+marker also predates the 2026-08-27 routing contract and its routing block is invalid, in which
+case the whole marker is already unroutable and the refusal is reported as a warning rather than
+a failure. An unreadable creation
 date is treated as in force, never as grandfathered.
 
 ---

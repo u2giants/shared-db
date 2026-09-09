@@ -228,6 +228,10 @@ export function evaluateRouting(markers, predecessorRouteIdOf = () => null) {
       problems: [],
       warnings: [
         ...prefixed,
+        // #2318. Routing grandfathering must not swallow an admission refusal:
+        // the marker still fails routing, but the stated grounds are why the
+        // role was never held, and a dropped refusal is an unaudited one.
+        ...admissionProblems,
         `marker #${marker.number} opened ${marker.createdAt.slice(0, 10)}, before the routing ` +
           `contract took effect on ${CONTRACT_EFFECTIVE_DATE}, so this does not fail the guard. ` +
           `It DOES mean the marker names no delegation target: \`--resolve\` reports it INVALID ` +
