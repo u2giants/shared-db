@@ -6,8 +6,8 @@
   "migration_versions": ["20260909132734"],
   "contract_ref": "refs/db-contracts/2466/1",
   "contract_sha256": "17d4a12875b0ac127f7c51b55e1f1a4e443eb73fdf7a6db8f48825b7f04b207f",
-  "head_sha": "e654501f338501ba3c2af9870c4157def7c57724",
-  "evidence_note": "Implementation head e654501f preserves the style-tracker bridge's legacy ERP UUID while canonical-only items retain a non-null plm.item UUID, after the final main update at 5874305e. Fresh exact-head CI and governed reviews are tracked by PR #2634; the following evidence-only commit changes only the two required .agent evidence files.",
+  "head_sha": "495f2eb73e3f134a66f5b4c653c3fa0e1a513395",
+  "evidence_note": "Implementation head 495f2eb7 preserves the style-tracker bridge's legacy ERP UUID while canonical-only items retain a non-null plm.item UUID, and exercises canonical attribution through the real transaction-bound fixture authorization guard after the final main update at 5874305e. Fresh exact-head CI and governed reviews are tracked by PR #2634; the following evidence-only commit changes only the two required .agent evidence files.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
