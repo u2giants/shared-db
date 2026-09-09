@@ -24,11 +24,13 @@
     "function public.set_popdam_item_dismissed",
     "view api.plm_item_list",
     "table public.product_category_predictions",
+    "column public.product_category_predictions.erp_item_id",
     "column public.product_category_predictions.plm_item_id",
     "column public.product_category_predictions.item_identity_status",
     "function public.resolve_product_category_prediction_item_identity",
     "trigger product_category_predictions_resolve_item_identity on public.product_category_predictions",
-    "index public.idx_product_category_predictions_plm_item_id"
+    "index public.idx_product_category_predictions_plm_item_id",
+    "table api.plm_item_list"
   ],
   "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
   "file_writes": [
@@ -37,7 +39,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 1,
+  "generation": 2,
   "goal": "Give PopDAM durable canonical item dismissal state and preserve category prediction history before the frozen ERP tables are retired.",
   "prohibited_actions": [
     "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",

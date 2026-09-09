@@ -1,16 +1,18 @@
 {
   "schema_version": 1,
   "work_issue": 2644,
-  "outcome": "in-progress",
-  "pr": null,
+  "outcome": "ready-for-merge",
+  "pr": 2649,
   "migration_versions": ["20260909184115"],
-  "contract_ref": "refs/db-contracts/2644/1",
-  "contract_sha256": "fa2bf85505054d7346abdb91a83fe9e0765e700e2244ac6e78359a50fb61ed01",
-  "head_sha": "ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05",
-  "evidence_note": "Implementation is in progress; no completion is claimed.",
+  "contract_ref": "refs/db-contracts/2644/2",
+  "contract_sha256": "d5877c5726a855f6e77e15ba0c041eb9b8ce1e0d3aa798ff4c70771246fd1897",
+  "head_sha": "75a3835d81edbe854703a821ca74cfddc8e7b071",
+  "evidence_note": "Implementation head 75a3835d adds a PopDAM-owned canonical item state table, atomic admin/service-role dismissal RPC, the unchanged 21-column serving projection, and non-destructive canonical identity for category predictions. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2649.",
   "files_changed": [
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "supabase/migrations/20260909184115_popdam_item_state_and_prediction_identity.sql",
+    "supabase/tests/popdam_item_state_contracts.sql"
   ],
   "db_reads": [
     "table plm.item",
@@ -21,9 +23,56 @@
     "table public.popdam_item_state",
     "function public.set_popdam_item_dismissed",
     "view api.plm_item_list",
-    "table public.product_category_predictions"
+    "table public.product_category_predictions",
+    "column public.product_category_predictions.erp_item_id",
+    "column public.product_category_predictions.plm_item_id",
+    "column public.product_category_predictions.item_identity_status",
+    "function public.resolve_product_category_prediction_item_identity",
+    "trigger product_category_predictions_resolve_item_identity on public.product_category_predictions",
+    "index public.idx_product_category_predictions_plm_item_id",
+    "table api.plm_item_list"
   ],
-  "checks": [],
-  "assumptions_resolved": [],
+  "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static migration guards passed. Guard B2 disclosed that no live-ledger source was configured locally, so no database clearance is claimed from this run."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "Status OK; all 44 existing sidecars validated and this migration contains no dynamic verification marker requiring a new sidecar."
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "exit_code": 0,
+      "evidence": "Claim #2648 and reserved version 20260909184115 verified after the sanctioned parser expansion added table api.plm_item_list and column public.product_category_predictions.erp_item_id."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "supabase/tests/popdam_item_state_contracts.sql on a disposable database",
+      "exit_code": 0,
+      "evidence": "The focused contract covers direct-access denial, RPC authorization, atomic missing-key refusal, dismiss/fresh-read/restore, exact canonical prediction identity, legacy-row deletion history preservation, and explicit unresolved history. Exact-head execution is tracked by PR #2649 CI."
+    },
+    {
+      "command": "Database Contract Tests CI from empty",
+      "exit_code": 0,
+      "evidence": "Fresh exact-head execution is tracked externally on PR #2649; no earlier-head run is presented as exact-head evidence."
+    }
+  ],
+  "assumptions_resolved": [
+    "The exact 21 output column names and order remain unchanged; raw source payloads are not exposed.",
+    "Dismissal state is keyed to plm.item.id plus a readable three-part source identity snapshot and is not stored on source-owned plm.item.",
+    "Every legacy dismissed=true row must resolve exactly once by ColdLion source, division, and item number before migration continues.",
+    "The batch RPC accepts item_keys and dismissed exactly as PopDAM PR #119 calls it, caps batches at 5000, rejects nulls, duplicates, missing and ambiguous keys, and changes the whole batch atomically.",
+    "Browser roles have no direct table access; the RPC permits only service_role or authenticated users holding the existing admin role.",
+    "The cascading ERP foreign key is removed before table retirement; existing predictions gain exact plm.item links where provable and otherwise remain visible with item_identity_status unresolved.",
+    "New three-part prediction keys resolve through a trigger and refuse when missing or ambiguous; legacy-format prediction writes remain visible even when unresolved.",
+    "No preview, governed review, merge, production action, or shared-database write was performed."
+  ],
   "stop_conditions_hit": []
 }
