@@ -3,7 +3,7 @@
 -- instead of the fixed clock `45 3 * * *`.
 -- Depends on #2439, merged to main as 03f917d0dec6e0973e4b9cddd72e02f686a19e0c.
 --
--- Claim #2608 reserves version 20260908204414 and these objects:
+-- Claim #2608 reserves version 20260909005945 and these objects:
 --
 --   function public.queue_nightly_rebuild_style_groups()      (replaced in place)
 --   function public.refresh_style_group_counts_batch(uuid[])  (declared, NOT touched --

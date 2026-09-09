@@ -1,4 +1,4 @@
--- Contracts for 20260908204414_chain_style_group_counts_to_rebuild_completion.sql (#2440).
+-- Contracts for 20260909005945_chain_style_group_counts_to_rebuild_completion.sql (#2440).
 --
 -- What is being pinned:
 --   1. Catalog posture of public.queue_nightly_rebuild_style_groups(): zero arguments,
