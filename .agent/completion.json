@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260909121403"
   ],
-  "contract_ref": "refs/db-contracts/2403/3",
-  "contract_sha256": "41924a982db951bcb82c698e989f634b55a23c8f560d98319654e9074f70c124",
-  "head_sha": "6d65afc997ac465e479629a9187dae54182e6bb7",
+  "contract_ref": "refs/db-contracts/2403/4",
+  "contract_sha256": "65ecc46d92b650bcb8e1ed4a984e95490426c74d86069ccdd5d05525cadc1187",
+  "head_sha": "7c688930090d7ae3e770fd623c2b52ad0101cb2f",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -55,22 +55,22 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head 6d65afc9 after integrating origin/main 71fe95d6 and guarded version supersession: Guard B confirmed reserved version 20260909121403 sorts after base version 20260909005945; static, expected-count, verification-cost and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."
+      "evidence": "Re-run on the candidate tree integrated with origin/main e149bd0b: Guard B confirmed reserved version 20260909121403 sorts after base version 20260909005945; static, expected-count, verification-cost and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head 6d65afc9: status OK, 44 sidecars checked; version 20260909121403 has no dynamic-execution markers and requires no sidecar."
+      "evidence": "Re-run on the candidate tree integrated with origin/main e149bd0b: status OK, 44 sidecars checked; version 20260909121403 has no dynamic-execution markers and requires no sidecar."
     },
     {
       "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head 6d65afc9 with PR_NUMBER=2425: migration claim #2418 and reserved version 20260909121403 verified."
+      "evidence": "Re-run on the candidate tree integrated with origin/main e149bd0b with PR_NUMBER=2425: migration claim #2418 and reserved version 20260909121403 verified."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head 6d65afc9: no whitespace errors."
+      "evidence": "Re-run on the candidate tree integrated with origin/main e149bd0b: no whitespace errors."
     },
     {
       "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
@@ -87,7 +87,7 @@
     "DesignFlow owner acknowledgement comment 5577130097 confirms shared-db owns the governed migration and exact consolidated non-production target route.",
     "Guarded supersession evidence permanently preserves versions 20260906040010 and 20260908022407; supersession ref ac5f3475dff31b9f331b18a95212bf9344fac7b6 reserves current version 20260909121403.",
     "Original and superseded migration paths resolve to identical Git blob 3f2e7f44a6dfb30fc879449c684f260863c5fc10; only the filename changed.",
-    "Origin/main e149bd0bac3aae0b3172468ec9b4a95fa2bc3a0d was integrated after 71fe95d64a7e6ff1e4d822145271853a31d82b2d; the only conflicts were the single-slot .agent/contract.json and .agent/completion.json evidence pair, which must describe THIS pull request, so this branch's evidence was retained and refreshed. The migration SQL blob remains unchanged from implementation head 6d65afc997ac465e479629a9187dae54182e6bb7. No preview, production apply, claim release, issue closure, or inherited cleanup occurred."
+    "Origin/main e149bd0bac3aae0b3172468ec9b4a95fa2bc3a0d was integrated at implementation head 7c688930090d7ae3e770fd623c2b52ad0101cb2f after 71fe95d64a7e6ff1e4d822145271853a31d82b2d; the only conflicts were the single-slot .agent/contract.json and .agent/completion.json evidence pair, which must describe THIS pull request, so this branch's evidence was retained and refreshed. The migration SQL blob remains unchanged from its earlier implementation. No preview, production apply, claim release, issue closure, or inherited cleanup occurred."
   ],
   "stop_conditions_hit": []
 }
