@@ -1,22 +1,22 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2403,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Create only the empty hts_rag_split schema and nine internally linked tables for the DesignFlow consolidated non-production target while preserving public.hts_rag_* and copying no rows.",
-  "base_sha": "8d64a75812beec85d2f8b2c78669e5e17635359d",
-  "dispatcher": "codex shared-db.orch marker2559 route01a07e3d-df78-7ed0-bd62-d675f000158b",
-  "worker": "codex issue-2403 preparation worker",
+  "base_sha": "71fe95d64a7e6ff1e4d822145271853a31d82b2d",
+  "dispatcher": "codex shared-db.orch marker2629 route01a085f2-a84f-7963-b474-e5770b149ecd",
+  "worker": "codex issue-2403 guarded merge worker",
   "branch": "claude/issue-2403-hts-rag-split",
-  "worktree": "C:/Users/ahazan/AppData/Local/Temp/shared-db-2559-2403",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2403-hts-rag-split",
   "allowed_paths": [
-    "supabase/migrations/20260908022407_hts_rag_split_isolated_schema.sql",
+    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260908022407_hts_rag_split_isolated_schema.sql",
+    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
@@ -58,26 +58,27 @@
     "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
   ],
   "prohibited_actions": [
-    "No reviewer allocation or provider call",
-    "No preview, DesignFlow target, shared production, or row write",
+    "No production or DesignFlow target write",
+    "No reviewer call outside the governed exact-head runner",
     "No change to public.hts_rag_* and no row copy",
     "No merge, claim release, issue closure, or inherited cleanup"
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
     "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-migration-pr-lease.mjs",
     "git diff --check"
   ],
   "assumptions": [
     "Issue comment 5577130097 confirms shared-db owns deployment to the DesignFlow consolidated non-production target reached by DB_*_SANDBOX in GCP lithe-breaker-323913",
-    "Claim2418 keeps original version20260906040010 permanently protected through guarded supersession to version20260908022407 despite lease expiry",
-    "The manager renames only the migration filename; SQL statement bytes and semantics remain unchanged while preparation integrates current main and exact evidence"
+    "Claim2418 permanently protects versions 20260906040010 and 20260908022407 and now reserves 20260909121403 through guarded supersession",
+    "The manager renamed only the migration filename from 20260908022407 to 20260909121403; SQL statement bytes and semantics remain unchanged after integrating current main"
   ],
 
   "stop_conditions": [
-    "Stop if origin main or the PR branch moves during preparation",
+    "Stop if origin main or the PR branch moves after exact-head review begins",
     "Stop if any claimed object or migration byte must change",
-    "Stop before local suites while the protected Windows reviewer run is active",
+    "Stop if both governed reviewer slots cannot be drawn before either review runs",
     "Stop if the target route acknowledgement or coordinator marker changes"
   ]
 }

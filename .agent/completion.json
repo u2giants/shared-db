@@ -4,15 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2425,
   "migration_versions": [
-    "20260908022407"
+    "20260909121403"
   ],
-  "contract_ref": "refs/db-contracts/2403/2",
-  "contract_sha256": "0011590ca8adbf7c63e9d3bb79a0f5f45264ed4e654c6a534616dd3fcd0aea7e",
-  "head_sha": "445953146338a389374b77953bd6f4afff09bf19",
+  "contract_ref": "refs/db-contracts/2403/3",
+  "contract_sha256": "5eb8c354056707ffafa743a779882bc2bbf5f991867db2f598f3b6c484c8e9db",
+  "head_sha": "6d65afc997ac465e479629a9187dae54182e6bb7",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260908022407_hts_rag_split_isolated_schema.sql"
+    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql"
   ],
   "db_reads": [
     "table public.hts_rag_determinations",
@@ -55,34 +55,39 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Re-run at merge head 44595314 after integrating origin/main bc4caafa: Guard B confirmed reserved version 20260908022407 sorts after the base branch's newest version 20260907200221; static, expected-count, verification-cost and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."
+      "evidence": "Re-run at implementation head 6d65afc9 after integrating origin/main 71fe95d6 and guarded version supersession: Guard B confirmed reserved version 20260909121403 sorts after base version 20260909005945; static, expected-count, verification-cost and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "Re-run at merge head 44595314: status OK, 43 sidecars checked; version 20260908022407 has no dynamic-execution markers and requires no sidecar."
+      "evidence": "Re-run at implementation head 6d65afc9: status OK, 44 sidecars checked; version 20260909121403 has no dynamic-execution markers and requires no sidecar."
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "exit_code": 0,
+      "evidence": "Re-run at implementation head 6d65afc9 with PR_NUMBER=2425: migration claim #2418 and reserved version 20260909121403 verified."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "Re-run at merge head 44595314: no whitespace errors."
+      "evidence": "Re-run at implementation head 6d65afc9: no whitespace errors."
     },
     {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f supabase/migrations/20260908022407_hts_rag_split_isolated_schema.sql",
+      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
       "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable server applied the unchanged migration and its built-in catalog/emptiness assertions successfully. The migration file bytes are unchanged by the origin/main integration (identical blob), so this evidence still binds at head 44595314."
+      "evidence": "PostgreSQL 17 disposable server applied the migration and its built-in catalog/emptiness assertions successfully before the guarded pure filename supersession. The SQL blob is unchanged, so this evidence binds to implementation head 6d65afc9."
     },
     {
       "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f verify.sql",
       "exit_code": 0,
-      "evidence": "All nine hts_rag_split tables remained empty while one sentinel row in each of the nine public.hts_rag_* positive-control tables remained unchanged. The migration file bytes are unchanged by the origin/main integration (identical blob), so this evidence still binds at head 44595314."
+      "evidence": "All nine hts_rag_split tables remained empty while one sentinel row in each of the nine public.hts_rag_* positive-control tables remained unchanged. The SQL blob is unchanged by main integration and guarded filename supersession, so this evidence binds to implementation head 6d65afc9."
     }
   ],
   "assumptions_resolved": [
     "DesignFlow owner acknowledgement comment 5577130097 confirms shared-db owns the governed migration and exact consolidated non-production target route.",
-    "Guarded supersession evidence ref 48b591b18702a30d42a2bf25be1f9f785a4e3a4f permanently preserves original version 20260906040010 and reserves 20260908022407.",
+    "Guarded supersession evidence permanently preserves versions 20260906040010 and 20260908022407; supersession ref ac5f3475dff31b9f331b18a95212bf9344fac7b6 reserves current version 20260909121403.",
     "Original and superseded migration paths resolve to identical Git blob 3f2e7f44a6dfb30fc879449c684f260863c5fc10; only the filename changed.",
-    "Origin/main 0f22de12562b7250ebf70fb07502e0fbce429cb3 was integrated by merge commit 445953146338a389374b77953bd6f4afff09bf19; the only conflicts were the single-slot .agent/contract.json and .agent/completion.json evidence pair, which must describe THIS pull request, so this branch's side was kept and main's merged pair was superseded. The migration file bytes are unchanged. No reviewer, preview, merge, production apply, claim release, issue closure, or inherited cleanup occurred."
+    "Origin/main 71fe95d64a7e6ff1e4d822145271853a31d82b2d was integrated by merge commit f40b9e09c58743f1906446ae9ac0d950784b48e4; the only conflicts were the single-slot .agent/contract.json and .agent/completion.json evidence pair, which must describe THIS pull request, so this branch's side was kept. The manager then performed the guarded pure filename supersession at implementation head 6d65afc997ac465e479629a9187dae54182e6bb7. No preview, production apply, claim release, issue closure, or inherited cleanup occurred."
   ],
   "stop_conditions_hit": []
 }
