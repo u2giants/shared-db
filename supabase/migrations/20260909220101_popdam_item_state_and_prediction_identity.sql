@@ -162,8 +162,8 @@ select item.id,
        item.raw ->> 'divisionCode',
        item.item_number,
        true,
-       'migration:20260909184115',
-       'migration:20260909184115'
+       'migration:20260909220101',
+       'migration:20260909220101'
 from public.erp_items_current legacy
 join plm.item item
   on item.source_system = 'coldlion'
