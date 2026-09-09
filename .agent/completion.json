@@ -4,15 +4,16 @@
   "outcome": "ready-for-merge",
   "pr": 2649,
   "migration_versions": ["20260909184115"],
-  "contract_ref": "refs/db-contracts/2644/3",
-  "contract_sha256": "94a01cc5305549b46748363d10a2ed829b693b5b4a7d472d1604d7fa7c88438b",
-  "head_sha": "b3b8ad52928f45e4f30efb4cdac0bcbbdbd9c75a",
-  "evidence_note": "Implementation head b3b8ad52 is based on current PR base b7f14140 and adds a PopDAM-owned canonical item state table, atomic admin/service-role dismissal RPC, the unchanged 21-column serving projection, non-destructive canonical identity for category predictions, and focused proof for duplicate-batch refusal plus both legacy ERP-row and canonical item retirement history preservation. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2649.",
+  "contract_ref": "refs/db-contracts/2644/4",
+  "contract_sha256": "3e49af19996fa0bcf7b6ca1a37aca9f4c1dfafe59d9eab7b2c2bd4a0382e4a46",
+  "head_sha": "0ac175fc9f387a66527de9c168e9a25317fbb3b4",
+  "evidence_note": "Implementation head 0ac175fc is based on current PR base b7f14140 and adds a PopDAM-owned canonical item state table, atomic admin/service-role dismissal RPC, the unchanged 21-column serving projection, non-destructive canonical identity for category predictions, focused proof for duplicate-batch refusal plus both legacy ERP-row and canonical item retirement history preservation, and updates the predecessor view contract to prove that new legacy flags no longer own dismissal state. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2649.",
   "files_changed": [
     ".agent/contract.json",
     ".agent/completion.json",
     "supabase/migrations/20260909184115_popdam_item_state_and_prediction_identity.sql",
-    "supabase/tests/popdam_item_state_contracts.sql"
+    "supabase/tests/popdam_item_state_contracts.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql"
   ],
   "db_reads": [
     "table plm.item",

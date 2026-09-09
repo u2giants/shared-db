@@ -2,6 +2,7 @@
   "allowed_paths": [
     "supabase/migrations/20260909184115_popdam_item_state_and_prediction_identity.sql",
     "supabase/tests/popdam_item_state_contracts.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
@@ -36,10 +37,11 @@
   "file_writes": [
     "supabase/migrations/20260909184115_popdam_item_state_and_prediction_identity.sql",
     "supabase/tests/popdam_item_state_contracts.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 3,
+  "generation": 4,
   "goal": "Give PopDAM durable canonical item dismissal state and preserve category prediction history before the frozen ERP tables are retired.",
   "prohibited_actions": [
     "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
