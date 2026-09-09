@@ -1,5 +1,5 @@
 {
-  "allowed_paths": [
+  "allowed_paths" : [
     "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
     "supabase/tests/plm_item_list_repoint_contracts.sql",
     "supabase/tests/plm_item_import_phase2_contracts.sql",
