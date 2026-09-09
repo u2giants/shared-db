@@ -1,7 +1,7 @@
 {
 
   "schema_version": 1,
-  "generation": 3,
+  "generation": 4,
   "work_issue": 2439,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -16,6 +16,7 @@
     "scripts/production_migration_guard.py",
     "scripts/test_production_migration_guard.py",
     "scripts/check-migration-ledger-drift.test.mjs",
+    "scripts/test_post_batch_app_verification.py",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
@@ -24,6 +25,7 @@
     "scripts/production_migration_guard.py",
     "scripts/test_production_migration_guard.py",
     "scripts/check-migration-ledger-drift.test.mjs",
+    "scripts/test_post_batch_app_verification.py",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
@@ -50,7 +52,7 @@
     "Do not touch PopDAM application code or seed data"
   ],
   "required_checks": [
-    "python -m unittest scripts.test_production_migration_guard",
+    "python -m unittest scripts/test_*.py",
     "node --test scripts/check-migration-ledger-drift.test.mjs",
     "bash scripts/check-sql.sh",
     "node scripts/check-migration-pr-lease.mjs",
