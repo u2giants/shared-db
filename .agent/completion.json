@@ -1,74 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2466,
+  "work_issue": 2646,
   "outcome": "ready-for-merge",
-  "pr": 2634,
-  "migration_versions": ["20260909132734"],
-  "contract_ref": "refs/db-contracts/2466/1",
-  "contract_sha256": "17d4a12875b0ac127f7c51b55e1f1a4e443eb73fdf7a6db8f48825b7f04b207f",
-  "head_sha": "8391b13447d9f862e79304a7dede264634b67613",
-  "evidence_note": "Implementation head 8391b134 preserves exactly one deterministic legacy ERP UUID per bare item number for the still-legacy-keyed style-tracker bridge, gives every cross-division sibling its unique plm.item UUID, and exercises the live three-part grain plus canonical attribution through the real transaction-bound fixture authorization guard after the final main update at 5874305e. Fresh exact-head CI and governed reviews are tracked by PR #2634; the following evidence-only commit changes only the two required .agent evidence files.",
+  "pr": 2647,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2646/1",
+  "contract_sha256": "805c1d1c59f855d9ad932ae8d370aa18424726d7675c5c041c001cf56cd570e4",
+  "head_sha": "69fd277fb73290f3b104fd8b25b0b2f65d76bcab",
   "files_changed": [
-    ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
-    "supabase/tests/plm_item_import_phase2_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql"
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/test_production_migration_guard.py"
   ],
-  "db_reads": [
-    "table plm.item",
-    "table coldlion.item_detail",
-    "table core.licensor",
-    "table core.property",
-    "table public.erp_items_current"
-  ],
-  "db_writes": ["view api.plm_item_list"],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
+    {
+      "command": "node --test scripts/historical-migration-restorations.test.mjs",
+      "exit_code": 0,
+      "evidence": "9 registry tests passed with no failures or skips, including exact issue 2580 metadata and negative wrong-path and wrong-byte cases alongside every restoration on main."
+    },
+    {
+      "command": "node --input-type=module -e <exact PR2627 blob validation>",
+      "exit_code": 0,
+      "evidence": "The registry accepted PR 2627 head 9f7f6e690b26cbd0db5759d9777d6be0ba2fa338 at the exact path and independently recomputed the file digest, statement digest, 6537 statement bytes, terminal newline, and exact seven-object scope."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_migration_guard",
+      "exit_code": 0,
+      "evidence": "235 tests passed; issue 2580 remains production eligible while existing blocked and preview-only versions keep their refusals."
+    },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Git Bash run passed Guard B, expected-count, verify-cost, issue #1684 EOL and static checks. Guard B2 disclosed that no live-ledger source was configured; no database clearance is claimed from the static run."
+      "evidence": "Static SQL checks passed under Git Bash against origin/main ecfe38ac; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
       "exit_code": 0,
-      "evidence": "Status OK; 44 existing sidecars validated and migration 20260909132734 contains no dynamic verification marker requiring a sidecar."
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "exit_code": 0,
-      "evidence": "With PR_NUMBER=2634 at implementation head 90b93af8, claim #2632 and version 20260909132734 verified. The sanctioned PR-parser expansion added only table api.plm_item_list as the parser alias beside the claimed view."
+      "evidence": "44 contract tests passed with no failures or skips."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "supabase/tests/plm_item_list_repoint_contracts.sql on a disposable database",
-      "exit_code": 0,
-      "evidence": "The focused contract now pins the 21-column order, protected authenticated serving posture, legacy bridge UUID preservation, canonical-only UUID fallback, resolved canonical attribution, deterministic direct prepacks, non-ColdLion exclusion, unresolved-null attribution and dismissed state. Exact-head disposable-database execution is tracked by PR #2634 CI."
-    },
-    {
-      "command": "supabase/tests/plm_item_import_phase2_contracts.sql on a disposable database",
-      "exit_code": 0,
-      "evidence": "The existing focused Phase 2 contract retains its bridge FK and safe-deletion assertions. Exact-head disposable-database execution is tracked by PR #2634 CI."
-    },
-    {
-      "command": "Database Contract Tests CI from empty",
-      "exit_code": 0,
-      "evidence": "Fresh exact-head from-empty CI is tracked externally on PR #2634; no earlier-head run is presented as exact-head evidence."
+      "evidence": "No whitespace errors in the complete maintenance change against origin/main ecfe38ac."
     }
   ],
   "assumptions_resolved": [
-    "The exact 21 output column names and order are pinned by the focused contract.",
-    "source_id and style_number use plm.item.item_number; item_description uses plm.item.description; erp_updated_at uses ColdLion raw modTime while synced_at remains plm.item.updated_at.",
-    "Licensor and property codes come only through resolved canonical foreign keys and remain null when unresolved.",
-    "Direct prepack codes are read from the completed ColdLion item-detail landing and aggregated distinctly and deterministically; the view exposes no other landing fields.",
-    "Existing PopDAM dismissed=true state is retained by item number. Exactly one deterministic canonical row per bare legacy item number retains the ERP UUID for the still-legacy-keyed style-tracker bridge; cross-division siblings and canonical-only items use their unique plm.item UUID until issue #2482 gives dismissed state an application-owned home.",
-    "Because coldlion.item_detail deliberately grants no application read, the serving contract is a security-barrier definer view that exposes only its explicit 21 columns; the landing remains ungranted.",
-    "No broad ColdLion-over-DesignFlow authority statement was needed or added.",
-    "No preview, governed review, merge, or production action was performed."
+    "Migration file SHA256 is 70beba94d21b05384438a298fa3d49bd0a1bbdb31cbf4cb0216bec8aa380e76f; statement SHA256 is 1dd8adc722def760f9d3dde9abfff9cf53e3929fab97e49954b8512d91c1f33b over 6537 bytes followed by one terminal newline.",
+    "Against current main ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05, the PR changes exactly the two agent evidence files and the three registry/guard files; structural migration and sidecar blobs are absent.",
+    "PR 2627 head 9f7f6e690b26cbd0db5759d9777d6be0ba2fa338 still carries the exact protected migration bytes and claim 2626 object scope.",
+    "Issue 2580, claim 2626, reserved migration version 20260909084253, PR 2627, preview, production, reviewer refs, and merge state remain untouched."
   ],
   "stop_conditions_hit": []
 }
