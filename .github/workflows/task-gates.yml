@@ -1,0 +1,51 @@
+name: task gates
+
+on:
+  pull_request:
+    paths:
+      - '.ai-devops/**'
+      - '.github/workflows/task-gates.yml'
+      - 'scripts/tests/test-task-gates.sh'
+  push:
+    branches: [main]
+    paths:
+      - '.ai-devops/**'
+      - '.github/workflows/task-gates.yml'
+      - 'scripts/tests/test-task-gates.sh'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out shared-db
+        uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - name: Check out accepted task-gate engine
+        # popcre/ai-devops is public, so the default token can read this exact
+        # source-of-truth commit without a cross-repository secret.
+        uses: actions/checkout@v4
+        with:
+          repository: popcre/ai-devops
+          ref: 4d83f9a5dc400f87408663eddac872b9074c18ed
+          path: .task-gates-toolkit
+          persist-credentials: false
+
+      - name: Install task-gate commands on the runner path
+        shell: bash
+        run: |
+          mkdir -p "$HOME/.local/bin"
+          ln -s "$GITHUB_WORKSPACE/.task-gates-toolkit/bin/ai-task-gates" "$HOME/.local/bin/ai-task-gates"
+          ln -s "$GITHUB_WORKSPACE/.task-gates-toolkit/bin/ai-repo-policy" "$HOME/.local/bin/ai-repo-policy"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Verify installed command and consumer policy
+        shell: bash
+        run: |
+          ai-task-gates version
+          scripts/tests/test-task-gates.sh
