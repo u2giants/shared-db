@@ -6,8 +6,8 @@
   "migration_versions": ["20260909194231"],
   "contract_ref": "refs/db-contracts/2622/2",
   "contract_sha256": "9d40e5928a6323f0c6647dd93adb8c81089d2f2414e3812d2e5e1cb39ba5417b",
-  "head_sha": "fd5bd41123f7d7dbedc80338073b430c3a0ea831",
-  "evidence_note": "Current-main implementation head fd5bd411 includes the completed #2580 main tip e4725924 and changes only the ColdLion merchandise-group detail identity plus its structural tests. It refuses null categories, duplicate five-part identities, unexpected prior keys, and incoming dependent foreign keys; preserves the existing header relationship; and proves category/type separation, exact uniqueness, required category, and header integrity. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2651.",
+  "head_sha": "e69a872dea8cb311a67b26b83080d304e4809c5d",
+  "evidence_note": "Current-main implementation head e69a872d includes main tip 7fc819f9 and changes only the ColdLion merchandise-group detail identity plus its structural tests. It refuses null categories, duplicate five-part identities, unexpected prior keys, and incoming dependent foreign keys; preserves the existing header relationship; and proves category/type separation, exact uniqueness, required category, and header integrity. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2651.",
   "files_changed": [
     ".agent/contract.json",
     ".agent/completion.json",

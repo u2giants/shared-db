@@ -1,4 +1,5 @@
 {
+
   "allowed_paths": [
     "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
     "supabase/tests/coldlion_master_landing_contracts.sql",
