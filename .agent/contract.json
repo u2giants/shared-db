@@ -1,1 +1,64 @@
-{"allowed_paths":["supabase/migrations/20260909132734_repoint_plm_item_list.sql","supabase/tests/plm_item_list_repoint_contracts.sql","supabase/tests/plm_item_import_phase2_contracts.sql",".agent/contract.json",".agent/completion.json"],"assumptions":["The existing api.plm_item_list 21-column output contract is preserved exactly.","The approved mapping uses plm.item item_number, description, and modTime semantics, with unresolved attribution remaining null where the business rules require it.","The direct prepack load evidence linked from PopDAM issue 114 is sufficient for this narrow source transition.","Dismissed-state behavior must not be lost."],"base_sha":"71fe95d64a7e6ff1e4d822145271853a31d82b2d","branch":"codex/issue-2466-plm-item-list","db_reads":["table plm.item","table coldlion.item_detail","table core.licensor","table core.property","table public.erp_items_current"],"db_writes":["view api.plm_item_list"],"dispatcher":"codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd","file_writes":["supabase/migrations/20260909132734_repoint_plm_item_list.sql","supabase/tests/plm_item_list_repoint_contracts.sql","supabase/tests/plm_item_import_phase2_contracts.sql",".agent/contract.json",".agent/completion.json"],"generation":1,"goal":"Repoint api.plm_item_list to the canonical PLM item source while preserving its exact 21-column consumer contract and the approved attribution and dismissed-state behavior.","prohibited_actions":["No preview apply, reviewer allocation, merge, or production promotion","No Supabase MCP or shared-database write","No broad assertion that ColdLion is always authoritative","No object or path outside claim 2632 and this contract"],"required_checks":["bash scripts/check-sql.sh","node scripts/check-production-verification-sidecars.mjs --base origin/main","node scripts/check-migration-pr-lease.mjs","git diff --check","supabase/tests/plm_item_list_repoint_contracts.sql on a disposable database","supabase/tests/plm_item_import_phase2_contracts.sql on a disposable database","Database Contract Tests CI from empty"],"route":"shared-db-orchestrator","schema_version":1,"stop_conditions":["Claim 2632, reserved version 20260909132734, or coordinator route changes","A competing change touches api.plm_item_list or a contracted path","Implementation requires any object or path outside claim 2632 or this contract","The 21-column consumer contract cannot be preserved"],"work_issue":2466,"work_type":"structural","worker":"codex issue-2466 migration author holding claim 2632","worktree":"C:/repos/shared-db-worktrees/issue-2466-plm-item-list"}
+{
+  "allowed_paths": [
+    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "assumptions": [
+    "The existing api.plm_item_list 21-column output contract is preserved exactly.",
+    "The approved mapping uses plm.item item_number, description, and modTime semantics, with unresolved attribution remaining null where the business rules require it.",
+    "The direct prepack load evidence linked from PopDAM issue 114 is sufficient for this narrow source transition.",
+    "Dismissed-state behavior must not be lost."
+  ],
+  "base_sha": "71fe95d64a7e6ff1e4d822145271853a31d82b2d",
+  "branch": "codex/issue-2466-plm-item-list",
+  "db_reads": [
+    "table plm.item",
+    "table coldlion.item_detail",
+    "table core.licensor",
+    "table core.property",
+    "table public.erp_items_current"
+  ],
+  "db_writes": [
+    "view api.plm_item_list"
+  ],
+  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
+  "file_writes": [
+    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "generation": 1,
+  "goal": "Repoint api.plm_item_list to the canonical PLM item source while preserving its exact 21-column consumer contract and the approved attribution and dismissed-state behavior.",
+  "prohibited_actions": [
+    "No preview apply, reviewer allocation, merge, or production promotion",
+    "No Supabase MCP or shared-database write",
+    "No broad assertion that ColdLion is always authoritative",
+    "No object or path outside claim 2632 and this contract"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-migration-pr-lease.mjs",
+    "git diff --check",
+    "supabase/tests/plm_item_list_repoint_contracts.sql on a disposable database",
+    "supabase/tests/plm_item_import_phase2_contracts.sql on a disposable database",
+    "Database Contract Tests CI from empty"
+  ],
+  "route": "shared-db-orchestrator",
+  "schema_version": 1,
+  "stop_conditions": [
+    "Claim 2632, reserved version 20260909132734, or coordinator route changes",
+    "A competing change touches api.plm_item_list or a contracted path",
+    "Implementation requires any object or path outside claim 2632 or this contract",
+    "The 21-column consumer contract cannot be preserved"
+  ],
+  "work_issue": 2466,
+  "work_type": "structural",
+  "worker": "codex issue-2466 migration author holding claim 2632",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2466-plm-item-list"
+}

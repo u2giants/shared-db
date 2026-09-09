@@ -7,7 +7,7 @@
   "contract_ref": "refs/db-contracts/2466/1",
   "contract_sha256": "17d4a12875b0ac127f7c51b55e1f1a4e443eb73fdf7a6db8f48825b7f04b207f",
   "head_sha": "90b93af825846ae36695a0eb785b4f8210db1866",
-  "evidence_note": "Implementation head 90b93af8 passed the full from-empty Database Contract Tests run 34365153189. The later evidence-only commit changes only this completion report.",
+  "evidence_note": "Implementation head 90b93af8 passed the full from-empty Database Contract Tests run 34365153189. Later evidence-only commits change only the two required .agent evidence files.",
   "files_changed": [
     ".agent/contract.json",
     "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
