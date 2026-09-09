@@ -61,8 +61,11 @@
 -- (3) REWRITES queue_nightly_rebuild_style_groups() as a three-armed driver. At most one
 --     arm fires per invocation, and every arm is gated on state, never on the clock alone.
 --
--- THE THREE ARMS
+-- THE THREE ARMS - AND THE ORDER THEY ARE EVALUATED IN
 -- ---------------------------------------------------------------------------------
+-- Evaluation order is ARM 2, then ARM 1, then ARM 3. That is NOT the numbering order and
+-- the difference is load-bearing - see "WHY ARM 2 IS EVALUATED FIRST" below.
+--
 -- ARM 1 - ENQUEUE. Preserves the retired `0 6 * * *` semantics under a 10-minute poll:
 --   fire only at or after 06:00 UTC, only once per UTC day, and only when the operation
 --   is not already 'running' or 'queued'. The once-per-day gate reads `last_enqueued_at`
@@ -78,11 +81,55 @@
 --       would otherwise re-reconcile every ten minutes forever. Requirement 2 on #2440.
 --
 -- ARM 3 - THE FLOOR. Fires when the last reconcile of any kind is older than 7 days, or
---   has never happened. Requirement 3 on #2440, and it is not optional: the failure mode
---   this change INTRODUCES is silence. If the rebuild stops reaching 'completed', the
---   counts simply stop refreshing and nothing anywhere says so - strictly worse than
---   today's stale-but-running counts. The floor bounds that silence at 7 days, and the
---   marker object makes it observable rather than inferable (see "THE DETECTOR").
+--   has never happened, AND THE REBUILD IS NOT CURRENTLY IN FLIGHT. Requirement 3 on
+--   #2440, and it is not optional: the failure mode this change INTRODUCES is silence. If
+--   the rebuild stops reaching 'completed', the counts simply stop refreshing and nothing
+--   anywhere says so - strictly worse than today's stale-but-running counts. The floor
+--   bounds that silence at 7 days, and the marker object makes it observable rather than
+--   inferable (see "THE DETECTOR").
+--
+-- WHY THE FLOOR IS GATED ON THE REBUILD NOT BEING IN FLIGHT
+-- ---------------------------------------------------------------------------------
+-- Raised as a HIGH finding in review of this pull request, and it was real. As first
+-- written, ARM 3 tested only `last_reconciled_at IS NULL OR older than 7 days`. It did not
+-- exclude 'running' or 'queued', and ARM 1 - which returns immediately after enqueueing -
+-- writes `last_enqueued_at` but never seeds `last_reconciled_at`. So on the FIRST poll at
+-- or after 06:00 UTC following this migration's apply:
+--
+--   poll 1  ARM 1 fires, enqueues, returns. last_reconciled_at is still null.
+--   poll 2  status is now 'queued'/'running', so ARM 1 is skipped and ARM 2 does not
+--           match - but ARM 3 saw a null marker and ran the FULL chunked recompute while
+--           the worker was mid-rebuild.
+--
+-- That contradicts this header's own justification for the ~98s advisory-lock window,
+-- which is that the reconcile runs AFTER the rebuild reports 'completed'. Worse, a chunk
+-- cancelled by that contention aborts the whole driver transaction without stamping the
+-- marker, so the next */10 poll retries it - for the remainder of a ~2h09m rebuild.
+--
+-- THE FIX: ARM 3 now additionally requires that the operation is not in flight. "In
+-- flight" is `status in ('running','queued')` AND the operation's own `updated_at`
+-- (falling back to `started_at`, then to this function's `last_enqueued_at`) is inside the
+-- floor window. The staleness half matters: without it, an operation abandoned at 'queued'
+-- because the PopDAM worker died would suppress the floor FOREVER, trading the bug above
+-- for unbounded silence - which is precisely what ARM 3 exists to prevent. With it, a
+-- rebuild genuinely in progress is left alone, and a rebuild that has been "in progress"
+-- for longer than the floor window is correctly treated as not running at all.
+--
+-- Seeding `last_reconciled_at` on ARM 1 was the other suggested remedy and is deliberately
+-- NOT done: `last_reconciled_at` is the detector's answer to "when did the counts last
+-- refresh", and stamping it on an enqueue - which refreshes nothing - would make the
+-- detector lie. Gating the arm closes the window without corrupting the signal.
+--
+-- WHY ARM 2 IS EVALUATED FIRST
+-- ---------------------------------------------------------------------------------
+-- Also raised in review, as a MEDIUM, and also real. ARM 1 rewrites the whole
+-- 'rebuild-style-groups' object with a fresh 'queued' state and a new run_id, and it
+-- returns. If a run had reached 'completed' but had not yet been reconciled - because the
+-- apply landed between completion and the next poll, or because a poll was missed - the
+-- 06:00 enqueue would destroy the only record that that run_id had completed, and its
+-- membership changes would go uncounted until the 7-day floor. Testing ARM 2's condition
+-- before ARM 1 closes it: an unreconciled completed run is always reconciled first, and
+-- the enqueue simply happens on the next poll, at most ten minutes later.
 --
 -- BATCHING - REQUIREMENT 4
 -- ---------------------------------------------------------------------------------
@@ -222,6 +269,8 @@ declare
   v_last_enqueued   timestamptz;
   v_last_reconciled timestamptz;
   v_last_run        text;
+  v_op_seen_at      timestamptz;
+  v_in_flight       boolean;
   v_reason          text;
   v_now             timestamptz := now();
   v_state           jsonb;
@@ -251,10 +300,40 @@ begin
   v_last_reconciled := nullif(btrim(coalesce(v_marker ->> 'last_reconciled_at', '')), '')::timestamptz;
   v_last_run        := nullif(btrim(coalesce(v_marker ->> 'last_reconciled_run_id', '')), '');
 
+  -- The last moment anything claimed this operation was alive. The worker stamps
+  -- 'updated_at' on every progress write and 'started_at' on the enqueue; if the object
+  -- carries neither, ARM 1's own 'last_enqueued_at' is the fallback.
+  v_op_seen_at := coalesce(
+    nullif(btrim(coalesce(v_op ->> 'updated_at', '')), '')::timestamptz,
+    nullif(btrim(coalesce(v_op ->> 'started_at', '')), '')::timestamptz,
+    v_last_enqueued
+  );
+
+  -- A rebuild is IN FLIGHT only if it says 'running'/'queued' AND something has touched it
+  -- inside the floor window. An operation stuck at 'queued' for longer than the floor is a
+  -- dead worker, not a running rebuild, and must not suppress ARM 3 forever. See
+  -- "WHY THE FLOOR IS GATED ON THE REBUILD NOT BEING IN FLIGHT".
+  v_in_flight := coalesce(v_status, '') in ('running', 'queued')
+                 and v_op_seen_at is not null
+                 and v_op_seen_at >= v_now - make_interval(days => c_floor_days);
+
+  -- ======================================================================
+  -- ARM 2 - CHAINED RECONCILE, evaluated FIRST. An unreconciled completed run must be
+  -- reconciled before ARM 1 is allowed to overwrite the operation object with a fresh
+  -- 'queued' state and a new run_id. See "WHY ARM 2 IS EVALUATED FIRST".
+  -- ======================================================================
+  if v_status = 'completed'
+     and v_run_id is not null
+     and v_run_id is distinct from v_last_run
+  then
+    v_reason := 'rebuild_completed';
+  end if;
+
   -- ======================================================================
   -- ARM 1 - ENQUEUE. The retired `0 6 * * *` behaviour, expressed as state.
   -- ======================================================================
-  if coalesce(v_status, '') not in ('running', 'queued')
+  if v_reason is null
+     and coalesce(v_status, '') not in ('running', 'queued')
      and extract(hour from (v_now at time zone 'UTC')) >= c_enqueue_hour
      and (
        v_last_enqueued is null
@@ -294,15 +373,16 @@ begin
   end if;
 
   -- ======================================================================
-  -- ARM 2 - CHAINED RECONCILE, and ARM 3 - THE FLOOR.
+  -- ARM 3 - THE FLOOR. Never while the rebuild is in flight: the ~98s recompute is
+  -- justified only against membership the rebuild has finished changing, and running it
+  -- mid-rebuild is the HIGH finding documented in the header above.
   -- ======================================================================
-  if v_status = 'completed'
-     and v_run_id is not null
-     and v_run_id is distinct from v_last_run
-  then
-    v_reason := 'rebuild_completed';
-  elsif v_last_reconciled is null
-        or v_last_reconciled < v_now - make_interval(days => c_floor_days)
+  if v_reason is null
+     and not v_in_flight
+     and (
+       v_last_reconciled is null
+       or v_last_reconciled < v_now - make_interval(days => c_floor_days)
+     )
   then
     v_reason := 'floor';
   end if;
@@ -379,11 +459,16 @@ grant execute on function public.queue_nightly_rebuild_style_groups() to postgre
 comment on function public.queue_nightly_rebuild_style_groups() is
   'Nightly style-group rebuild DRIVER (issue #2440). Invoked every 10 minutes by cron job '
   '"nightly-rebuild-style-groups"; the schedule is a poll, the function decides. Three '
-  'mutually exclusive arms: (1) enqueue the rebuild once per UTC day at or after 06:00 UTC, '
-  'which is the retired 0 6 * * * behaviour expressed as state; (2) run the asset-count '
-  'reconcile in 500-group chunks when the operation reaches status "completed" with a run_id '
-  'this function has not already reconciled; (3) run it unconditionally if the last reconcile '
-  'is older than 7 days. Arm 2 replaces the retired cron job "nightly-reconcile-sg-asset-counts" '
+  'mutually exclusive arms, evaluated in the order 2, 1, 3: (1) enqueue the rebuild once per '
+  'UTC day at or after 06:00 UTC, which is the retired 0 6 * * * behaviour expressed as state; '
+  '(2) run the asset-count reconcile in 500-group chunks when the operation reaches status '
+  '"completed" with a run_id this function has not already reconciled - checked BEFORE arm 1 so '
+  'the enqueue cannot overwrite an unreconciled completed run; (3) run it if the last reconcile '
+  'is older than 7 days or never happened AND the rebuild is not in flight - arm 3 never runs '
+  'while the operation is "running"/"queued" and freshly touched, because a ~98s recompute '
+  'against membership the rebuild is still changing is exactly what this design exists to stop. '
+  'An operation stuck at "queued" for longer than the floor window counts as not in flight, so a '
+  'dead worker cannot suppress the floor forever. Arm 2 replaces the retired cron job "nightly-reconcile-sg-asset-counts" '
   '(45 3 * * *), which recomputed every count 2h15m BEFORE the rebuild that changed the '
   'membership being counted. Idempotence and the once-per-day enqueue gate are keyed on '
   'admin_config -> BULK_OPERATIONS -> "style-group-counts-reconcile", a separate key the '

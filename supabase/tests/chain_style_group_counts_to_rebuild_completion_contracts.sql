@@ -18,6 +18,22 @@
 --      go silent indefinitely.
 --   6. The marker lives under its own top-level BULK_OPERATIONS key, NOT inside the
 --      'rebuild-style-groups' object that public.update_bulk_operation replaces wholesale.
+--   7. THE REVIEW HIGH FINDING: the floor arm must not fire while the rebuild is in
+--      flight. The exact case is `status` 'queued' or 'running' with `last_reconciled_at`
+--      STILL NULL - which is what the very first poll after this migration applies looks
+--      like, because the enqueue arm writes last_enqueued_at and returns without ever
+--      seeding last_reconciled_at. Before the fix, that poll ran the full ~98s chunked
+--      recompute against membership the worker was still rewriting. Both statuses are
+--      pinned, both with a null marker.
+--   8. The in-flight suppression is bounded. An operation abandoned at 'queued' with
+--      nothing touching it for longer than the floor window is a dead worker, not a
+--      running rebuild, and the floor must still fire - otherwise fixing (7) would trade
+--      a concurrent recompute for unbounded silence, which is what the floor exists to
+--      prevent.
+--   9. THE REVIEW MEDIUM FINDING: arm 2 is evaluated before arm 1. A completed run that
+--      has not yet been reconciled must be reconciled rather than overwritten by the
+--      06:00 enqueue, which replaces the operation object wholesale with a new run_id and
+--      would otherwise lose that run's membership changes until the floor.
 --
 -- Every behavioural step below FAILS against the pre-#2440 body, which had no arms at all:
 -- it would enqueue (or skip) and never write a 'style-group-counts-reconcile' key.
@@ -143,6 +159,7 @@ declare
   v_reason   text;
   v_run      text;
   v_at       text;
+  v_status   text;
 begin
   select count(*) into v_groups from public.style_groups;
 
@@ -222,8 +239,54 @@ begin
 
   raise notice 'OK: marker is a separate top-level BULK_OPERATIONS key.';
 
+  -- ------------------------------------------------------------------
+  -- Review HIGH finding: the floor must NOT fire while the rebuild is in
+  -- flight, and the case that matters is the one with NO marker at all -
+  -- the first poll after this migration applies. Run for both in-flight
+  -- statuses. These are negative steps: they must never run the recompute,
+  -- so they are outside the size guard and always execute.
+  -- ------------------------------------------------------------------
+  foreach v_status in array array['running', 'queued'] loop
+    v_baseline := jsonb_build_object(
+      c_op, jsonb_build_object(
+        'status',     v_status,
+        'run_id',     '55555555-5555-5555-5555-555555555555',
+        'started_at', now()::text,
+        'updated_at', now()::text
+      ),
+      c_marker, jsonb_build_object(
+        -- Exactly what ARM 1 leaves behind: an enqueue stamp and NOTHING else.
+        -- last_reconciled_at is absent, i.e. "never reconciled".
+        'last_enqueued_at', now()::text
+      )
+    );
+
+    update public.admin_config set value = v_baseline, updated_at = now()
+    where key = 'BULK_OPERATIONS';
+
+    perform public.queue_nightly_rebuild_style_groups();
+
+    select value -> c_marker into v_marker from public.admin_config where key = 'BULK_OPERATIONS';
+
+    if v_marker -> 'last_reconcile_reason' is not null then
+      raise exception 'CONTRACT (#2440 review HIGH): the floor arm fired (reason = %) while the rebuild was "%" with last_reconciled_at still null. That is the first poll after deploy, and it runs the full ~98s chunked recompute against membership the worker is still rewriting - contradicting the header''s justification for the advisory-lock window, and re-firing every 10 minutes for the rest of a ~2h09m rebuild whenever a cancelled chunk aborts the driver before it stamps the marker.',
+        v_marker ->> 'last_reconcile_reason', v_status;
+    end if;
+
+    if v_marker -> 'last_reconciled_at' is not null then
+      raise exception 'CONTRACT (#2440 review HIGH): last_reconciled_at was stamped while the rebuild was "%". Nothing reconciled anything on this pass.', v_status;
+    end if;
+
+    if (select value -> c_op ->> 'status' from public.admin_config where key = 'BULK_OPERATIONS')
+       is distinct from v_status then
+      raise exception 'CONTRACT: the enqueue arm overwrote an operation that was already "%". The in-flight guard on ARM 1 is broken.', v_status;
+    end if;
+
+    raise notice 'OK review HIGH: status "%" with a null reconcile marker triggers nothing.', v_status;
+  end loop;
+
   if v_groups > c_guard then
-    raise notice 'SKIP: public.style_groups holds % rows (> %); the two positive reconcile steps would run the full recompute and are not executed here.', v_groups, c_guard;
+    raise notice 'SKIP: public.style_groups holds % rows (> %); the positive reconcile steps would run the full recompute and are not executed here.', v_groups, c_guard;
     return;
   end if;
 
@@ -306,6 +369,95 @@ begin
   end if;
 
   raise notice 'OK req 3: the 7-day floor fires and bounds the silence.';
+
+  -- ------------------------------------------------------------------
+  -- The in-flight suppression is BOUNDED. An operation left at 'queued'
+  -- with nothing touching it for longer than the floor window is a dead
+  -- worker, and the floor must still fire. Without this, the fix for the
+  -- HIGH finding would trade a concurrent recompute for permanent silence.
+  -- ------------------------------------------------------------------
+  v_baseline := jsonb_build_object(
+    c_op, jsonb_build_object(
+      'status',     'queued',
+      'run_id',     '66666666-6666-6666-6666-666666666666',
+      'started_at', (now() - interval '30 days')::text,
+      'updated_at', (now() - interval '30 days')::text
+    ),
+    c_marker, jsonb_build_object(
+      'last_enqueued_at',       (now() - interval '30 days')::text,
+      'last_reconciled_at',     (now() - interval '30 days')::text,
+      'last_reconciled_run_id', '22222222-2222-2222-2222-222222222222',
+      'last_reconcile_reason',  'seed'
+    )
+  );
+
+  update public.admin_config set value = v_baseline, updated_at = now()
+  where key = 'BULK_OPERATIONS';
+
+  perform public.queue_nightly_rebuild_style_groups();
+
+  select value -> c_marker into v_marker from public.admin_config where key = 'BULK_OPERATIONS';
+
+  if v_marker ->> 'last_reconcile_reason' is distinct from 'floor' then
+    raise exception 'CONTRACT (#2440 review HIGH, bound): an operation stuck at "queued" for 30 days suppressed the floor (reason = %). A dead worker must not silence the counts forever; only a rebuild touched inside the floor window counts as in flight.', coalesce(v_marker ->> 'last_reconcile_reason', '<null>');
+  end if;
+
+  raise notice 'OK: a stale "queued" operation does not suppress the floor.';
+
+  -- ------------------------------------------------------------------
+  -- Review MEDIUM: arm 2 is evaluated before arm 1. A completed run that
+  -- was never reconciled must be reconciled, not overwritten by the
+  -- enqueue, which replaces the operation object wholesale with a new
+  -- run_id.
+  --
+  -- HONEST LIMIT, stated rather than hidden: the enqueue arm also requires
+  -- the current UTC hour to be >= 6, and a contract test cannot move the
+  -- clock. `last_enqueued_at` is set to yesterday, which opens the other
+  -- half of the enqueue gate, so this step is DISCRIMINATING - it fails
+  -- against the pre-fix arm ordering - only when the suite runs at or after
+  -- 06:00 UTC. Before that hour the enqueue could not have fired anyway and
+  -- the step proves nothing about ordering; it says so out loud instead of
+  -- reporting a pass it did not earn. The reconcile assertion below is
+  -- checked in both cases, because a completed unreconciled run must be
+  -- reconciled at any hour.
+  -- ------------------------------------------------------------------
+  v_baseline := jsonb_build_object(
+    c_op, jsonb_build_object(
+      'status',     'completed',
+      'run_id',     '77777777-7777-7777-7777-777777777777',
+      'started_at', (now() - interval '1 day')::text,
+      'updated_at', now()::text
+    ),
+    c_marker, jsonb_build_object(
+      'last_enqueued_at',       (now() - interval '1 day')::text,
+      'last_reconciled_at',     now()::text,
+      'last_reconciled_run_id', '22222222-2222-2222-2222-222222222222',
+      'last_reconcile_reason',  'seed'
+    )
+  );
+
+  update public.admin_config set value = v_baseline, updated_at = now()
+  where key = 'BULK_OPERATIONS';
+
+  perform public.queue_nightly_rebuild_style_groups();
+
+  select value -> c_marker into v_marker from public.admin_config where key = 'BULK_OPERATIONS';
+
+  if v_marker ->> 'last_reconciled_run_id' is distinct from '77777777-7777-7777-7777-777777777777' then
+    raise exception 'CONTRACT (#2440 review MEDIUM): a completed-but-unreconciled run was not reconciled (last_reconciled_run_id = %). ARM 1 must not be evaluated before ARM 2: the enqueue replaces the operation object wholesale with a new run_id, destroying the only record that this run completed, and its membership changes would go uncounted until the floor.', coalesce(v_marker ->> 'last_reconciled_run_id', '<null>');
+  end if;
+
+  if (select value -> c_op ->> 'status' from public.admin_config where key = 'BULK_OPERATIONS') = 'queued' then
+    raise exception 'CONTRACT (#2440 review MEDIUM): the enqueue arm fired on the same pass that had an unreconciled completed run. At most one arm fires per invocation, and the reconcile has priority.';
+  end if;
+
+  if extract(hour from (now() at time zone 'UTC')) >= 6 then
+    raise notice 'OK review MEDIUM: an unreconciled completed run is reconciled before the enqueue (UTC hour %, the enqueue gate was open, so this step was discriminating).',
+      extract(hour from (now() at time zone 'UTC'));
+  else
+    raise notice 'PARTIAL review MEDIUM: the completed run WAS reconciled, but the UTC hour is % (< 6), so the enqueue arm could not have fired and the ARM-2-before-ARM-1 ordering was NOT exercised by this run. Not claimed as coverage of the ordering.',
+      extract(hour from (now() at time zone 'UTC'));
+  end if;
 end $behaviour$;
 
 rollback;
