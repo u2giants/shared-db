@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "work_issue": 2643,
   "generation": 2,
+  "work_issue": 2643,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Permit only the exact protected issue 2501 migration bytes to pass the backdated-version guard while preserving every ordinary collision and production safety refusal.",
