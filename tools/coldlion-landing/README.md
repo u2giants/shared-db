@@ -43,9 +43,20 @@ repository's Actions secrets before either workflow can start:
 
 `SUPABASE_DB_URL_PRODUCTION` is a URL, not a password: it is deliberately not
 the same secret as `SUPABASE_DB_PASSWORD_PRODUCTION`, which the licensor and
-property workflows use with the Supabase CLI. Only the repository owner can
-create it. Both workflows refuse to start when either secret is missing, rather
-than connecting to nothing and reporting success.
+property workflows use with the Supabase CLI. Both workflows refuse to start when
+either secret is missing, rather than connecting to nothing and reporting success.
+
+Both secrets exist. `SUPABASE_DB_URL_PRODUCTION` was created on 2026-09-09 and a
+read-only dispatch of the sync workflow proved the whole path end to end: the
+target check passed and the run reported the three closed windows outstanding.
+
+It holds a POOLER connection, not a direct one, and that is not interchangeable.
+A direct `db.<ref>.supabase.co` connection resolves to IPv6 unless the project
+buys the IPv4 add-on, and GitHub-hosted runners have no IPv6 route, so a direct
+URL would fail from Actions while working from a developer machine. The pooler
+endpoint for this project was verified against the Supabase Management API and is
+recorded in the 1Password item that holds the password; the password itself is
+never written here or anywhere else in this repository.
 
 Ongoing sync — re-reads the most recent windows, skipping any already loaded:
 
