@@ -273,6 +273,7 @@ class GuardTests(unittest.TestCase):
                 "20260828052706",
                 "20260830195655",
                 "20260903200951",
+                "20260908195056",
             },
         )
 
@@ -299,6 +300,26 @@ class GuardTests(unittest.TestCase):
             migrations
             / "20260905024139_reissue_coldlion_division_reference_table.sql"
         ).read_bytes()
+        self.assertEqual(original, reissue)
+
+    def test_stranded_bulk_operation_history_original_is_blocked_but_reissue_is_allowed(
+        self,
+    ) -> None:
+        with self.assertRaisesRegex(GuardError, "20260908195056"):
+            parse_allowlist("20260908195056")
+        with self.assertRaisesRegex(GuardError, "20260908195056"):
+            parse_allowlist("20260908195056,20260909202801")
+        self.assertEqual(parse_allowlist("20260909202801"), ["20260909202801"])
+
+    def test_stranded_bulk_operation_history_reissue_is_content_identical(self) -> None:
+        """The replacement must preserve every SQL and comment byte after EOL normalization."""
+        migrations = REPO / "supabase" / "migrations"
+        original = (
+            migrations / "20260908195056_bulk_operation_runs_history.sql"
+        ).read_text(encoding="utf-8")
+        reissue = (
+            migrations / "20260909202801_bulk_operation_runs_history_reissue.sql"
+        ).read_text(encoding="utf-8")
         self.assertEqual(original, reissue)
 
     def test_stranded_issue_505_original_is_permanently_blocked(self) -> None:
