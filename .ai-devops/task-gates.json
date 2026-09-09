@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "_comment": "shared-db strengthens every Supabase surface as governed shared-database work and applies the repository branch-and-PR rule to ordinary changes.",
+  "paths": [
+    { "glob": "supabase/**", "class": "shared-db" },
+    { "glob": "config/atomic-migration-allowlist.json", "class": "shared-db" },
+    { "glob": "config/production-risk-policy-activation.json", "class": "shared-db" }
+  ],
+  "gates": {
+    "prose": {
+      "required": ["repository-branch-and-pr"],
+      "forbidden_actions": []
+    },
+    "code": {
+      "required": ["repository-branch-and-pr", "exact-head-independent-review"],
+      "forbidden_actions": []
+    },
+    "shared-db": {
+      "required": [
+        "repository-branch-and-pr",
+        "exact-head-independent-review",
+        "target-database-proof-before-write",
+        "production-promotion-authorization"
+      ],
+      "forbidden_actions": []
+    }
+  }
+}
