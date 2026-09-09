@@ -6,8 +6,8 @@
   "migration_versions": ["20260909132734"],
   "contract_ref": "refs/db-contracts/2466/1",
   "contract_sha256": "17d4a12875b0ac127f7c51b55e1f1a4e443eb73fdf7a6db8f48825b7f04b207f",
-  "head_sha": "7ed936c283a2ffe41357cf6bbe20e013de27e9e6",
-  "evidence_note": "Current-main integration head 7ed936c2 preserves the implementation after the final main update. Fresh exact-head CI and governed reviews are tracked by PR #2634; the following evidence-only commit changes only the two required .agent evidence files.",
+  "head_sha": "c92e16ca2cc23b45f3ba64db0d96dc7e6c08bf77",
+  "evidence_note": "Current-main integration head c92e16ca preserves the implementation after the final main update at 5874305e. Fresh exact-head CI and governed reviews are tracked by PR #2634; the following evidence-only commit changes only the two required .agent evidence files.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
