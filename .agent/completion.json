@@ -4,13 +4,14 @@
   "outcome": "ready-for-merge",
   "pr": 2636,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2318/5",
-  "contract_sha256": "0041e39136be068ccd74f15edb72a07a470d0efad0325c26a967c29d7f66ed95",
-  "head_sha": "14b42e17ffb77cfbf92864fe1eb3fd762003016a",
-  "evidence_note": "Generation 5. head_sha names 14b42e17, the last head at which every check other than the git-evidence file list was run; the only later commits are this evidence pair itself, which no report can name without naming its own SHA. The git-evidence checker compares files_changed against the whole PR diff including .agent/*, so the evidence pair itself is listed. Generation 5 answers two findings raised in governed review of generation 4: (1) a marker that predates the 2026-08-27 routing contract took the grandfathered branch and returned its admission refusal nowhere, so an inadmissible ground on an old marker was dropped silently -- the refusal is now reported as a warning beside the routing cause, pinned by a new test; (2) two AGENTS.md sentences were wrong -- one described the dropped-refusal behaviour, the other told authors every field takes a value or `none`, which for `authorization` is itself a refused ground. The generation-4 report also listed a check against scripts/lib/orchestrator-routing.test.mjs, which does not exist in this tree, and stale test counts; both are corrected here and the nonexistent check is removed from the contract's required_checks. No SQL, no migration, no database access of any kind.",
+  "contract_ref": "refs/db-contracts/2318/6",
+  "contract_sha256": "3484677614f466961c60754c107557fa8eb23b7fe20f206495b7361267616f22",
+  "head_sha": "ba788593afb70b6e979aea85fbc00c4f4abd19d5",
+  "evidence_note": "Generation 6. head_sha names ba788593afb70b6e979aea85fbc00c4f4abd19d5, the last head at which every check other than the git-evidence file list was run; the only later commits are this evidence pair itself, which no report can name without naming its own SHA. The git-evidence checker compares files_changed against the whole PR diff including .agent/*, so the evidence pair is listed. Generation 6 answers the REVISE verdict recorded against the previous head: the new admission unit suite ran in no CI lane, so the Orchestrator Marker Guard workflow now runs it. Generation 5 answered two earlier findings: an admission refusal was dropped silently on a marker predating the 2026-08-27 routing contract, and two AGENTS.md sentences described the old behaviour and told authors to write `none` for authorization. It also removed a check naming a test file that does not exist in this tree and corrected stale counts. No SQL, no migration, no database access of any kind.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
+    ".github/workflows/orchestrator-marker-guard.yml",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/check-orchestrator-marker.mjs",
@@ -46,6 +47,11 @@
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
       "evidence": "'truth audit OK: call_sites=272'. Three new call sites were reviewed and recorded as `excluded`, each with its own reason: two are refusal/warning strings about a missing `authorization:` routing-block field and one is a source comment about emitting that field blank. None asserts anything about a database object being missing or not applied, which is the audit's subject. The recorded count and semantic digest were regenerated from the discovered inventory, not hand-edited."
+    },
+    {
+      "command": "grep -n admission .github/workflows/orchestrator-marker-guard.yml",
+      "exit_code": 0,
+      "evidence": "The Orchestrator Marker Guard workflow now runs `node --test scripts/lib/orchestrator-admission.test.mjs` as its own step alongside the existing marker-guard suite. Governed review of the previous head found the 19 admission unit cases -- normalisation variants, blank, almost-right owner forms, unreadable dates, whole-marker admission -- ran only on this machine and in no CI lane, leaving the guard rules unenforced. No other workflow covers scripts/lib/*.test.mjs generally."
     }
   ],
   "assumptions_resolved": [
