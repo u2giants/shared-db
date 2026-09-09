@@ -6,8 +6,8 @@
   "migration_versions": ["20260909184115"],
   "contract_ref": "refs/db-contracts/2644/2",
   "contract_sha256": "d5877c5726a855f6e77e15ba0c041eb9b8ce1e0d3aa798ff4c70771246fd1897",
-  "head_sha": "75a3835d81edbe854703a821ca74cfddc8e7b071",
-  "evidence_note": "Implementation head 75a3835d adds a PopDAM-owned canonical item state table, atomic admin/service-role dismissal RPC, the unchanged 21-column serving projection, and non-destructive canonical identity for category predictions. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2649.",
+  "head_sha": "8506994cda1c54a1bf7f0ba2688231fe2d8da648",
+  "evidence_note": "Implementation head 8506994c is based on current PR base b7f14140 and adds a PopDAM-owned canonical item state table, atomic admin/service-role dismissal RPC, the unchanged 21-column serving projection, non-destructive canonical identity for category predictions, and focused proof that both legacy ERP-row and canonical item retirement preserve prediction history. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2649.",
   "files_changed": [
     ".agent/contract.json",
     ".agent/completion.json",
@@ -56,7 +56,7 @@
     {
       "command": "supabase/tests/popdam_item_state_contracts.sql on a disposable database",
       "exit_code": 0,
-      "evidence": "The focused contract covers direct-access denial, RPC authorization, atomic missing-key refusal, dismiss/fresh-read/restore, exact canonical prediction identity, legacy-row deletion history preservation, and explicit unresolved history. Exact-head execution is tracked by PR #2649 CI."
+      "evidence": "The focused contract covers direct-access denial, RPC authorization, atomic missing-key refusal, dismiss/fresh-read/restore, exact canonical prediction identity, legacy ERP-row and canonical item deletion history preservation, and explicit unresolved history. Exact-head execution is tracked by PR #2649 CI."
     },
     {
       "command": "Database Contract Tests CI from empty",
