@@ -106,6 +106,40 @@ begin
     raise exception '#2644: duplicate identities did not refuse without changing state';
   end if;
 
+  insert into plm.item (
+    item_number, description, source_system, source_id, raw
+  ) values
+    ('ZZ2644AMBIG', 'ZZ2644 AMBIGUOUS A', 'coldlion', 'ZZCO|ZZ001|ZZ2644AMBIG-A',
+     '{"companyCode":"ZZCO","divisionCode":"ZZ001","itemNo":"ZZ2644AMBIG"}'),
+    ('ZZ2644AMBIG', 'ZZ2644 AMBIGUOUS B', 'coldlion', 'ZZCO|ZZ001|ZZ2644AMBIG-B',
+     '{"companyCode":"ZZCO","divisionCode":"ZZ001","itemNo":"ZZ2644AMBIG"}');
+
+  v_failed := false;
+  begin
+    perform public.set_popdam_item_dismissed(
+      array['coldlion|ZZ001|ZZ2644AMBIG'], true
+    );
+  exception when others then
+    v_failed := true;
+  end;
+  if not v_failed or exists (
+    select 1 from public.popdam_item_state where source_id = 'ZZ2644AMBIG'
+  ) then
+    raise exception '#2644: ambiguous dismissal identity did not refuse without creating state';
+  end if;
+
+  v_failed := false;
+  begin
+    insert into public.product_category_predictions (
+      external_id, predicted_category, confidence, classification_source, status
+    ) values ('coldlion|ZZ001|ZZ2644AMBIG', 'Unknown', 0, 'ai', 'unclassifiable');
+  exception when others then
+    v_failed := true;
+  end;
+  if not v_failed then
+    raise exception '#2644: ambiguous canonical prediction identity did not refuse';
+  end if;
+
   perform public.set_popdam_item_dismissed(array['coldlion|ZZ001|ZZ2644ITEM'], false);
   if (select dismissed from api.plm_item_list where source_id = 'ZZ2644ITEM') is distinct from false then
     raise exception '#2644: restore -> fresh view read failed';
