@@ -202,6 +202,14 @@ Live row counts (2026-07-15): customers **836**, vendors **539**, inventory **8,
 | `/prodHistory` | **Purchase history** — orders we placed with factories, one row per production-order line × prepack component (133 fields incl. `prodLineSeq`). **Not paged; 7-day window cap.** See [`coldlion-history-endpoints-shape.md`](coldlion-history-endpoints-shape.md) | companyCode *(req)*, fromDate *(req)*, toDate *(req)*, prodOrderNo, stageCode |
 | `/orderHistory` | **Sales history** — orders customers placed with us, one row per sales-order line × prepack component (59 fields). **Not paged; 7-day window cap.** See [`coldlion-history-endpoints-shape.md`](coldlion-history-endpoints-shape.md) | companyCode *(req)*, fromDate *(req)*, toDate *(req)*, divisionCode, salesOrderNo |
 
+> **There is no Licensor or Property list endpoint.** Verified live 2026-09-07:
+> `/licensors`, `/properties`, `/royalty` and similar all return **404**. Licensors and
+> Properties are merchandise-group values and come from `/merchGroupDetails` with
+> `mgTypeCode=05`/`06` in `CW001`/`SP001`, as the row above says. Reaching for a
+> non-existent licensor endpoint is what led one analysis to read `royaltyCode` as the
+> Licensor and invalidate a whole population count — see
+> [`business-rules/unmapped-licensor-population.md`](business-rules/unmapped-licensor-population.md).
+
 **Read vs write:** all pulls are read-only GET **except** `PUT /itemDetails`, `PUT /itemImages`,
 `PUT /items`, and `POST /order`. The import only needs GETs. Any write path (pushing data
 back into the ERP) requires explicit sign-off before use.

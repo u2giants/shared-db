@@ -674,6 +674,28 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    `scripts/check-workflow-preview-ref.test.mjs` now fails the *Shared Supabase
    Migrations* guard job if any workflow pins a preview ref literal again.
 
+   > **SUPERSESSION POINTER — 2026-09-09 (orchestrator EDGE-DEV-2 closeout, marker #2597).**
+   > The wording used in this file (line 11), in `AGENTS.md` §4, and in
+   > `docs/production-promotion-procedure.md` — "run
+   > `--prepare-preview-dispatch <issue>` ... and **use only the matching stored
+   > instruction**" — reads as though that flag merely *prints* instructions you then
+   > dispatch by hand. **It does not. It is a MUTATING command.** Traced 2026-09-09 in
+   > `scripts/orchestrator-flow/reconcile.mjs`: when a live sole-orchestrator marker
+   > resolves and its `calling_task` matches the marker's own task, the call takes the
+   > mutex and **persists preview-ready state** (`persist-preview-ready` /
+   > `io.persistReady`), returning `status: RECONCILED`. Only when the marker is not
+   > the caller's own does it degrade to `REPORT_ONLY`. Treat it as a state change that
+   > must be deliberate, never as a read-only "show me the command" step. It also
+   > refuses outright from a non-orchestrator session with `REFUSED: matching live
+   > sole-orchestrator marker is required`, which is a *different* refusal from the
+   > dependency-closure one and is easy to misread as the same thing.
+   >
+   > The paragraph immediately below (merge first, then rehearse) is **correct and is
+   > NOT superseded** — it was re-read and confirmed on 2026-09-09. It is restated here
+   > because ignoring it is expensive: a preview-apply performed *before* merging
+   > permanently red-checks the pull request, and on PR #2542 that cost three review
+   > rounds. Superseded text above is left in place on purpose; it is the audit trail.
+
    **Post-merge rehearsal (the normal order).** Merge first, then rehearse on
    preview from merged `main`, then promote. Dispatch *Shared Supabase
    Migrations* with `target=preview`, `mode=apply`,

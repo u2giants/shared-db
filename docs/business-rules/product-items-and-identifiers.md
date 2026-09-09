@@ -24,7 +24,49 @@ Product classification follows [`merchandise-and-product-taxonomy.md`](merchandi
 
 An assortment head and a prepack member are different business objects. The assortment head is the orderable carton and legitimately carries no single Licensor or Property, because it mixes several. The member is a real single-property Item and must carry its own Licensor and Property. Reporting an assortment head as an Item with missing Licensor data is a false defect.
 
-Assortment membership is the controlling test, not the shape of the style number. Style-number length and format correlate with assortment status but misclassify in both directions and must not be used as the rule.
+Assortment membership is the controlling test, not the shape of the style number. Style-number length and format correlate with assortment status but misclassify in both directions and must not be used as the rule. Measured on 2026-09-07, the shape heuristic missed **41** assortments carrying normal-looking item numbers and wrongly discarded genuine components. Replacing it with the stock record's own `prepackCode` gave **1,846** prepack heads and **4,662** prepack members with only **3** items in both sets — effectively disjoint, and decidable from evidence rather than from a guess.
+
+### Source authority: ColdLion outranks DesignFlow
+
+**Settled — Albert Hazan, 2026-09-08, given in session and recorded here because it existed nowhere in the repository.** ColdLion is always authoritative over DesignFlow. Where the two disagree on any item fact, ColdLion wins; DesignFlow is a downstream copy and is never the reason to keep a value ColdLion contradicts.
+
+This settles how prepack codes are sourced. The 1,454 prepack codes visible today on the frozen item-master snapshot reached us through DesignFlow, which had itself taken them from ColdLion's own nightly prepack association sync — so the apparent conflict was never ColdLion missing the data, only our reading it at second hand. ColdLion's stock feed carries roughly 7,161 prepack-bearing rows, about five times more. The correct move is therefore to cut over to ColdLion and build the missing loader, not to hold the cutover to protect the stale copy. The loader is tracked at u2giants/popdam3#114; the destination column already exists and is empty.
+
+Do not write placeholder text into a prepack code field to mark rows for later. A placeholder is indistinguishable from a real code to every consumer that reads the column, and an empty column with a tracked loader is the honest state.
+
+### Prepack head and prepack member are two different fields
+
+**Verified 2026-09-07. This matters for prepack work in flight.**
+`plm."itemDetail".prepack_code_fk` and `public.erp_items_current.prepack_code`
+have similar names and mean opposite things:
+
+| Field | Marks | Share resolving a Property |
+|---|---|---|
+| `plm."itemDetail".prepack_code_fk` | prepack **members** — the real single-property Items inside a carton | **97.3%** |
+| `public.erp_items_current.prepack_code` | prepack **heads** — the orderable assortment carton | **5.2%** |
+
+They are not the same field and must never be treated as interchangeable.
+Reading the head field where the member field was meant inverts the answer:
+members almost always have a Property, heads almost never do, and that is the
+correct behaviour of both. For comparison, items that are neither head nor
+member resolve a Property 94.2% of the time.
+
+### Exclusions to apply before counting a "missing Licensor" population
+
+**Settled — owner ruling by Albert Hazan, 2026-09-06:** "take out of this list
+anything from 2021 and before. take out anything that is clearly not a product
+and probably an ERP artifact (EXTRA COST, GLITTER FEE, REPRINT FEE)."
+
+Items created in 2021 or earlier, and obvious ERP artifacts — extra cost,
+glitter fee, reprint fee and similar charge lines — are excluded from any
+population being assessed for a missing Licensor or Property.
+
+The exclusions that get forgotten, in the order they bite: **non-licensed
+divisions, prepack heads, prepack members, ERP charge lines, uncleaned test
+rows.** Missing any one of them inflates the answer by an order of magnitude;
+the full worked example, from a headline of thousands down to a single real
+product, is in
+[`unmapped-licensor-population.md`](unmapped-licensor-population.md).
 
 ## Non-inventory items
 
