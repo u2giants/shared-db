@@ -1166,6 +1166,58 @@ def preview_instance_text(texts: dict, source_pr) -> str | None:
     return texts.get("preview-instance.json")
 
 
+def prove_registered_historical_restoration_provenance(
+    *, version: str, run_id: int, run_head: str, original_commit: str, source_pr: int,
+    merge_sha: str, texts: dict[str, str], repo_root: Path,
+    runner: Callable[..., Any] = subprocess.run,
+) -> None:
+    """Accept producer drift only for one exact, byte-pinned restoration record.
+
+    The JavaScript registry remains the single authority used by the migration
+    guards.  This adapter asks it to validate the current migration bytes and
+    binds that answer to the original artifact digest, run, commit, source PR,
+    and source merge.  Any absent or mismatched field refuses here, leaving the
+    caller's ordinary producer-mismatch path unchanged.
+    """
+    matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
+    if len(matches) != 1:
+        raise RiskGateError(
+            f"registered historical restoration {version} is absent or ambiguous on exact main"
+        )
+    recorded = preview_content_manifest(texts).get(version)
+    evidence = {
+        "version": version,
+        "previewApplyRun": str(run_id),
+        "previewDispatchCommit": run_head,
+        "previewAppliedCommit": original_commit,
+        "sourcePr": source_pr,
+        "sourceMergeCommit": merge_sha,
+        "artifactFileSha256": recorded,
+    }
+    relative = matches[0].relative_to(repo_root).as_posix()
+    try:
+        result = runner(
+            [
+                "node", "scripts/historical-migration-restorations.mjs",
+                "--production-provenance", relative,
+                json.dumps(evidence, separators=(",", ":"), sort_keys=True),
+            ],
+            cwd=repo_root, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            encoding="utf-8",
+        )
+    except OSError as exc:
+        raise RiskGateError("historical restoration registry could not be executed") from exc
+    if result.returncode != 0:
+        detail = (result.stderr or "historical restoration registry refused the evidence").strip()
+        raise RiskGateError(detail)
+    try:
+        answer = json.loads(result.stdout)
+    except (json.JSONDecodeError, TypeError) as exc:
+        raise RiskGateError("historical restoration registry returned unreadable evidence") from exc
+    if answer != {"version": version, "fileSha256": recorded}:
+        raise RiskGateError("historical restoration registry returned mismatched evidence")
+
+
 def prove_historical_original_apply_runs(
     *, record: dict, allowlist: list[str], repo_root: Path, main_sha: str,
     api: Callable[[str], Any], downloader: Callable[[int, Path], None],
@@ -1347,13 +1399,21 @@ def prove_historical_original_apply_runs(
                 )
             except PreviewProducerMismatch as producer_error:
                 texts = texts or artifact_texts(artifact, downloader)
-                prove_bound_mainline_post_merge_original(
-                    texts=texts, run=run, run_id=run_id, run_head=run_head,
-                    original_commit=original_commit,
-                    run_versions=sorted(v for v in allowlist if runs.get(v) == run_id),
-                    source_pr=source_pr, merge_sha=merge_sha, main_sha=main_sha, api=api,
-                    producer_error=producer_error,
-                )
+                try:
+                    prove_registered_historical_restoration_provenance(
+                        version=version, run_id=run_id, run_head=run_head,
+                        original_commit=original_commit,
+                        source_pr=source_pr, merge_sha=merge_sha, texts=texts,
+                        repo_root=repo_root,
+                    )
+                except RiskGateError:
+                    prove_bound_mainline_post_merge_original(
+                        texts=texts, run=run, run_id=run_id, run_head=run_head,
+                        original_commit=original_commit,
+                        run_versions=sorted(v for v in allowlist if runs.get(v) == run_id),
+                        source_pr=source_pr, merge_sha=merge_sha, main_sha=main_sha, api=api,
+                        producer_error=producer_error,
+                    )
         texts = texts or artifact_texts(artifact, downloader)
         if texts.get("historical-preview-source.json"):
             raise RiskGateError(
@@ -1837,6 +1897,7 @@ def main() -> int:
     return 0 if result.get("productionPromotionAllowed", result["automaticPromotionAllowed"]) else 3
 
 PREVIEW_PRODUCER_PATHS += (
+    "scripts/production-verification-sidecars/20260908214749.json",
     "scripts/production-verification-sidecars/20260830013942.json",
     "scripts/production-verification-sidecars/20260830130345.json",
     "scripts/production-verification-sidecars/20260830172356.json",
@@ -1862,6 +1923,7 @@ PREVIEW_PRODUCER_PATHS += (
     "scripts/production-verification-sidecars/20260903083204.json",
     "scripts/production-verification-sidecars/20260905063701.json",
     "scripts/production-verification-sidecars/20260905142150.json",
+    "scripts/production-verification-sidecars/20260907200221.json",
     "scripts/production-verification-sidecars/20260907030418.json",
     "scripts/production-verification-sidecars/20260907051735.json",
     # Invoked by check-sql.sh during preview; pin the reviewed parser so the

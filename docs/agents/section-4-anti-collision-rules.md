@@ -2,9 +2,9 @@
 
 > **Active hardening plan:** [`../../plan_multi_agent_database_coordination_hardening.md`](../../plan_multi_agent_database_coordination_hardening.md), issue #1366. Read its STATUS table first. It preserves the rules below while adding read/write dependencies, proven prerequisites, provider-neutral work contracts, lifecycle traces, recoverable fenced stage leases, and an opt-in Supabase branch pilot. Its implementation is repository maintenance outside the structure/schema orchestrator.
 >
-> **Completed reviewer API-budget plan:** [`../../plan_reviewer_assignment_api_budget.md`](../../plan_reviewer_assignment_api_budget.md), issue #1767. Read its STATUS table and verification link before changing reviewer assignment. It replaced historical availability scans with a bounded active-reviewer index, strict pre-lock quota/request checks, cached PR/verdict reads, and exhaustive mutex-cleanup tests. Slot 1 is capped at 19 requests; mandatory slot 2 has a documented 22-request normal-path ceiling after PR #1813.
+> **Completed reviewer API-budget plan:** [`../../plan_reviewer_assignment_api_budget.md`](../../plan_reviewer_assignment_api_budget.md), issue #1767. Read its STATUS table and verification link before changing reviewer assignment. It replaced historical availability scans with a bounded active-reviewer index, strict pre-lock quota/request checks, cached PR/verdict reads, and exhaustive mutex-cleanup tests. The current fixed per-operation ceiling is 25 requests; see the dated re-derivations and #2550 repair in the verification record.
 
-Reviewer availability is the bounded `refs/db-review-active/<reviewer>` index. Permanent assignment, replacement, and failure refs remain immutable audit evidence and are never scanned to decide availability. Each command reads the active prefix once, caches repeated evidence, refuses before creating an owner commit or mutex when GitHub quota is unreadable or below reserve, and stops before the enforced ceiling (`REVIEW_OPERATION_REQUEST_LIMIT` — **22 since 2026-08-29**, so request 23 is refused; 19 before that, per issue #1812 / PR #1813, which raised it to fit `--review-slot 2`'s three extra pre-mutex calls). Read the constant, never a number copied from a document. Quota reset errors use `America/New_York`.
+Reviewer availability is the bounded `refs/db-review-active/<reviewer>` index. Permanent assignment, replacement, and failure refs remain immutable audit evidence and are never scanned to decide availability. Each command reads the active prefix once, caches repeated evidence, refuses before creating an owner commit or mutex when GitHub quota is unreadable or below reserve, and stops before the enforced ceiling (`REVIEW_OPERATION_REQUEST_LIMIT` — **25 since 2026-09-01**, so request 26 is refused). Replacement preflight batches the immutable failure ref named by each suffixed replacement record, and absence in the complete active-reviewer snapshot is not reread; neither optimization replaces the fresh checks inside the mutex. Read the constant, never a number copied from a document. Quota reset errors use `America/New_York`.
 
 An exact-head verdict, terminal failure/replacement, moved head, merged PR, or closed PR makes a lease stale. Stale leases are deleted only while the global mutex is owned and the fixed ref still matches its expected SHA. If release cannot be proved, preserve the named ref/SHA and use the guarded `recover-author-mutex.yml` procedure.
 
@@ -250,7 +250,7 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    ```
 
    For new assignments, the machine-independent cursor rotates Grok 4.6 → GLM
-   5.3 → Kimi K3 → Muse Spark 1.2 Contributor → Gemini 3.8 Flash High →
+   5.3 → Kimi K3 → Muse Spark 1.3 Contributor → Gemini 3.8 Flash High →
    repeat, skipping any reviewer whose engine matches the live orchestrator.
    Codex GPT-5.6 Sol was retired from the rotation on 2026-09-06 (issue #2485)
    by owner instruction and is no longer drawable.
@@ -673,6 +673,28 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    the `coldlion-*` workflows) were converted to the same pattern, and
    `scripts/check-workflow-preview-ref.test.mjs` now fails the *Shared Supabase
    Migrations* guard job if any workflow pins a preview ref literal again.
+
+   > **SUPERSESSION POINTER — 2026-09-09 (orchestrator EDGE-DEV-2 closeout, marker #2597).**
+   > The wording used in this file (line 11), in `AGENTS.md` §4, and in
+   > `docs/production-promotion-procedure.md` — "run
+   > `--prepare-preview-dispatch <issue>` ... and **use only the matching stored
+   > instruction**" — reads as though that flag merely *prints* instructions you then
+   > dispatch by hand. **It does not. It is a MUTATING command.** Traced 2026-09-09 in
+   > `scripts/orchestrator-flow/reconcile.mjs`: when a live sole-orchestrator marker
+   > resolves and its `calling_task` matches the marker's own task, the call takes the
+   > mutex and **persists preview-ready state** (`persist-preview-ready` /
+   > `io.persistReady`), returning `status: RECONCILED`. Only when the marker is not
+   > the caller's own does it degrade to `REPORT_ONLY`. Treat it as a state change that
+   > must be deliberate, never as a read-only "show me the command" step. It also
+   > refuses outright from a non-orchestrator session with `REFUSED: matching live
+   > sole-orchestrator marker is required`, which is a *different* refusal from the
+   > dependency-closure one and is easy to misread as the same thing.
+   >
+   > The paragraph immediately below (merge first, then rehearse) is **correct and is
+   > NOT superseded** — it was re-read and confirmed on 2026-09-09. It is restated here
+   > because ignoring it is expensive: a preview-apply performed *before* merging
+   > permanently red-checks the pull request, and on PR #2542 that cost three review
+   > rounds. Superseded text above is left in place on purpose; it is the audit trail.
 
    **Post-merge rehearsal (the normal order).** Merge first, then rehearse on
    preview from merged `main`, then promote. Dispatch *Shared Supabase
