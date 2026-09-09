@@ -1868,9 +1868,30 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/reap-merged-worktrees.mjs:212",
+      "semantic_key": "scripts/reap-merged-worktrees.mjs:0c5486b47c120906e77ea4bbd5b9279bae7aa6062e0bff1e7994003ea89855c1:1",
+      "line_sha256": "0c5486b47c120906e77ea4bbd5b9279bae7aa6062e0bff1e7994003ea89855c1",
+      "disposition": "excluded",
+      "reason": "Issue #1868. Excluded: the word appears in a prose comment about an optional git administrative file whose mtime could not be read while measuring worktree activity. It makes no claim about a migration, a DDL object, or anything created or applied in the database, so it is outside the throughput-truth surface this audit guards."
+    },
+    {
+      "site": "scripts/reap-merged-worktrees.mjs:132",
+      "semantic_key": "scripts/reap-merged-worktrees.mjs:e2ccad293e4e07e4e25f9500b4285ceef1f5a34975fea14d5b5709efc9441a40:1",
+      "line_sha256": "e2ccad293e4e07e4e25f9500b4285ceef1f5a34975fea14d5b5709efc9441a40",
+      "disposition": "excluded",
+      "reason": "Issue #1868. Excluded: the word appears in a prose comment describing the worktree reaper's own whole-run refusal when the open database claims cannot be read. It makes no claim about a migration, a DDL object, or anything created or applied in the database, so it is outside the throughput-truth surface this audit guards."
+    },
+    {
+      "site": "scripts/check-required-checks-preflight.mjs:109",
+      "semantic_key": "scripts/check-required-checks-preflight.mjs:c5d54e7fa56d7d31627f29752aefcede778aadb2df4ea5b570a886c7001e4b2f:1",
+      "line_sha256": "c5d54e7fa56d7d31627f29752aefcede778aadb2df4ea5b570a886c7001e4b2f",
+      "disposition": "excluded",
+      "reason": "This is the refusal raised when the trusted origin/main copy of the pre-flight source cannot be read, so the pinned floor is unknown. It reports the pre-flight's own missing input and has nothing to do with a database object that was never created, which is what the throughput truth audit enriches."
     }
   ],
-  "call_site_count": 265,
-  "call_site_sha256": "3e52eb648e38ce50633161e68f8cc1b4cb12d4fb592135556042c2210820a442",
+  "call_site_count": 268,
+  "call_site_sha256": "ae7d532230055ada3338d37f973bfc8aa26affae122a190fddc8ece604f0d180",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

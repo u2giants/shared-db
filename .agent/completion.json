@@ -1,14 +1,17 @@
 {
   "schema_version": 1,
-  "work_issue": 2572,
+  "work_issue": 1403,
   "outcome": "ready-for-merge",
-  "pr": 2585,
+  "pr": 2613,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2572/2",
-  "contract_sha256": "3947dea07b8af7cfb64454ba018fc26b6fbda81379f07b0fe4cecab20245408c",
-  "head_sha": "7b72b2f4bd21a26ac013b1f86370ba15bb3ebf70",
+  "contract_ref": "refs/db-contracts/1403/6",
+  "contract_sha256": "907970e05aeb9652521634141615fd48fc244dc4154a82cf470bf0580f20ebb9",
+  "head_sha": "835d05cbf409ea52789eaf0ff61ebdc67b3c7ef7",
   "files_changed": [
-    "HANDOFF.d/2026-09-08T1650Z-edge-dev-claude-four-blocked-issues.md"
+    "docs/verification/main-required-status-checks.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-required-checks-preflight.mjs",
+    "scripts/check-required-checks-preflight.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -16,23 +19,61 @@
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; published as refs/db-contracts/2572/1."
+      "evidence": "Contract is valid; generation 3 published as refs/db-contracts/1403/3 at 500994e3. Generations 1 and 2 belong to the codex session that activated enforced mode on 2026-09-07; this generation covers the separate required-context promotion that activation record deferred."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Report satisfies contract generation 1 pinned by hash 68e5648b."
+      "evidence": "Report satisfies contract generation 3 pinned by hash 31a35f15."
+    },
+    {
+      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
+      "exit_code": 0,
+      "evidence": "47 tests, 47 pass, 0 fail after the review fix (42 before). Five are new: a regression test that reproduces the merge deadlock -- origin/main's mirror and pin both carry the older eleven while the head pins twelve, and the mirror is now accepted; a real shrink is still refused; a head whose pin drops a name origin/main still pins is refused with 'may only grow'; an unreadable, empty or unparseable origin/main pin is refused rather than defaulted; and a context named only inside a comment is not read as pinned."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors in the handoff document."
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node scripts/update-required-checks.mjs --add \"Agent work contract\" --apply",
+      "exit_code": 0,
+      "evidence": "Live change applied 2026-09-08T21:28:48Z. READBACK OK -- 12 contexts required, strict: false. Before: Promotion contract tests (offline), Cross-PR object collision, Tools offline tests, SQL migration guards, Domain ownership, Intake pointer guard, Handoff contract, Migration author lease, Migration guarded merge authorization, Orchestrator marker guard, Cancelled work guard. After: those eleven unchanged plus Agent work contract. No context removed, no context renamed. The tool rewrote docs/verification/main-required-status-checks.json from that readback, and this pull request carries the rewrite."
+    },
+    {
+      "command": "gh pr checks <each open PR> --json name,state | select .name == \"Agent work contract\"",
+      "exit_code": 0,
+      "evidence": "Gate evidence read at 2026-09-08T21:27:09Z, one day after enforced mode began at 2026-09-07T21:26:45Z. Eleven pull requests open. Nine SUCCESS. PR 2612 FAILURE, and its log gives the reason as 'checked PR base is not an ancestor of the reported implementation head; refresh the branch before relying on its evidence' -- a stale branch its own author refreshes, which is the gate working rather than a defect in it. PR 2606 reported no checks at all because it is in conflict with main, and GitHub cannot compute a merge commit for a conflicted pull request, so no pull_request workflow is created for it."
+    },
+    {
+      "command": "node -e \"import('./scripts/check-required-checks-preflight.mjs').then(m => console.log(m.readPinnedFloor(process.cwd()).length, m.readRequiredChecksMirror(process.cwd()).length))\"",
+      "exit_code": 0,
+      "evidence": "Known-dirty control first: the pre-review head 1dea8fc5, run against the real origin/main, refuses with 'the trusted origin/main mirror is a stale subset; missing pinned contexts: Agent work contract' -- exactly the deadlock the reviewer described, reproduced from git rather than by hand. The fixed head then reports 'floor from origin/main: 11 names; includes Agent work contract? false' and 'mirror from origin/main accepted: 11 contexts', which is the state the guarded merge will see."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=268. The check first refused on this branch with 'semantic inventory drift: re-review changed call sites (found 268, recorded 267)' -- a real refusal reproduced in CI, not asserted -- because the new origin/main floor read raises a refusal whose text contains the word 'missing'. The one new site is recorded as excluded with its reason; no existing disposition was altered and no stale site remains."
     }
   ],
+  "deviations": [
+    "The tool's rewrite of the mirror drops the _provenance field the 2026-09-04 capture carried. The file says it is rewritten by the tool from its own post-write readback and must not be hand-edited, so the field was not restored by hand; the _why field it keeps already names the tool as the source."
+  ],
+  "residual_risk": [
+    "Between the live change and this pull request merging, branch protection requires twelve contexts while the mirror on main names eleven. The lag is permissive, not dangerous: the pre-flight still refuses any check that reported on the head and is not green, and live branch protection enforces the twelfth at merge time regardless. The floor is now read from origin/main, so the lag can no longer deadlock the merge.",
+    "Switch 2 of issue #1403 stays closed and the issue stays open. One open claim, issue #2418, still writes objects:, with an author lease running to 2026-09-09T02:53:18Z. A legacy objects: claim is read as a WRITE, so retiring the alias while it is live would let a second writer start against work already in flight."
+  ],
   "assumptions_resolved": [
-    "This pull request changes one prose file plus the two .agent evidence files; no code, test, workflow, migration or configuration file is touched.",
-    "No database was read or written. No issue was closed by this pull request.",
-    "Re-reviewed from a clone whose main is current origin/main fbd49fe829a33a225805334a0cdba662dfd44084; the merge-base diff of this branch is exactly the handoff file plus the two .agent evidence files."
+    "The activation gate is met: enforced mode began 2026-09-07T21:26:45Z and the live change was applied 2026-09-08T21:28:48Z, two minutes after a full day had passed.",
+    "Enforced mode has run green for that day in the sense the gate meant: nine of eleven open pull requests pass the check, the one FAILURE is a stale branch base the check correctly refuses, and the one with no result at all is a pull request in conflict with main, for which GitHub creates no pull_request run.",
+    "The pinned floor grew without weakening: every test that consumes PINNED_REQUIRED_CONTEXTS either compares the committed mirror to it or feeds it in as a trusted origin/main list, and all 42 pass.",
+    "Nothing was removed or renamed and strict stayed false, proved by the tool's own post-write readback rather than by the request that was sent.",
+    "No database was read or written.",
+    "Switch 2 was not touched: the legacy objects: alias is still live, and issue #1403 stays open for it.",
+    "The independent review of head fee94bce returned REVISE on a real defect, not a nitpick: the guarded merge runs the pre-flight from the head's tree, so a grown pin was judged against origin/main's un-grown mirror and the only merge path refused the only commit that could update that mirror. It was fixed rather than argued away, and the pre-fix failure was reproduced from git before the fix was written.",
+    "The branch was refreshed onto main after pull request 2606 merged, because the guarded merge refuses a dispatch against a superseded tip. The refresh touched only the evidence pair; the three real files are unchanged from the reviewed fix.",
+    "The offline tools check refused this branch until the new refusal line carried an explicit disposition in the throughput truth audit. The inventory grew by exactly one site, which was reviewed and excluded on its meaning rather than silenced by raising the recorded count alone."
   ],
   "stop_conditions_hit": []
 }
