@@ -5,8 +5,10 @@ begin;
 do $$
 declare
   v_item uuid;
+  v_deleted_item uuid;
   v_legacy uuid;
   v_prediction uuid;
+  v_deleted_prediction uuid;
   v_count integer;
   v_columns text[];
   v_viewdef text;
@@ -128,6 +130,30 @@ begin
     raise exception '#2644: removing a legacy ERP row deleted prediction history';
   end if;
 
+  insert into plm.item (
+    item_number, description, source_system, source_id, raw
+  ) values (
+    'ZZ2644DELETE', 'ZZ2644 DELETE HISTORY', 'coldlion', 'ZZCO|ZZ001|ZZ2644DELETE',
+    '{"companyCode":"ZZCO","divisionCode":"ZZ001","itemNo":"ZZ2644DELETE"}'
+  ) returning id into v_deleted_item;
+
+  insert into public.product_category_predictions (
+    external_id, predicted_category, confidence, classification_source, status
+  ) values (
+    'coldlion|ZZ001|ZZ2644DELETE', 'Wall', 0.8, 'ai', 'approved'
+  ) returning id into v_deleted_prediction;
+
+  delete from plm.item where id = v_deleted_item;
+  if not exists (
+    select 1 from public.product_category_predictions
+    where id = v_deleted_prediction
+      and plm_item_id is null
+      and item_identity_status = 'unresolved'
+      and status = 'approved'
+  ) then
+    raise exception '#2644: retiring a canonical item deleted or falsely resolved prediction history';
+  end if;
+
   insert into public.product_category_predictions (
     erp_item_id, external_id, predicted_category, confidence,
     classification_source, status
@@ -154,7 +180,7 @@ begin
     raise exception '#2644: missing canonical prediction identity did not refuse';
   end if;
 
-  raise notice '#2644 PASSED: protected state, atomic dismiss/restore, 21-column view, canonical prediction identity and history preservation.';
+  raise notice '#2644 PASSED: protected state, atomic dismiss/restore, 21-column view, canonical prediction identity and ERP/item retirement history preservation.';
 end;
 $$;
 
