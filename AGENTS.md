@@ -1453,7 +1453,7 @@ unauthorized assumption, not evidence that authority existed.**
 | Value | Meaning |
 |---|---|
 | `owner-current-chat <ISO-8601 instant>` | Albert authorized **this** session to hold the orchestrator, in the conversation this session is running in. Not a past chat, not another session's chat, not a standing document. |
-| `owner-authorized-handover #<marker issue>` | Direct succession from the named predecessor marker. It must be the **same** issue this marker declares as `handover_issue:`, so a session cannot cite a handover it is not continuing. |
+| `owner-authorized-handover #<marker issue>` | Direct succession from the named predecessor marker. It must be the **same** issue this marker declares as `handover_issue:`. That agreement is all the guard can check: like `handover_issue` itself (§11c), it does not prove the cited marker exists or that this session really succeeds it. |
 
 #### What is refused, by name, and why
 

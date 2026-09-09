@@ -57,8 +57,9 @@ export const AUTHORIZATION_FIELD = 'authorization'
  * routing contract uses (`CONTRACT_EFFECTIVE_DATE` in
  * `check-orchestrator-marker.mjs`): a live orchestrator must not be failed for
  * a field that did not exist when it started. Grandfathering is reported as a
- * warning, never silently. It applies ONLY to already-open markers; it is not a
- * grace period for a new one.
+ * warning, never silently. The test is the marker's own opening date, so any
+ * marker opened before the cutoff -- including one opened today -- takes this
+ * branch; after the cutoff no marker is grandfathered at all.
  */
 export const AUTHORIZATION_EFFECTIVE_DATE = '2026-09-10'
 
