@@ -3,6 +3,32 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HISTORICAL_RESTORATIONS, validateHistoricalProductionProvenance, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
+test('pins the issue 2580 restoration without changing production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260909084253']
+  assert.equal(row.filename,'supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql')
+  assert.equal(row.fileSha256,'70beba94d21b05384438a298fa3d49bd0a1bbdb31cbf4cb0216bec8aa380e76f')
+  assert.equal(row.statementBytes,6537)
+  assert.equal(row.statementSha256,'1dd8adc722def760f9d3dde9abfff9cf53e3929fab97e49954b8512d91c1f33b')
+  assert.equal(Object.isFrozen(row),true)
+  assert.deepEqual(row.objects,[
+    'table dflow.sample_shipment_notice',
+    'table dflow.sample_shipment_notice_recipient',
+    'function dflow.prevent_sample_shipment_notice_snapshot_mutation',
+    'function dflow.prevent_sample_shipment_notice_recipient_snapshot_mutation',
+    'trigger sample_shipment_notice_snapshot_immutable on dflow.sample_shipment_notice',
+    'trigger sample_shipment_notice_recipient_snapshot_immutable on dflow.sample_shipment_notice_recipient',
+    'function dflow.claim_sample_shipment_notice',
+  ])
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260909084253_wrong.sql','select 1;\n'),
+    /not an approved exact historical restoration/,
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,'select 1;\n'),
+    /historical restoration file hash mismatch for 20260909084253/,
+  )
+})
+
 test('pins the issue 2506 preview restoration without granting production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260908214749']
   assert.equal(row.filename,'supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql')
