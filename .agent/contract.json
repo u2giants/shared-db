@@ -54,9 +54,9 @@
     "No object or path outside claim 2630"
   ],
   "assumptions": [
-    "Private licensor-source-data PR 65 emits exactly Disney and Lucas North America Home/Standard scopes with per-scope counts and hashes plus aggregate counts.",
+    "Private licensor-source-data PR 65 emits exactly Disney and Lucas North America Home/Standard scopes with per-scope counts and relationship hashes plus aggregate counts.",
     "The fixed ten-column source inventory remains metadata-only; exact capture identity exposure belongs to issue 2357 candidate functions.",
-    "Existing mutable OPA entity tables retain current_snapshot basis; only the three new capture tables use the coherent latest-complete root."
+    "Existing mutable OPA entity tables retain current_snapshot count basis; only the three new capture tables use the coherent latest-complete root."
   ],
   "stop_conditions": [
     "Claim 2630, reserved version 20260909115140, or coordinator route changes",
