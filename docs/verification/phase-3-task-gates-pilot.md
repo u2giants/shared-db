@@ -7,7 +7,7 @@ text was trimmed; the one router change is a short route to the installed gate.
 
 | Surface | Before | After | Headings | SHA-256 |
 |---|---:|---:|---:|---|
-| `AGENTS.md` | 123,361 bytes / 1,618 lines | 123,683 bytes / 1,625 lines | 62 | before `ab8ceed1b6bb32ddbcc6e5ead542c8ef2cb0b8c114357a2dcefa194dc974413d`; after `d0c075c9f3347b05652f3658821e45e38e29dc4d56908d161297feb8f9340917` |
+| `AGENTS.md` | 123,361 bytes / 1,618 lines | 123,903 bytes / 1,628 lines | 62 | before `ab8ceed1b6bb32ddbcc6e5ead542c8ef2cb0b8c114357a2dcefa194dc974413d`; after `6cfd6d1653a3c4549eb6038783460e7d9323d297225a2e44c6970a9f8e1a0942` |
 | `CLAUDE.md` | absent | absent | 0 | n/a |
 | `HANDOFF.md` | 3,256 bytes / 70 lines | 3,256 bytes / 70 lines | 7 | `d2cf8d4a2813d904af59300ef518e8b19627fb3bfd12b68cbf8f466ec161f348` |
 | `README.md` | 8,539 bytes / 135 lines | 8,539 bytes / 135 lines | 9 | `0440b702bc3cf8de3ed1cd8aa998a714db6b6fe17df94c421a4be5643fc89d90` |

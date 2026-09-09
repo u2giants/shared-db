@@ -27,6 +27,8 @@ jobs:
           persist-credentials: false
 
       - name: Check out accepted task-gate engine
+        # popcre/ai-devops is public, so the default token can read this exact
+        # source-of-truth commit without a cross-repository secret.
         uses: actions/checkout@v4
         with:
           repository: popcre/ai-devops
