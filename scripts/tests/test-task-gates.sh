@@ -18,6 +18,7 @@ expect_class(){
 
 expect_class README.md prose 'ordinary documentation uses the prose fast path'
 expect_class scripts/example.py code 'ordinary source uses the code path'
+expect_class AGENTS.md reviewer-safety 'agent rulebook receives protected full treatment'
 expect_class supabase/config.toml shared-db 'Supabase configuration is protected shared-db work'
 expect_class supabase/migrations/20990101000000_fixture.sql shared-db 'migration is protected shared-db work'
 
@@ -63,15 +64,24 @@ assert_blocked 'owner request cannot bypass protected migration' --owner-request
 )
 pass 'valid code flow proceeds to shipping checks'
 
+code_hash_before="$(git -C "$fixture" hash-object scripts/example.py)"
 cp "$fixture/.ai-devops/task-gates.json" "$TMP/policy.backup.json"
 rm -f "$fixture/.ai-devops/task-gates.json"
+printf '%s\n' 'supabase/config.toml' > "$TMP/rollback-path"
+without_policy="$(cd "$fixture" && ai-task-gates explain --json --paths-from "$TMP/rollback-path" | jq -r '.observed_class')"
 cp "$TMP/policy.backup.json" "$fixture/.ai-devops/task-gates.json"
-cmp -s "$TMP/policy.backup.json" "$fixture/.ai-devops/task-gates.json" \
-  && pass 'policy rollback and restore leaves repository code unchanged' \
-  || fail 'policy rollback and restore did not reproduce the declaration'
+with_policy="$(cd "$fixture" && ai-task-gates explain --json --paths-from "$TMP/rollback-path" | jq -r '.observed_class')"
+code_hash_after="$(git -C "$fixture" hash-object scripts/example.py)"
+if [ "$without_policy" = code ] && [ "$with_policy" = shared-db ] \
+  && [ "$code_hash_before" = "$code_hash_after" ] \
+  && cmp -s "$TMP/policy.backup.json" "$fixture/.ai-devops/task-gates.json"; then
+  pass 'rollback removes the local escalation and restore reinstates it without changing code'
+else
+  fail 'rollback positive control or source-integrity check failed'
+fi
 
 if [ "$failures" -ne 0 ]; then
   printf '%s failure(s)\n' "$failures" >&2
   exit 1
 fi
-printf '9 passed / 0 failed\n'
+printf '10 passed / 0 failed\n'

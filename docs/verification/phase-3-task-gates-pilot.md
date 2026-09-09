@@ -30,18 +30,25 @@ Unassigned headings: **0**. Removed or unreachable instructions: **0**.
 ## Policy, trigger, and enforcement evidence
 
 - Ordinary Markdown resolves to `prose`; ordinary source resolves to `code`.
+- Agent rulebooks resolve to protected `reviewer-safety`, preserving the
+  repository's existing full-treatment carve-out for instruction files.
 - The local declaration strengthens every `supabase/**` path plus the two
   migration-risk policy files to protected `shared-db` work.
 - A migration fixture refuses deployment with exit 3. Neither `--acknowledge`
   nor `--owner-request` can bypass it. A valid code flow proceeds to shipping.
 - The merged gate retains the governed issue claim, branch-and-PR requirement,
   target proof, preview proof, and production-promotion authorization.
+- The dedicated pull-request workflow installs the two task-gate commands from
+  the accepted central-engine commit, proves the system-path command, and runs
+  the focused fixture so the assertion can block CI.
 - This pilot is repository maintenance only. It performs no database, schema,
   application-row, preview, cloud, infrastructure, or production mutation.
 
 ## Rollback rehearsal
 
-The focused test removes and restores the declaration from a disposable Git
-fixture, compares it byte-for-byte with its backup, and leaves the fixture's
-source untouched. Operational rollback is the same bounded action: revert the
-pilot commit. No database or production rollback is involved.
+The focused test removes the declaration from a disposable Git fixture and
+positively observes `supabase/config.toml` fall from `shared-db` to `code`. It
+then restores the declaration, observes `shared-db` again, compares the policy
+byte-for-byte, and proves the source-file hash did not change. Operational
+rollback is the same bounded action: revert the pilot commit. No database or
+production rollback is involved.
