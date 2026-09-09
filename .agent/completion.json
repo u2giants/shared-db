@@ -10,7 +10,6 @@
   "evidence_note": "Implementation head 90b93af8 passed the full from-empty Database Contract Tests run 34365153189. The later evidence-only commit changes only this completion report.",
   "files_changed": [
     ".agent/contract.json",
-    ".agent/completion.json",
     "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
     "supabase/tests/plm_item_import_phase2_contracts.sql",
     "supabase/tests/plm_item_list_repoint_contracts.sql"
