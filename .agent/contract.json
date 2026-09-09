@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2318,
-  "generation": 6,
+  "generation": 7,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Close the gap that let unauthorized orchestrator marker #2312 pass every check on 2026-09-04: nothing anywhere asked on what grounds the orchestrator role had been taken. Add an `authorization:` field to the orchestrator routing block with exactly two admissible grounds (owner authorization in the current chat, or an owner-authorized handover naming the marker actually being continued), refuse by name each inference that produced #2312, fail closed on unrecognised free text, and wire it into check-orchestrator-marker.mjs so a marker without admissible grounds resolves as INVALID rather than routable. Document it in AGENTS.md.",
@@ -13,7 +13,7 @@
   "stop_conditions": [
     "The change would require adding `authorization` to REQUIRED_FIELDS, which would fail the live marker for a field that did not exist when it opened",
     "Main moves in a way that invalidates the marker-guard tests or the routing block shape",
-    "Scope widens beyond the marker guard, its routing/admission libraries, their tests, and AGENTS.md"
+    "Scope widens beyond the marker guard, its routing/admission libraries, their tests, the Orchestrator Marker Guard workflow that runs them, and AGENTS.md"
   ],
   "assumptions": [
     "Admission cannot PREVENT a marker being opened. Markers are claimed outside any pull request, exactly as marker collisions are. This makes the grounds a required, typed, published field so a silent assumption becomes a written, refutable assertion.",
@@ -57,6 +57,7 @@
     "AGENTS.md",
     ".agent/contract.json",
     ".agent/completion.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    ".github/workflows/orchestrator-marker-guard.yml"
   ]
 }
