@@ -17,36 +17,12 @@
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "node --test scripts/historical-migration-restorations.test.mjs",
-      "exit_code": 0,
-      "evidence": "10 registry tests passed with no failures or skips after the current-main refresh, including exact issue 2543 and issue 2580 metadata and negative wrong-path and wrong-byte cases."
-    },
-    {
-      "command": "node --input-type=module -e <exact PR2631 blob validation>",
-      "exit_code": 0,
-      "evidence": "The registry accepted PR 2631 head 7ba30e4db1558d2dabf5997141ee6b98306f8e86 at the exact path, independently recomputed the file and statement digests and 61267 statement bytes, confirmed the exact claim 2630 object scope, and refused changed path or bytes."
-    },
-    {
-      "command": "python -m unittest scripts.test_production_migration_guard",
-      "exit_code": 0,
-      "evidence": "236 tests passed; issue 2543 and the current-main issue 2580 restoration remain production eligible while existing blocked and preview-only versions keep their refusals."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL checks passed under Git Bash against current origin/main e4725924; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."
-    },
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "44 contract tests passed with no failures or skips."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors after the exact current-main e4725924 refresh and additive restoration-registry conflict resolution."
-    }
+    {"command": "node --test scripts/historical-migration-restorations.test.mjs", "exit_code": 0, "evidence": "10 registry tests passed with no failures or skips after the current-main refresh, including exact issue 2543 and issue 2580 metadata and negative wrong-path and wrong-byte cases."},
+    {"command": "node --input-type=module -e <exact PR2631 blob validation>", "exit_code": 0, "evidence": "The registry accepted PR 2631 head 7ba30e4db1558d2dabf5997141ee6b98306f8e86 at the exact path, independently recomputed the file and statement digests and 61267 statement bytes, confirmed the exact claim 2630 object scope, and refused changed path or bytes."},
+    {"command": "python -m unittest scripts.test_production_migration_guard", "exit_code": 0, "evidence": "236 tests passed; issue 2543 and the current-main issue 2580 restoration remain production eligible while existing blocked and preview-only versions keep their refusals."},
+    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL checks passed under Git Bash against current origin/main e4725924; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."},
+    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 contract tests passed with no failures or skips."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors after the exact current-main e4725924 refresh and additive restoration-registry conflict resolution."}
   ],
   "assumptions_resolved": [
     "Migration file SHA256 is 9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7; statement SHA256 is 0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719 over 61267 bytes.",
