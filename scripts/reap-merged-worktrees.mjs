@@ -177,7 +177,7 @@ export function blockedByLiveOrchestrator(orchestratorActive, force, claimsReada
 }
 
 /**
- * Measure commits which exist only in this checkout's branch. A missing
+ * Measure commits which exist only in this checkout's branch. An absent
  * upstream is a distinct, safe-to-report state: without a remote comparison
  * point the reaper must keep the worktree.
  */
