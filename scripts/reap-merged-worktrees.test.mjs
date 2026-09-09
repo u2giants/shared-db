@@ -14,6 +14,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   blockedByLiveOrchestrator,
+  branchPushState,
   claimedHolds,
   isIdle,
   lastActivityMs,
@@ -31,7 +32,9 @@ const wt = (over = {}) => ({
   detached: false,
   locked: false,
   dirty: false,
-  unpushed: false,
+  hasUpstream: true,
+  upstream: "origin/feature/x",
+  unpushed: 0,
   isMain: false,
   ...over,
 });
@@ -58,9 +61,77 @@ test("a DIRTY worktree is never removed, however merged its branch is", () => {
 });
 
 test("a worktree with unpushed commits is never removed", () => {
-  const { remove, keep } = plan([wt({ unpushed: true })], merged);
+  const { remove, keep } = plan([wt({ unpushed: 3 })], merged);
   assert.equal(remove.length, 0);
-  assert.match(keep[0].reason, /not pushed/);
+  assert.match(keep[0].reason, /3 unpushed commits relative to origin\/feature\/x/);
+});
+
+test("a branch with no upstream is never removed", () => {
+  const { remove, keep } = plan(
+    [wt({ hasUpstream: false, upstream: null, unpushed: null })],
+    merged,
+  );
+  assert.equal(remove.length, 0);
+  assert.match(keep[0].reason, /no upstream/);
+});
+
+function gitFixture() {
+  const root = mkdtempSync(join(tmpdir(), "reaper-unpushed-"));
+  const remote = join(root, "remote.git");
+  const worktree = join(root, "worktree");
+  execFileSync("git", ["init", "--bare", "-q", remote]);
+  execFileSync("git", ["clone", "-q", remote, worktree]);
+  const git = (...args) => execFileSync("git", ["-C", worktree, ...args], { stdio: "pipe" });
+  git("config", "user.name", "Reaper Test");
+  git("config", "user.email", "reaper@example.invalid");
+  writeFileSync(join(worktree, "fixture.txt"), "base\n");
+  git("add", "fixture.txt");
+  git("commit", "-q", "-m", "base");
+  git("push", "-q", "-u", "origin", "HEAD:main");
+  git("switch", "-q", "-c", "feature/x");
+  git("push", "-q", "-u", "origin", "feature/x");
+  return { root, worktree, git };
+}
+
+test("REGRESSION: a clean merged branch with one unpushed commit is kept", () => {
+  const fixture = gitFixture();
+  try {
+    writeFileSync(join(fixture.worktree, "fixture.txt"), "base\nlocal-only\n");
+    fixture.git("add", "fixture.txt");
+    fixture.git("commit", "-q", "-m", "local only");
+    assert.equal(String(fixture.git("status", "--porcelain")), "", "fixture must be clean");
+
+    const state = branchPushState(fixture.worktree, "feature/x");
+    assert.deepEqual(state, {
+      hasUpstream: true,
+      upstream: "origin/feature/x",
+      unpushed: 1,
+    });
+    const { remove, keep } = plan([wt(state)], merged);
+    assert.equal(remove.length, 0);
+    assert.match(keep[0].reason, /1 unpushed commit relative to origin\/feature\/x/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
+});
+
+test("REGRESSION: a clean merged branch with no upstream is kept", () => {
+  const fixture = gitFixture();
+  try {
+    fixture.git("switch", "-q", "-c", "feature/local-only");
+    assert.equal(String(fixture.git("status", "--porcelain")), "", "fixture must be clean");
+
+    const state = branchPushState(fixture.worktree, "feature/local-only");
+    assert.deepEqual(state, { hasUpstream: false, upstream: null, unpushed: null });
+    const { remove, keep } = plan(
+      [wt({ branch: "feature/local-only", ...state })],
+      new Set(["feature/local-only"]),
+    );
+    assert.equal(remove.length, 0);
+    assert.match(keep[0].reason, /no upstream/);
+  } finally {
+    rmSync(fixture.root, { recursive: true, force: true });
+  }
 });
 
 test("a locked worktree is never removed", () => {

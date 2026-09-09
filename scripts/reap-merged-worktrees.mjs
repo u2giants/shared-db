@@ -24,7 +24,7 @@
  *   - `git worktree remove` is used, never `rm -rf`, so git's own refusals apply.
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync, execSync } from "node:child_process";
 import { statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -95,7 +95,7 @@ export function isIdle(worktree, now, idleHours) {
 /**
  * Decide what to do with each worktree. Pure, so every refusal is testable.
  *
- * @param {Array<{path,branch,detached,locked,dirty,unpushed,isMain,lastActivityMs}>} worktrees
+ * @param {Array<{path,branch,detached,locked,dirty,hasUpstream,upstream,unpushed,isMain,lastActivityMs}>} worktrees
  * @param {Set<string>} mergedBranches branches whose PULL REQUEST is merged
  * @param {{claimedPaths?:Set<string>,claimedBranches?:Set<string>,selfPath?:string|null,orchestratorActive?:boolean,now?:number,idleHours?:number,force?:boolean}} guard
  * @returns {{remove: object[], keep: Array<{worktree: object, reason: string}>}}
@@ -120,7 +120,15 @@ export function plan(worktrees, mergedBranches, guard = {}) {
     else if (w.dirty) reason = "UNCOMMITTED CHANGES — recover or commit them first";
     else if (w.locked) reason = "locked";
     else if (w.detached) reason = "detached HEAD — no branch to check";
-    else if (w.unpushed) reason = "commits not pushed anywhere";
+    else if (w.hasUpstream === false)
+      reason = "branch has no upstream — commits may exist only here";
+    else if (w.unpushed === null) reason = "could not determine whether commits are pushed";
+    else if (w.unpushed) {
+      const count = Number(w.unpushed);
+      reason =
+        `${count} unpushed commit${count === 1 ? "" : "s"} relative to ` +
+        `${w.upstream ?? "upstream"}`;
+    }
     else if (self !== null && here === self) reason = "this reap is running inside it";
     else if (claimedPaths.has(here)) reason = "an open database claim names this exact worktree";
     else if (w.branch && claimedBranches.has(w.branch))
@@ -168,6 +176,32 @@ export function blockedByLiveOrchestrator(orchestratorActive, force, claimsReada
   return orchestratorActive && !claimsReadable;
 }
 
+/**
+ * Measure commits which exist only in this checkout's branch. A missing
+ * upstream is a distinct, safe-to-report state: without a remote comparison
+ * point the reaper must keep the worktree.
+ */
+export function branchPushState(worktreePath, branch) {
+  const git = (args) =>
+    execFileSync("git", ["-C", worktreePath, ...args], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    }).trim();
+  const upstream = git([
+    "for-each-ref",
+    "--format=%(upstream:short)",
+    `refs/heads/${branch}`,
+  ]);
+  if (!upstream) return { hasUpstream: false, upstream: null, unpushed: null };
+
+  const rawCount = git(["rev-list", "--count", `${upstream}..HEAD`]);
+  const unpushed = Number(rawCount);
+  if (!Number.isSafeInteger(unpushed) || unpushed < 0) {
+    throw new Error(`git returned an invalid unpushed commit count: ${rawCount}`);
+  }
+  return { hasUpstream: true, upstream, unpushed };
+}
+
 // --------------------------------------------------------------------------
 
 function sh(cmd, opts = {}) {
@@ -195,13 +229,18 @@ function readWorktrees() {
     if (w.isMain) continue;
     try {
       w.dirty = sh(`git -C "${w.path}" status --porcelain`).length > 0;
-      w.unpushed = w.branch
-        ? sh(`git -C "${w.path}" log --oneline @{u}..HEAD 2>/dev/null || true`).length > 0
-        : false;
     } catch {
       // Unreadable worktree: keep it. Never remove what you could not inspect.
       w.dirty = true;
-      w.unpushed = true;
+    }
+    try {
+      if (w.branch) Object.assign(w, branchPushState(w.path, w.branch));
+      else w.unpushed = 0;
+    } catch {
+      // A failed upstream comparison is not evidence that every commit is safe.
+      w.hasUpstream = null;
+      w.upstream = null;
+      w.unpushed = null;
     }
   }
   return out;
