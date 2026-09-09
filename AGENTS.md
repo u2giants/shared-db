@@ -8,6 +8,16 @@
 
 # AGENTS.md — cross-app coordination playbook
 
+## Task declaration
+
+Before starting work, run `ai-task-gates start --class <class>` from the
+installed [`popcre/ai-devops` toolkit](https://github.com/popcre/ai-devops/blob/main/docs/deployment.md).
+If the command is absent, stop and use that supported installation route; do
+not copy or bypass the gate. The command rechecks the real change set before
+review, waiting, shipping, or deployment. If scope reaches a protected class,
+redeclare at that class and satisfy its proofs because acknowledgement or
+owner-request flags cannot bypass it.
+
 ## Companywide business rules
 
 Business logic is organized by business topic, not by application. Before
@@ -782,7 +792,10 @@ rules below are the operative summary.
 
 4. **New timestamped migration files only.** Each change is a new `YYYYMMDDHHMMSS_*.sql` file.
    **Never edit a migration that has already been applied anywhere** — that is how two sessions
-   silently clobber each other.
+   silently clobber each other. Since issue #2037 this is ENFORCED, not merely written down:
+   `scripts/check-applied-migration-edit.mjs` runs in the `SQL migration guards` job and refuses
+   any pull request that modifies, deletes or renames a migration file whose version is present
+   in the preview or production ledger. Fix forward at a new version instead.
 
 5. **Never reuse a timestamp — a duplicate SILENTLY SKIPS a migration.** The ledger
    (`supabase_migrations.schema_migrations`) keys on the **version alone, not the filename**. If

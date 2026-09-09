@@ -155,6 +155,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": ".github/workflows/historical-item-mg-reclassification-tests.yml:76",
+      "disposition": "excluded",
+      "reason": "This line is the offline CI assertion that the locked May 14, 2025 historical cutoff is still present in constants.mjs; it reports a missing constant and makes no throughput derivability claim.",
+      "semantic_key": ".github/workflows/historical-item-mg-reclassification-tests.yml:f59e1294c8137b9ddd86ef3b198be6c3b0645e321ee827ce3d00b50ca8c4597a:1",
+      "line_sha256": "f59e1294c8137b9ddd86ef3b198be6c3b0645e321ee827ce3d00b50ca8c4597a"
+    },
+    {
       "site": ".github/workflows/migration-author-lease.yml:38",
       "semantic_key": ".github/workflows/migration-author-lease.yml:5d027dd51abeaa7641677b41ece3751aef1e82b8b35fe8fbdc0d5ddd811fec55:1",
       "line_sha256": "5d027dd51abeaa7641677b41ece3751aef1e82b8b35fe8fbdc0d5ddd811fec55",
@@ -337,6 +344,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": "scripts/benchmark_popsg_search_v2.py:13",
+      "semantic_key": "scripts/benchmark_popsg_search_v2.py:692d1cb0b25417625966fe67514c6f9b6cc2bfc81de7d878a6fe0cca7fdb1ddc:1",
+      "line_sha256": "692d1cb0b25417625966fe67514c6f9b6cc2bfc81de7d878a6fe0cca7fdb1ddc",
+      "disposition": "excluded",
+      "reason": "Synthetic search filter value missing denotes an unavailable thumbnail, not a claim about missing catalog objects or migration evidence."
+    },
+    {
       "site": "scripts/catalog-truth.mjs:14",
       "semantic_key": "scripts/catalog-truth.mjs:dc299927710ce668393c11ef50b43a3ef9cf60d8b0e73d1eca1e4db32dc0f3aa:1",
       "line_sha256": "dc299927710ce668393c11ef50b43a3ef9cf60d8b0e73d1eca1e4db32dc0f3aa",
@@ -363,6 +377,13 @@
       "line_sha256": "e47fc51b7d39934fc8bf83e0788a61943d78d1174ad1dd72357cc9f5e75b2b97",
       "disposition": "enriched",
       "reason": "This call site reports independent evidence and preserves the existing refusal exit."
+    },
+    {
+      "site": "scripts/check-applied-migration-edit.mjs:35",
+      "semantic_key": "scripts/check-applied-migration-edit.mjs:eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3:1",
+      "line_sha256": "eea90ebb6704b333bda8c31dab907dc4d9d086fa20cd901465707c1aea303fb3",
+      "disposition": "excluded",
+      "reason": "This line documents the guard's fail-closed result and does not make a throughput or derivation claim."
     },
     {
       "site": "scripts/check-business-rule-library.mjs:44",
@@ -554,6 +575,13 @@
       "reason": "Reviewed for issue 2274: this line is about a required STATUS CHECK that has not reported on a head, or about the committed required-checks mirror being absent. It makes no claim about a migration, an applied object or dynamic DDL, so it carries no throughput truth claim to enrich."
     },
     {
+      "site": "scripts/check-required-checks-preflight.mjs:109",
+      "semantic_key": "scripts/check-required-checks-preflight.mjs:c5d54e7fa56d7d31627f29752aefcede778aadb2df4ea5b570a886c7001e4b2f:1",
+      "line_sha256": "c5d54e7fa56d7d31627f29752aefcede778aadb2df4ea5b570a886c7001e4b2f",
+      "disposition": "excluded",
+      "reason": "This is the refusal raised when the trusted origin/main copy of the pre-flight source cannot be read, so the pinned floor is unknown. It reports the pre-flight's own missing input and has nothing to do with a database object that was never created, which is what the throughput truth audit enriches."
+    },
+    {
       "site": "scripts/check-required-checks-preflight.mjs:68",
       "semantic_key": "scripts/check-required-checks-preflight.mjs:c741c6200efcc2bf28b7c20e44ae8a68be4eef0e80ea9262d44cf9193ddaf065:1",
       "line_sha256": "c741c6200efcc2bf28b7c20e44ae8a68be4eef0e80ea9262d44cf9193ddaf065",
@@ -650,6 +678,62 @@
       "line_sha256": "cc5fe0d1f54bb8415b7b1592e5806f9f343c1ee0adb24fb5da8ce0a61579b227",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/build-manifest.mjs:47",
+      "semantic_key": "scripts/historical-item-mg-reclassification/build-manifest.mjs:32f88a3b3183e197eaa5ac7707cbaef8d6b3f10525cf802e98d3b397f3b5c3a3:1",
+      "line_sha256": "32f88a3b3183e197eaa5ac7707cbaef8d6b3f10525cf802e98d3b397f3b5c3a3",
+      "disposition": "excluded",
+      "reason": "Guard branch of the new source-header proof; it refuses a mismatched export rather than emitting throughput."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/build-manifest.mjs:45",
+      "semantic_key": "scripts/historical-item-mg-reclassification/build-manifest.mjs:6d403170ce1b398dac734927e8e96312a1b7fb05c19ea031f9d9b7ac9bb9a4bd:1",
+      "line_sha256": "6d403170ce1b398dac734927e8e96312a1b7fb05c19ea031f9d9b7ac9bb9a4bd",
+      "disposition": "excluded",
+      "reason": "Computes the list of missing source columns for the new header proof; it is the input to a refusal, not a throughput message of its own."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/build-manifest.mjs:49",
+      "semantic_key": "scripts/historical-item-mg-reclassification/build-manifest.mjs:e741a15e3f6317fa60bd735d0a0b99440b8deb73b261293ea7bbd893098bd440:1",
+      "line_sha256": "e741a15e3f6317fa60bd735d0a0b99440b8deb73b261293ea7bbd893098bd440",
+      "disposition": "enriched",
+      "reason": "Refusal text naming the missing source columns; enriched by construction because it names the exact columns that failed."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/lib/manifest.mjs:115",
+      "semantic_key": "scripts/historical-item-mg-reclassification/lib/manifest.mjs:383930d550f6ebb301f15bc25209f14376bb43fd21a3046f3cbfbbf31e2b2fdc:1",
+      "line_sha256": "383930d550f6ebb301f15bc25209f14376bb43fd21a3046f3cbfbbf31e2b2fdc",
+      "disposition": "excluded",
+      "reason": "Documentation comment on the new manifest-to-target binder; it explains a refusal and emits no throughput message of its own."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:41",
+      "semantic_key": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:082fdaffe5a5641fabb0a73e0df56fced4ffbc2c34e745e9d82e77cec66ca98e:1",
+      "line_sha256": "082fdaffe5a5641fabb0a73e0df56fced4ffbc2c34e745e9d82e77cec66ca98e",
+      "disposition": "excluded",
+      "reason": "Documentation comment distinguishing a missing git binary from a non-repository answer; it emits nothing at run time."
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:20",
+      "disposition": "excluded",
+      "reason": "Comment describing this guard file own missing-directory probing behavior; not a throughput/lease guard call site.",
+      "semantic_key": "scripts/historical-item-mg-reclassification/lib/private-path.mjs:d4cc6726bf4b21dabbffbe9a211c359b032e506f237b089c390cc1e9396c5806:1",
+      "line_sha256": "d4cc6726bf4b21dabbffbe9a211c359b032e506f237b089c390cc1e9396c5806"
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/lib/verify.mjs:44",
+      "disposition": "excluded",
+      "reason": "This line reports a read-only post-apply verification failure for the reclassification executor; it describes a live database row or function that is absent and makes no throughput derivability claim.",
+      "semantic_key": "scripts/historical-item-mg-reclassification/lib/verify.mjs:4787774716fd11191fd6505f52ae80fc2de230b0978a6f78bb8333896faeecc9:1",
+      "line_sha256": "4787774716fd11191fd6505f52ae80fc2de230b0978a6f78bb8333896faeecc9"
+    },
+    {
+      "site": "scripts/historical-item-mg-reclassification/lib/verify.mjs:84",
+      "disposition": "excluded",
+      "reason": "This line reports a read-only post-apply verification failure for the reclassification executor; it describes a live database row or function that is absent and makes no throughput derivability claim.",
+      "semantic_key": "scripts/historical-item-mg-reclassification/lib/verify.mjs:e8b31e35869f65ef1cb3e8da8b78f22a118d7640948fd1b3ecadea22555031e9:1",
+      "line_sha256": "e8b31e35869f65ef1cb3e8da8b78f22a118d7640948fd1b3ecadea22555031e9"
     },
     {
       "site": "scripts/import-order-list-xlsx.py:2006",
@@ -792,13 +876,6 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/manage-migration-author-lanes.mjs:4055",
-      "semantic_key": "scripts/manage-migration-author-lanes.mjs:f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a:1",
-      "line_sha256": "f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a",
-      "disposition": "excluded",
-      "reason": "Fail-closed immutable reviewer-evidence validation; the word missing does not describe database or migration state."
-    },
-    {
       "site": "scripts/manage-migration-author-lanes.mjs:3265",
       "semantic_key": "scripts/manage-migration-author-lanes.mjs:8da94f391777fd03edd79c104d91688f45731132e59a130de7ff14c484311415:1",
       "line_sha256": "8da94f391777fd03edd79c104d91688f45731132e59a130de7ff14c484311415",
@@ -881,6 +958,13 @@
       "line_sha256": "f2b70e881056d343bb62e9487b82900f635636b8136d2773566a2308bb505e5d",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:4055",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a:1",
+      "line_sha256": "f30023772b56725e26d2ee56709548ccdbe3ba11879aad96d6fe6f357c85079a",
+      "disposition": "excluded",
+      "reason": "Fail-closed immutable reviewer-evidence validation; the word missing does not describe database or migration state."
     },
     {
       "site": "scripts/migration_derivation.py:245",
@@ -1737,6 +1821,20 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": "scripts/reap-merged-worktrees.mjs:212",
+      "semantic_key": "scripts/reap-merged-worktrees.mjs:0c5486b47c120906e77ea4bbd5b9279bae7aa6062e0bff1e7994003ea89855c1:1",
+      "line_sha256": "0c5486b47c120906e77ea4bbd5b9279bae7aa6062e0bff1e7994003ea89855c1",
+      "disposition": "excluded",
+      "reason": "Issue #1868. Excluded: the word appears in a prose comment about an optional git administrative file whose mtime could not be read while measuring worktree activity. It makes no claim about a migration, a DDL object, or anything created or applied in the database, so it is outside the throughput-truth surface this audit guards."
+    },
+    {
+      "site": "scripts/reap-merged-worktrees.mjs:132",
+      "semantic_key": "scripts/reap-merged-worktrees.mjs:e2ccad293e4e07e4e25f9500b4285ceef1f5a34975fea14d5b5709efc9441a40:1",
+      "line_sha256": "e2ccad293e4e07e4e25f9500b4285ceef1f5a34975fea14d5b5709efc9441a40",
+      "disposition": "excluded",
+      "reason": "Issue #1868. Excluded: the word appears in a prose comment describing the worktree reaper's own whole-run refusal when the open database claims cannot be read. It makes no claim about a migration, a DDL object, or anything created or applied in the database, so it is outside the throughput-truth surface this audit guards."
+    },
+    {
       "site": "scripts/record-blocker-stub.mjs:3",
       "semantic_key": "scripts/record-blocker-stub.mjs:a486b0255e74e3773eed0ee950e3936633162d291ba4073586e23d15021fe9d7:1",
       "line_sha256": "a486b0255e74e3773eed0ee950e3936633162d291ba4073586e23d15021fe9d7",
@@ -1800,7 +1898,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 255,
-  "call_site_sha256": "6691c77f38478b029477016f04d40ffada9a6db1914bacfe2bca5fe18902722a",
+  "call_site_count": 269,
+  "call_site_sha256": "dd2c59a62056645780e657e5ec2dd9a5e1aa1f629b4e6c2064e1c81740b48d2f",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

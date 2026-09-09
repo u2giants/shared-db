@@ -51,6 +51,23 @@ So licensed-versus-generic is decided by the division, and the two licensed
 divisions split the categories between them with no overlap: POP takes the
 three wall/tabletop/clock categories, Spruce Licensed takes the rest.
 
+### A non-licensed division with no Licensor is not a data gap
+
+**Settled — owner ruling by Albert Hazan, 2026-09-06:** "EH001 and EP001 have no
+licensed product, correct".
+
+Divisions `EH001` and `EP001` contain no licensed product. Being 100%
+unresolved for Licensor and Property is their **expected state**, not a failure,
+and blank is the correct final answer for them. Any population being assessed
+for a missing Licensor or Property must exclude them.
+
+**Break the population by division before counting it.** A whole-company count
+mixes non-licensed divisions into what is supposed to be a licensed-item
+measurement. On 2026-09-06 this single mistake turned a real gap of 2,016 items
+into a reported 6,350: `EH001` contributed 3,883 rows and `EP001` 451, all of
+them correctly blank. The worked example is in
+[`unmapped-licensor-population.md`](unmapped-licensor-population.md).
+
 **Conflict flagged, not resolved.** "Division scope of a Product Type" below
 records that the nineteen workbook Product Types each exist once in **all
 three** current divisions. That is a statement about which taxonomy rows exist
@@ -94,6 +111,14 @@ not the identity, and nothing new depends on them.
 A merchandise-group slot carries a code and a separate display name. The code is the fact; the name is a convenience label that may be absent even when the code is present. An item whose Licensor code is filled has a Licensor, regardless of whether the Licensor name is populated. Never test a slot's display name to decide whether the underlying fact is missing, and never report an item as unlicensed on that basis.
 
 `EP001` is a real retired division, not a mistaken spelling of `EH001`. DesignFlow also has older numeric division identifiers. Most historical item headers are in numeric division `2`; that history must not be silently reassigned to a current ColdLion division.
+
+**Read the field this page already names.** The 2026-09-06/07 unmapped-Licensor
+analysis was invalidated twice over, and both times the correct field was
+already written down here and had simply not been read. The first run read
+`royaltyCode` as the Licensor; the second read `merchGroup05Desc`, the display
+name, instead of `merchGroup05`, the code. Before measuring a Licensor or
+Property population, check which field this rule names, then read that one. See
+[`unmapped-licensor-population.md`](unmapped-licensor-population.md).
 
 Merchandise-group codes are unique only inside their Division and merchandise-group type. `FR`, for example, has represented different kinds of object in different contexts and must never be resolved from the letters alone.
 

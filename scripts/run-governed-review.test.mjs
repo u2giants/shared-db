@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { runGovernedReview, wrapperVerdictContractArgs, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
+import { runGovernedReview, wrapperVerdictContractArgs, wrapperBaseName, codexReportPath, codexGovernedBody, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
 import { anyVerdictFor } from './lib/review-verdict.mjs'
 
 const options={issue:1824,pr:2000,headSha:'a'.repeat(40),reviewer:'glm-5.3',wrapper:'ai-glm',worktree:'C:/review',slot:1,wrapperArgs:['review']}
@@ -339,4 +339,137 @@ test('an UNCONFIRMED marker is reported tentatively and still edits nothing (#24
   assert.equal(/a verdict that already exists/.test(note),false,'the unconfirmed notice body must not assert the artifact exists')
   assert.match(note,/could permanently invalidate a verdict that may already exist/)
   assert.equal(/so its digest stays valid/.test(thrown.message),false,'the unconfirmed throw must not assert a recorded digest')
+})
+
+
+// ---------------------------------------------------------------------------
+// Issue #2244: the codex wrapper publishes its verdict in a report file, not on
+// standard output. These prove the transcription, and prove it FAILS CLOSED on
+// every dirty shape -- a checker that has never been shown a known-bad case is
+// not a checker.
+// ---------------------------------------------------------------------------
+
+const codexHead='a'.repeat(40)
+const codexReport=(overrides={})=>{
+  const {head=codexHead,decision='APPROVE',findings='Coverage: scripts/run-governed-review.mjs.\n\nNo blocking finding.',verdictSection=true}=overrides
+  return [
+    '# Codex review — diff-review','',
+    '| field | value |','|---|---|',
+    '| repository | `C:/review` |',
+    `| reviewed commit | \`${head}\` |`,
+    '| source digest | `'+'d'.repeat(64)+'` |',
+    '| run | `20260908T190000-1234-5678` |','| caller | `shared-db` |','| elapsed seconds | `41` |','| sandbox | `read-only` |','',
+    '## Result','',findings,'',
+    ...(verdictSection?['## Verdict',decision]:[]),
+  ].join('\n')+'\n'
+}
+const codexPath='C:/review/.ai/reviews/codex-diff-review-20260908T190000-1234-5678.md'
+
+test('#2244: a published codex report becomes a recordable terminal verdict bound to the pinned head',()=>{
+  const body=codexGovernedBody(codexReport(),codexHead,'codex-diff-review-20260908T190000-1234-5678.md')
+  assert.equal(verdictFromOutput(body,codexHead),'APPROVE')
+  assert.deepEqual(extraVerdictLines(body),[],'the transcription introduces no second decision line')
+  assert.match(body,/No blocking finding\./,'the reviewer findings survive transcription')
+  assert.equal(verdictFromOutput(codexGovernedBody(codexReport({decision:'REJECT'}),codexHead),codexHead),'REJECT')
+})
+
+test('#2244: the wrapper header table is left out so the posted body names one commit only',()=>{
+  const body=codexGovernedBody(codexReport(),codexHead)
+  const shas=[...body.matchAll(/[0-9a-f]{40}/gi)].map((match)=>match[0].toLowerCase())
+  assert.deepEqual([...new Set(shas)],[codexHead],'a 64-hex source digest would read as a foreign commit sha')
+})
+
+test('#2244: the head comes only from the runner, and a report about another commit is refused',()=>{
+  assert.throws(()=>codexGovernedBody(codexReport({head:'b'.repeat(40)}),codexHead),/reviewed a different commit/)
+  assert.throws(()=>codexGovernedBody(codexReport().replace(/\| reviewed commit .*\n/,''),codexHead),/does not declare the commit it reviewed/)
+  // The report cannot SUPPLY a head: an unusable pinned head is refused outright,
+  // however well-formed the report is.
+  assert.throws(()=>codexGovernedBody(codexReport(),''),/not a commit sha/)
+})
+
+test('#2244: known-dirty codex reports are refused rather than guessed',()=>{
+  assert.throws(()=>codexGovernedBody(codexReport({verdictSection:false}),codexHead),/exactly one verdict section/)
+  assert.throws(()=>codexGovernedBody(`${codexReport()}\n## Verdict\nAPPROVE\n`,codexHead),/exactly one verdict section/)
+  assert.throws(()=>codexGovernedBody(codexReport({decision:'BLOCKED'}),codexHead),/BLOCKED, which is not a recordable decision/)
+  assert.throws(()=>codexGovernedBody(codexReport({decision:'LGTM'}),codexHead),/does not carry a recordable decision/)
+  assert.throws(()=>codexGovernedBody(codexReport({findings:''}),codexHead),/carries no findings to record/)
+  assert.throws(()=>codexGovernedBody(codexReport().replace('## Result','## Output'),codexHead),/does not carry a result section/)
+})
+
+test('#2244: a reviewer that writes its own Result heading keeps its review',()=>{
+  const body=codexGovernedBody(codexReport({findings:'## Result\nA nested heading in the reviewer text.'}),codexHead)
+  assert.match(body,/A nested heading in the reviewer text\./)
+  assert.equal(verdictFromOutput(body,codexHead),'APPROVE')
+})
+
+test('#2244: only the wrapper report shape is accepted as a path to read',()=>{
+  assert.equal(codexReportPath(`noise\n${codexPath}`),codexPath)
+  assert.equal(codexReportPath('C:\\review\\.ai\\reviews\\codex-final-check-20260908T190000-1-2.md'),'C:\\review\\.ai\\reviews\\codex-final-check-20260908T190000-1-2.md')
+  assert.throws(()=>codexReportPath(''),/printed no report path/)
+  assert.throws(()=>codexReportPath('C:/review/.ai/reviews/notes.md'),/not a published report path/)
+  assert.throws(()=>codexReportPath('C:/Users/ahazan/.ssh/codex-diff-review-20260908T190000-1-2.md'),/not inside the wrapper report directory/)
+})
+
+test('#2244: the runner records a codex review end to end without relaxing any rule',()=>{
+  const order=[]
+  const spawn=(command)=>{order.push(command);return command==='gh'
+    ?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-244'})}
+    :{status:0,stdout:`${codexPath}\n`}}
+  let recorded
+  const result=runGovernedReview({...options,headSha:codexHead,reviewer:'codex-gpt-5.6-sol',wrapper:'ai-codex-review',wrapperArgs:['diff-review']},{
+    spawn,resolve:(name)=>name,preflight:()=>order.push('preflight'),readReport:(path)=>{assert.equal(path,codexPath);order.push('read');return codexReport()},
+    record:(row)=>{recorded=row;order.push('record');return{ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)}},
+  })
+  assert.deepEqual(order,['preflight','ai-codex-review','read','gh','record'])
+  assert.equal(recorded.verdict,'APPROVE')
+  assert.equal(recorded.headSha,codexHead)
+  assert.match(result.body,/NON-AUTHORIZING UNLESS/)
+  assert.ok(!anyVerdictFor([{author_association:'OWNER',body:result.body}],'b'.repeat(40)),'the body ties to no head but the pinned one')
+})
+
+test('#2244: a codex report that cannot be transcribed refuses and publishes nothing',()=>{
+  for(const [stdout,report,expected] of [
+    ['not-a-report-path',codexReport(),/not a published report path/],
+    [codexPath,codexReport({decision:'BLOCKED'}),/BLOCKED/],
+    [codexPath,codexReport({head:'c'.repeat(40)}),/different commit/],
+  ]){
+    let ghCalls=0
+    assert.throws(()=>runGovernedReview({...options,headSha:codexHead,wrapper:'ai-codex-review',wrapperArgs:['diff-review']},{
+      spawn:(command)=>{if(command==='gh')ghCalls++;return command==='gh'?{status:0,stdout:'{}'}:{status:0,stdout:stdout}},
+      resolve:(name)=>name,preflight:()=>{},readReport:()=>report,record:()=>assert.fail('must not record'),
+    }),(error)=>{assert.match(error.message,/did not produce a recordable terminal verdict/);assert.match(error.message,expected);return true})
+    assert.equal(ghCalls,0,'an untranscribable codex round writes nothing to GitHub')
+  }
+})
+
+test('#2244: a failing codex run is never rescued by a report left behind',()=>{
+  assert.throws(()=>runGovernedReview({...options,headSha:codexHead,wrapper:'ai-codex-review',wrapperArgs:['diff-review']},{
+    spawn:()=>({status:1,stderr:'timed out',stdout:codexPath}),
+    resolve:(name)=>name,preflight:()=>{},readReport:()=>assert.fail('a failed run must not read a report'),record:()=>assert.fail('must not record'),
+  }),/reported a timeout/)
+})
+
+test('#2244: a codex review whose findings carry a stray decision line still takes the preservation path',()=>{
+  const posts=[]
+  assert.throws(()=>runGovernedReview({...options,headSha:codexHead,wrapper:'ai-codex-review',wrapperArgs:['diff-review']},{
+    spawn:(command,args,opts)=>{if(command!=='gh')return{status:0,stdout:codexPath};posts.push(JSON.parse(opts.input).body);return{status:0,stdout:JSON.stringify({html_url:'https://x/#c1'})}},
+    resolve:(name)=>name,preflight:()=>{},
+    readReport:()=>codexReport({findings:'APPROVE the change once the index is added.'}),
+    record:()=>assert.fail('must not record'),
+  }),/would read as a decision/)
+  assert.equal(posts.length,1)
+  assert.match(posts[0],new RegExp(PRESERVED_HEADER.split('\n')[0]))
+  assert.ok(!anyVerdictFor([{author_association:'OWNER',body:posts[0]}],codexHead))
+})
+
+test('#2244: other wrappers are untouched by the codex bridge',()=>{
+  assert.equal(wrapperBaseName('C:/tools/AI-Codex-Review.CMD'),'ai-codex-review')
+  assert.equal(wrapperBaseName('ai-glm'),'ai-glm')
+  const order=[]
+  runGovernedReview(options,{
+    spawn:(command)=>{order.push(command);return command==='gh'?{status:0,stdout:JSON.stringify({html_url:'https://x/#c2'})}:{status:0,stdout:`Fine.\nVERDICT: APPROVE ${options.headSha}`}},
+    resolve:(name)=>name,preflight:()=>{},readReport:()=>assert.fail('no report is read for a non-codex wrapper'),
+    record:()=>({ref:'refs/db-review-verdicts/z',sha:'e'.repeat(40)}),
+  })
+  assert.deepEqual(order,['ai-glm','gh'])
 })
