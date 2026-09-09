@@ -1,17 +1,71 @@
 {
   "schema_version": 1,
   "work_issue": 2543,
-  "outcome": "in-progress",
-  "pr": null,
+  "outcome": "ready-for-merge",
+  "pr": 2631,
   "migration_versions": ["20260909115140"],
-  "head_sha": null,
+  "contract_ref": "refs/db-contracts/2543/1",
+  "contract_sha256": "fc6e7c5911411351d4c68bd36e86db94b81a95eb36d1180f5bb0b50c8beff880",
+  "head_sha": "d424fdacd1d5d2916919dd9253949c08e3232f79",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "supabase/migrations/20260909115140_opa_coherent_complete_capture.sql",
     "supabase/tests/opa_coherent_complete_capture_contracts.sql"
   ],
-  "checks": [],
-  "assumptions_resolved": [],
+  "db_reads": [
+    "table plm.opa_property",
+    "table plm.opa_character",
+    "table plm.opa_property_character",
+    "table plm.opa_property_scope_membership"
+  ],
+  "db_writes": [
+    "table plm.opa_capture",
+    "table plm.opa_capture_scope",
+    "table plm.opa_property_character_capture",
+    "function plm.begin_opa_capture",
+    "function plm.load_opa_capture_chunk",
+    "function plm.finalize_opa_capture",
+    "function api.source_capture_inventory_exact",
+    "table api.source_capture_inventory",
+    "view api.source_capture_inventory"
+  ],
+  "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static migration guards passed for the reserved 20260909115140 version; no prohibited verification read or invalid expected-count cast was found."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "Sidecar scanner returned status OK and no unbound marker for 20260909115140; direct literal inventory DDL requires no sidecar."
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "exit_code": 0,
+      "evidence": "Claim #2630 verified reserved version 20260909115140 and the complete declared object set for PR #2631."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors were reported for the implementation diff."
+    },
+    {
+      "command": "supabase/tests/opa_coherent_complete_capture_contracts.sql on a disposable database",
+      "exit_code": 0,
+      "evidence": "PostgreSQL 18 disposable database returned BEGIN, DO, ROLLBACK: 19 behavioral assertions passed and 0 failed, covering two-scope success, idempotency, every required refusal, root isolation, and sanitized exposure."
+    },
+    {
+      "command": "Database Contract Tests CI from empty",
+      "exit_code": 0,
+      "evidence": "GitHub run 34355261970 succeeded at implementation head d424fdac: 176 contract files executed, 163 passed, 0 non-quarantined failed, 1 quarantined test passed, and 12 quarantined tests failed without affecting the established lane contract."
+    }
+  ],
+  "assumptions_resolved": [
+    "The private producer contract was checked without copying licensed rows: exactly Disney and Lucas North America Home/Standard scopes supply per-scope counts and hashes plus aggregate counts.",
+    "The public inventory remains a fixed sanitized ten-column metadata contract; exact reads identify only the latest completed capture root and never expose licensed values, source hashes, paths, or authentication evidence.",
+    "Existing mutable OPA tables retain current_snapshot basis; only the three new append-only capture tables use one latest_complete root."
+  ],
   "stop_conditions_hit": []
 }
