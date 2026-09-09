@@ -9,6 +9,7 @@
   "contract_ref": "refs/db-contracts/2440/5",
   "contract_sha256": "70a50231c19d432ab915aabccbd365f1bc56f3b329db2493c319cf756672334a",
   "head_sha": "aff94a2673de6dabb3806cbe00aba7d41d2695e0",
+  "evidence_note": "Generation 5 re-points the report at the merge head aff94a26; every non-.agent file is byte-identical to the reviewed implementation at 79a52394.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
