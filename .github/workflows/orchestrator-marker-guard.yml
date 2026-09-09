@@ -67,6 +67,13 @@ jobs:
       - name: Prove the guard fails on two markers, and on an unreadable answer
         run: node --test scripts/check-orchestrator-marker.test.mjs
 
+      # #2318. The admission rules live in their own module, and their unit
+      # cases -- normalisation variants, blank, almost-right owner forms,
+      # unreadable dates -- are only pinned here. A local-only suite is an
+      # unenforced one.
+      - name: Prove the admission rules refuse every ground that produced marker #2312
+        run: node --test scripts/lib/orchestrator-admission.test.mjs
+
       - name: Check how many orchestrator markers are open
         id: check
         env:

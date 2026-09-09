@@ -188,6 +188,13 @@ test('classifies the stranded coldlion.division original as retired, not pending
   assert.match(result['20260903200951'].reason, /issue 2349/)
 })
 
+test('classifies the stranded bulk-operation history original as retired, not pending', () => {
+  const result = guardClassifications(['20260908195056'], [])
+  assert.equal(result['20260908195056'].kind, 'retired')
+  assert.match(result['20260908195056'].reason, /reissued with identical migration content as 20260909202801/)
+  assert.match(result['20260908195056'].reason, /issue 2439 and claim 2443/)
+})
+
 test('classifies preview-only historical restoration as deliberately held',()=>{
   const result=guardClassifications(['20260817150944'],[])
   assert.equal(result['20260817150944'].kind,'deliberately-held')

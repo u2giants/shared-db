@@ -5,6 +5,48 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2543. The protected version and exact migration bytes were authored on
+  // PR #2631 before 20260909121403 reached main. This entry permits only those
+  // exact bytes to survive the backdated-version guard; it does not mark the
+  // migration preview-only or otherwise change its production eligibility.
+  '20260909115140': Object.freeze({
+    filename: 'supabase/migrations/20260909115140_opa_coherent_complete_capture.sql',
+    name: 'opa_coherent_complete_capture',
+    statementBytes: 61267,
+    statementSha256: '0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719',
+    fileSha256: '9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7',
+    objects: Object.freeze([
+      'table plm.opa_capture',
+      'table plm.opa_capture_scope',
+      'table plm.opa_property_character_capture',
+      'function plm.begin_opa_capture',
+      'function plm.load_opa_capture_chunk',
+      'function plm.finalize_opa_capture',
+      'function api.source_capture_inventory_exact',
+      'table api.source_capture_inventory',
+      'view api.source_capture_inventory',
+    ]),
+  }),
+  // #2580. The protected version and exact migration bytes were authored on
+  // PR #2627 before 20260909121403 reached main. This entry permits only those
+  // exact bytes to survive the backdated-version guard; it does not mark the
+  // migration preview-only or otherwise change its production eligibility.
+  '20260909084253': Object.freeze({
+    filename: 'supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql',
+    name: 'sample_shipment_notice_outbox',
+    statementBytes: 6537,
+    statementSha256: '1dd8adc722def760f9d3dde9abfff9cf53e3929fab97e49954b8512d91c1f33b',
+    fileSha256: '70beba94d21b05384438a298fa3d49bd0a1bbdb31cbf4cb0216bec8aa380e76f',
+    objects: Object.freeze([
+      'table dflow.sample_shipment_notice',
+      'table dflow.sample_shipment_notice_recipient',
+      'function dflow.prevent_sample_shipment_notice_snapshot_mutation',
+      'function dflow.prevent_sample_shipment_notice_recipient_snapshot_mutation',
+      'trigger sample_shipment_notice_snapshot_immutable on dflow.sample_shipment_notice',
+      'trigger sample_shipment_notice_recipient_snapshot_immutable on dflow.sample_shipment_notice_recipient',
+      'function dflow.claim_sample_shipment_notice',
+    ]),
+  }),
   // #2506. Preview applied these exact bytes in run 34290415305, dispatched at and
   // applied from PR #2542 head commit 281b967986b7cca99b13722f4d9ed3c988902c9d --
   // the same commit this branch still carries, so the file IS the applied body.
