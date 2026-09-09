@@ -65,6 +65,14 @@ MIGRATION_LINE_RE = re.compile(r"^\s*(?:[•*\-]\s*)?(\d{14})_[^\s]+\.sql\s*$")
 # ever turns out NOT to be applied, that changes the count in AGENTS.md 6.8 and
 # this set must be revisited before anything is promoted.
 HARD_BLOCKED = {
+    # #2439 merged-stranded original. Preview applied this version, but its
+    # producer checked out 53937748ee2b8fdba2ada40a79219f4d62d02f77 and used
+    # different lane-manager bytes than current main, so the production
+    # business-risk gate correctly refuses its evidence. Preview already holds
+    # the version, making a fresh qualifying ledger delta impossible.
+    # 20260909202801 carries the exact same Git blob under the atomic claim
+    # reissue for #2443. Never apply this original.
+    "20260908195056",
     # #505 merged-stranded original. Its first preview apply refused and rolled
     # back transactionally after live app drift invalidated an over-broad
     # licensor_id-is-null assumption. 20260830204711 carries the preserved
@@ -214,6 +222,7 @@ HARD_BLOCKED = {
 # verifier imports these names from here; pending-status policy must not import
 # that application verifier back into the production guard's execution closure.
 RETIRED_VERSION_REASONS = {
+    "20260908195056": "unpromotable producer provenance (preview apply run 34273765771 checked out 53937748ee2b8fdba2ada40a79219f4d62d02f77 with lane-manager bytes different from current main) and preview already holds the version, so no fresh qualifying ledger delta can be produced; reissued with identical migration content as 20260909202801 under issue 2439 and claim 2443",
     "20260814170749": "stranded without qualifying preview evidence after the preview project replacement; reissued with identical executable SQL as 20260825201330 under issue 1517, applied to production 2026-08-25 (PR 1541, run 32901820150)",
     "20260819011639": "unpromotable producer provenance; replaced byte-for-byte by 20260820142402, applied to production 2026-08-20 (issue 1171)",
     "20260819151536": "production verification times out and rolls the migration back; replaced by 20260820004338, applied to production 2026-08-20 (issue 1280)",
