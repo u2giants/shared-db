@@ -1,70 +1,65 @@
 {
   "schema_version": 1,
-  "work_issue": 2580,
+  "work_issue": 2318,
   "outcome": "ready-for-merge",
-  "pr": 2627,
-  "migration_versions": [
-    "20260909084253"
-  ],
-  "contract_ref": "refs/db-contracts/2580/4",
-  "contract_sha256": "e2a42979ba9cd27b7749f89cd2e6785ce91d5f3a3514deb00a322203418ebdaa",
-  "head_sha": "7a3af59348ffb537e3fa7597cc6c620ec7d89311",
-  "evidence_note": "The current-main implementation head preserves the migration and hash-bound sidecar bytes, individually pins that sidecar in the preview producer set, and now passes the exact historical-restoration guard merged through PR #2647. This evidence-only commit refreshes both required evidence files. No preview or production promotion was performed.",
+  "pr": 2636,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2318/13",
+  "contract_sha256": "518a07fb654e3902937be3603f6740f1719e573b29c90c3f757cf78a24dd863a",
+  "head_sha": "953d2627101c021f0d048d47348d4d3dba50856e",
+  "evidence_note": "Generation 13 re-points the pair after a fifth update from main (origin/main at e4725924, PR #2627). Main is landing faster than one governed review cycle takes, so each dispatch of the guarded merge has been refused for being behind the tip and the cycle re-run at the new head; this generation exists for that reason and for no change of substance. The only conflicts were this lane's own .agent pair, resolved in favour of this lane; every non-.agent file is unchanged by that merge. All suites re-run green at the merged head: 19 + 42 + 486 = 547 pass, 0 fail, truth audit OK at 272 call sites. One run of the author-lanes suite reported a single failure while this lane's own coordination refs were being written by a concurrent replacement and mutex recovery; three consecutive re-runs are 486 pass, 0 fail. head_sha names that merge commit; only this evidence pair follows it. Generation 12 re-points the pair after a fourth update from main (origin/main at b7f14140, PR #2647), required because the guarded merge refuses a dispatch behind the current tip. The only conflicts were this lane's own .agent pair, resolved in favour of this lane; every non-.agent file is unchanged by that merge. All suites re-run green at the merged head: 19 + 42 + 486 = 547 pass, 0 fail, truth audit OK at 272 call sites. head_sha names that merge commit; only this evidence pair follows it. Generation 11 re-points the pair after a third update from main (origin/main at ecfe38ac, PR #2634), whose only conflicts were this lane's own .agent pair, resolved in favour of this lane; every non-.agent file is unchanged by that merge. All suites re-run green at the merged head: 19 + 42 + 486 = 547 pass, 0 fail, truth audit OK at 272 call sites. head_sha names that merge commit, the last head at which those checks ran; only this evidence pair follows it. Generation 10 answers the REVISE verdict recorded by grok-4.6 against head 8fba08ee. Two of its findings were real and are fixed as wording, not behaviour: the admission module claimed grandfathering was not a grace period for a new marker, when the test is the marker's own opening date so a marker opened today before the cutoff is grandfathered too; and AGENTS.md 11d claimed the handover-issue agreement stops a session citing a handover it is not continuing, when it only checks the two fields agree -- the same honour-system limit 11c already records for handover_issue itself. Its finding that this head inserts a new 'Task declaration' standing order in AGENTS.md is a review-packet artifact, not a change in this branch: that section is already on origin/main at 5874305e, and the packet was built against the pre-merge base e149bd0b, so main's own commits appeared inside the reviewed diff. Verified with `git diff 5874305e..HEAD`, which touches exactly the ten files listed here. All suites re-run green at this head: 19 + 42 + 486 = 547 pass, 0 fail, truth audit OK at 272 call sites. Generation 9. Generation 9 re-points the pair after a second update from main (origin/main at 5874305e, PR #2425), whose only conflicts were this lane's own .agent pair, resolved in favour of this lane; every non-.agent file is unchanged by that merge and all suites were re-run green at the merged head (19 + 42 + 486 pass, truth audit OK). head_sha names that merge commit, the last head at which those checks ran; only this evidence pair follows it. Generation 7 adds the guard workflow to the contract's allowed_paths and stop condition, which generation 6 changed without declaring. The git-evidence checker compares files_changed against the whole PR diff including .agent/*, so the evidence pair is listed. Generation 6 answers the REVISE verdict recorded against the previous head: the new admission unit suite ran in no CI lane, so the Orchestrator Marker Guard workflow now runs it. Generation 5 answered two earlier findings: an admission refusal was dropped silently on a marker predating the 2026-08-27 routing contract, and two AGENTS.md sentences described the old behaviour and told authors to write `none` for authorization. It also removed a check naming a test file that does not exist in this tree and corrected stale counts. No SQL, no migration, no database access of any kind.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/production-verification-sidecars/20260909084253.json",
-    "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql"
+    ".github/workflows/orchestrator-marker-guard.yml",
+    "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-orchestrator-marker.mjs",
+    "scripts/check-orchestrator-marker.test.mjs",
+    "scripts/lib/orchestrator-admission.mjs",
+    "scripts/lib/orchestrator-admission.test.mjs",
+    "scripts/lib/orchestrator-routing.mjs"
   ],
-  "db_reads": [
-    "table dflow.sample_shipment",
-    "table dflow.users",
-    "table dflow.customers"
-  ],
-  "db_writes": [
-    "table dflow.sample_shipment_notice",
-    "table dflow.sample_shipment_notice_recipient",
-    "function dflow.claim_sample_shipment_notice"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
+    {
+      "command": "node --test scripts/lib/orchestrator-admission.test.mjs",
+      "exit_code": 0,
+      "evidence": "19 tests, 19 pass, 0 fail. Covers each of the four real inferences behind marker #2312, every key in REFUSED_GROUNDS, casing/underscore/trailing-period variants, unrecognised free text, blank and missing, almost-right owner forms, both admissible forms, handover-issue agreement, the grandfathering warning, that grandfathering covers a MISSING field only, an unreadable creation date, and that renderRoutingBlock emits the field."
+    },
+    {
+      "command": "node --test scripts/check-orchestrator-marker.test.mjs",
+      "exit_code": 0,
+      "evidence": "42 tests, 42 pass, 0 fail (35 pre-existing, 7 new). The new cases prove a db-work label, delegated task traffic, a structural need and a handoff each FAIL the guard; that an unauthorized marker is INVALID rather than NONE so the default stays non-orchestrator Path A; that explicit owner authorization passes and still resolves a target; that the live pre-admission marker warns but still routes; that a marker both unroutable and unauthorized reports both causes; and that a routing-grandfathered marker still reports its refused ground instead of dropping it."
+    },
+    {
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "exit_code": 0,
+      "evidence": "486 tests, 486 pass, 0 fail. The only other suite that imports the marker guard; unchanged by this work. Re-run after the update from main, which brought in PR #2633's changes to that same script. Combined run of the three suites in this repository (admission 19, marker guard 42, author lanes 486) is 547 pass, 0 fail. There is no scripts/lib/orchestrator-routing.test.mjs in this tree; the routing module is covered through the marker-guard suite."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors. Only CRLF advisory warnings from the repository's line-ending configuration."
     },
     {
-      "command": "python -m pytest scripts/test_production_business_risk_gate.py::ProductionBusinessRiskGateTests::test_every_verification_sidecar_is_an_individually_pinned_producer -q",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "1 passed; the sidecar inventory exactly equals the individually pinned producer set."
+      "evidence": "'truth audit OK: call_sites=272'. Three new call sites were reviewed and recorded as `excluded`, each with its own reason: two are refusal/warning strings about a missing `authorization:` routing-block field and one is a source comment about emitting that field blank. None asserts anything about a database object being missing or not applied, which is the audit's subject. The recorded count and semantic digest were regenerated from the discovered inventory, not hand-edited."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "command": "grep -n admission .github/workflows/orchestrator-marker-guard.yml",
       "exit_code": 0,
-      "evidence": "OK for 45 sidecars; the hash-bound sidecar covers dynamic marker lines 95-96."
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "exit_code": 0,
-      "evidence": "Claim #2626 and migration version 20260909084253 remain bound at PR #2627."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards passed and accepted version 20260909084253 only through its exact hash-, byte-, statement-, newline-, and object-bound historical restoration entry."
-    },
-    {
-      "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
-      "exit_code": 0,
-      "evidence": "Completion report validates against the immutable contract after the metadata refresh."
+      "evidence": "The Orchestrator Marker Guard workflow now runs `node --test scripts/lib/orchestrator-admission.test.mjs` as its own step alongside the existing marker-guard suite. Governed review of the previous head found the 19 admission unit cases -- normalisation variants, blank, almost-right owner forms, unreadable dates, whole-marker admission -- ran only on this machine and in no CI lane, leaving the guard rules unenforced. No other workflow covers scripts/lib/*.test.mjs generally."
     }
   ],
   "assumptions_resolved": [
-    "The implementation remains exactly within claim #2626 and migration 20260909084253.",
-    "The sidecar hash matches the migration body and covers both dynamic marker lines.",
-    "The sidecar is individually pinned as a preview producer, matching the repository's sanctioned evidence pattern.",
-    "The exact historical-restoration registry entry merged through PR #2647 permits only these hash-bound migration bytes and objects.",
-    "No preview or production promotion was performed."
+    "Admission cannot prevent a marker being opened, and the module header says so in its own words. What it does is make the grounds a required, typed, published field. The value is verified by the tests, not asserted: each of the four inferences that produced #2312 is proven to fail the guard.",
+    "authorization is NOT in REQUIRED_FIELDS. Verified by the test that the live pre-admission marker still routes with a warning: adding the field to REQUIRED_FIELDS would have failed live marker #2629, which opened 2026-09-09 and is therefore NOT grandfathered by CONTRACT_EFFECTIVE_DATE 2026-08-27. The separate cutoff AUTHORIZATION_EFFECTIVE_DATE 2026-09-10 is what makes the change safe to land while an orchestrator is live.",
+    "Grandfathering covers a missing field only. Verified by a dedicated test: a pre-cutoff marker declaring `db-work` still fails, and an unreadable createdAt is treated as in force.",
+    "An unauthorized marker is INVALID, not NONE. Verified by resolving the target from the evaluated markers and asserting the refusing state, so the two opposite answers in the AGENTS.md exit table are not collapsed.",
+    "The truth-audit dispositions are `excluded`, not `enriched`: these lines are prose about orchestrator admission and carry no throughput or verification claim. Verified by re-running the guard to a clean pass at 272 sites."
   ],
   "stop_conditions_hit": []
 }

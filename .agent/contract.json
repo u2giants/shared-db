@@ -1,63 +1,63 @@
 {
   "schema_version": 1,
-  "generation": 4,
-  "work_issue": 2580,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Add the durable Sample Tracking shipment email outbox and atomic server-only claim function exactly within issue #2580, including the individually pinned producer evidence required for its hash-bound verification sidecar.",
-  "base_sha": "b7f141400a5ccab99527b96ab41ab53421bdf88b",
-  "dispatcher": "shared-db orchestrator marker #2629 for claim #2626",
-  "worker": "Codex migration author",
-  "branch": "codex/issue-2580-sample-shipment-notice",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2580-sample-shipment-notice",
-  "allowed_paths": [
-    "supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql",
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/production-verification-sidecars/20260909084253.json",
-    "scripts/production_business_risk_gate.py"
-  ],
-  "file_writes": [
-    "supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql",
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/production-verification-sidecars/20260909084253.json",
-    "scripts/production_business_risk_gate.py"
-  ],
-  "db_reads": [
-    "table dflow.sample_shipment",
-    "table dflow.users",
-    "table dflow.customers"
-  ],
-  "db_writes": [
-    "table dflow.sample_shipment_notice",
-    "table dflow.sample_shipment_notice_recipient",
-    "function dflow.claim_sample_shipment_notice"
-  ],
-  "prohibited_actions": [
-    "No preview apply before guarded merge and no production promotion",
-    "No shared database writes or data seeding",
-    "No edits outside issue #2580, migration version 20260909084253, its hash-bound sidecar, or the one individually pinned producer entry",
-    "Do not alter claim #2626 or reserved migration version 20260909084253",
-    "Do not alter the migration SQL or verification sidecar bytes during the producer-pin repair"
-  ],
-  "required_checks": [
-    "git diff --check",
-    "python -m pytest scripts/test_production_business_risk_gate.py::ProductionBusinessRiskGateTests::test_every_verification_sidecar_is_an_individually_pinned_producer -q",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-migration-pr-lease.mjs",
-    "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json"
+  "work_issue": 2318,
+  "generation": 13,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Close the gap that let unauthorized orchestrator marker #2312 pass every check on 2026-09-04: nothing anywhere asked on what grounds the orchestrator role had been taken. Add an `authorization:` field to the orchestrator routing block with exactly two admissible grounds (owner authorization in the current chat, or an owner-authorized handover naming the marker actually being continued), refuse by name each inference that produced #2312, fail closed on unrecognised free text, and wire it into check-orchestrator-marker.mjs so a marker without admissible grounds resolves as INVALID rather than routable. Document it in AGENTS.md.",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2318",
+  "branch": "claude/issue-2318-orchestrator-admission",
+  "worker": "claude repo-maintenance session, issue 2318",
+  "dispatcher": "none -- repo-maintenance work is not dispatched by the orchestrator",
+  "base_sha": "71fe95d64a7e6ff1e4d822145271853a31d82b2d",
+  "stop_conditions": [
+    "The change would require adding `authorization` to REQUIRED_FIELDS, which would fail the live marker for a field that did not exist when it opened",
+    "Main moves in a way that invalidates the marker-guard tests or the routing block shape",
+    "Scope widens beyond the marker guard, its routing/admission libraries, their tests, the Orchestrator Marker Guard workflow that runs them, and AGENTS.md"
   ],
   "assumptions": [
-    "Generations 1 and 2 remain immutable history; generation 3 was published during dependency diagnosis but never adopted by the branch; generation 4 binds this unchanged migration scope to current main after the exact historical-restoration dependency merged.",
-    "The reserved claim #2626 authorizes exactly the three database writes listed above.",
-    "The server roles are postgres and optional designflow; browser roles and service_role receive no access.",
-    "The verification sidecar is individually pinned in the preview producer set because the catalog verifier reads its reviewed hash-bound declaration.",
-    "No preview or production evidence is claimed before guarded merge; any later preview action requires a fresh selector authorization."
+    "Admission cannot PREVENT a marker being opened. Markers are claimed outside any pull request, exactly as marker collisions are. This makes the grounds a required, typed, published field so a silent assumption becomes a written, refutable assertion.",
+    "No repository check can prove Albert said the words. The value is that the specific inferences that produced #2312 -- a db-work label, delegated task traffic, a structural need, a handoff document -- are refused by name with the reason quoted, so a session in that position reads a rebuttal rather than a formatting error it can work around.",
+    "`authorization` is deliberately NOT in REQUIRED_FIELDS. Adding it there would fail every marker opened before admission existed, including live marker #2629 which opened 2026-09-09, after CONTRACT_EFFECTIVE_DATE 2026-08-27 grandfathers. validateAdmission enforces it under its own later cutoff, AUTHORIZATION_EFFECTIVE_DATE 2026-09-10.",
+    "Grandfathering covers a MISSING field only. A marker opened before the cutoff that writes a refused ground still fails, and an unreadable creation date is treated as in force rather than grandfathered. Every ambiguity resolves away from the role.",
+    "An unauthorized marker resolves as INVALID, not NONE. Per the AGENTS.md exit table those are opposite answers: NONE means nobody is running, INVALID means somebody may be running and unreachable. Neither is permission to dispatch, and neither is permission to take the role. Path A either way.",
+    "The routing block renderer emits the field blank on a new marker rather than omitting it, and blank is refused -- which is the intended outcome for a session with no grounds.",
+    "The throughput truth-audit guard binds every source line matching its `missing`/`not applied` pattern to a reviewed disposition. Three new lines match it -- two refusal/warning strings about a missing `authorization:` field and one source comment -- and all three are recorded as `excluded`: they are about a routing-block field, not about a database object being missing or unapplied, which is the audit's subject."
   ],
-  "stop_conditions": [
-    "Claim #2626 or migration version 20260909084253 changes",
-    "Main moves so the exact base evidence is no longer valid",
-    "A required check refuses or the SQL scope widens"
+  "required_checks": [
+    "node --test scripts/lib/orchestrator-admission.test.mjs",
+    "node --test scripts/check-orchestrator-marker.test.mjs",
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "git diff --check"
+  ],
+  "prohibited_actions": [
+    "No database read or write of any kind; this change touches no SQL and no migration",
+    "No marker is opened, closed, edited or routed to by this work",
+    "No change to PROTECTED_SOURCE_PATHS files",
+    "No change to REQUIRED_FIELDS or to CONTRACT_EFFECTIVE_DATE"
+  ],
+  "db_writes": [],
+  "db_reads": [],
+  "file_writes": [
+    "scripts/lib/orchestrator-admission.mjs",
+    "scripts/lib/orchestrator-admission.test.mjs",
+    "scripts/lib/orchestrator-routing.mjs",
+    "scripts/check-orchestrator-marker.mjs",
+    "scripts/check-orchestrator-marker.test.mjs",
+    "AGENTS.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
+  ],
+  "allowed_paths": [
+    "scripts/lib/orchestrator-admission.mjs",
+    "scripts/lib/orchestrator-admission.test.mjs",
+    "scripts/lib/orchestrator-routing.mjs",
+    "scripts/check-orchestrator-marker.mjs",
+    "scripts/check-orchestrator-marker.test.mjs",
+    "AGENTS.md",
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    ".github/workflows/orchestrator-marker-guard.yml"
   ]
 }
