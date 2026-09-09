@@ -43,11 +43,10 @@ export function parseArgs(argv) {
         throw new Error(`unknown argument ${flag}`);
     }
   }
-  // CLAMPED, exactly as the backfill clamps it. `--to` is an "as of" date, and an
-  // "as of" date in the future selects windows that have not closed in reality. The
-  // vendor answers a future window with an empty envelope, completion is "proved",
-  // and the week is sealed as loaded with zero rows -- the same silent loss the
-  // header describes, reached through an argument instead of through the default.
+  // CLAMPED, exactly as the backfill clamps it. `--to` names the newest window to
+  // LOAD and is clamped to a window that has already closed. A future `--to` must
+  // never be obeyed: the vendor returns an empty envelope, completion is "proved",
+  // and an unloaded week is silently sealed as loaded with zero rows.
   const lastClosed = windowAtIndex(lastClosedWindowIndex(isoDate(new Date())));
   if (!args.to || args.to > lastClosed.to) args.to = lastClosed.to;
   if (!Number.isInteger(args.windows) || args.windows < 1) {

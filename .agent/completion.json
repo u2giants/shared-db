@@ -1,27 +1,13 @@
 {
   "schema_version": 1,
-  "work_issue": 2588,
+  "work_issue": 2616,
   "outcome": "ready-for-merge",
-  "pr": 2589,
+  "pr": 2617,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2588/1",
-  "contract_sha256": "cbe915ab4acfb5e0274043166ded5f370b6ca0c4c28f82540ae3ffef173fb148",
-  "head_sha": "43c828359b6770aebca4eaf2ea5e49a250e563b4",
+  "contract_ref": "refs/db-contracts/2616/2",
+  "contract_sha256": "28e150c3ad5939c5a93882f1758be9e7ba52e143dba959392ed9d210f7bf8fbe",
+  "head_sha": "81ce668b26fd3bd64a57bb268decb8f42b063c6f",
   "files_changed": [
-    ".github/workflows/coldlion-history-backfill.yml",
-    ".github/workflows/coldlion-landing-sync.yml",
-    "tools/coldlion-landing-history.test.mjs",
-    "tools/coldlion-landing/README.md",
-    "tools/coldlion-landing/backfill-history.mjs",
-    "tools/coldlion-landing/lib/db.mjs",
-    "tools/coldlion-landing/lib/grid.mjs",
-    "tools/coldlion-landing/lib/http.mjs",
-    "tools/coldlion-landing/lib/load-window.mjs",
-    "tools/coldlion-landing/lib/project-order-history.mjs",
-    "tools/coldlion-landing/lib/project-prod-history.mjs",
-    "tools/coldlion-landing/lib/run-history.mjs",
-    "tools/coldlion-landing/lib/scopes.mjs",
-    "tools/coldlion-landing/lib/values.mjs",
     "tools/coldlion-landing/sync-history.mjs"
   ],
   "db_reads": [],
@@ -30,33 +16,16 @@
     {
       "command": "node --test tools/coldlion-landing-history.test.mjs",
       "exit_code": 0,
-      "evidence": "58 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo. Offline: no network, no secrets, no database contact. Covers the fixed grid, the stage-scoped and stage-less scopes, the silent page cap, the wire-400/body-500 contract as PERMANENT and unretried, both projections, the shape of the generated transaction, both workflows' triggers and refusals, the open-versus-closed window boundary, and the exact window the scheduled sync selects."
+      "evidence": "58 pass, 0 fail, 0 cancelled, 0 skipped, and 0 todo; offline tests only."
     },
     {
-      "command": "node --test tools/*.test.mjs",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "838 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo, re-run after the round-seven fix. This is the same glob the required Tools Offline Tests check uses, so the new file is wired into CI by the glob rather than by a list somebody has to remember to extend."
-    },
-    {
-      "command": "npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml",
-      "exit_code": 0,
-      "evidence": "Parsed without error. No local YAML parser existed in the repository, so the workflow was validated before commit rather than discovered broken by GitHub after push."
-    },
-    {
-      "command": "npx --yes js-yaml .github/workflows/coldlion-history-backfill.yml",
-      "exit_code": 0,
-      "evidence": "Parsed without error."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "The migration schema of 2026-09-05 was used as the authority throughout; the 2026-08-19 CSV was consulted only for the ingest/ignore rulings it still owns.",
-    "The loader carries its own psql invocation with ON_ERROR_STOP and no outer transaction wrapper, so each window's SQL owns its BEGIN/COMMIT and atomicity is not a side effect of how the helper was invoked.",
-    "Both workflows require an explicitly named database secret and refuse to run without it. No connection string is assembled from a project ref.",
-    "No database was contacted from this session and neither loader was run against a live target. The transaction shape is proven by asserting on the generated SQL, not by executing it.",
-    "sync-masters.mjs was not built, as the contract prohibits; the masters half of Step 7 remains open.",
-    "The governed review at head 71f31a32 returned REVISE with five findings. Four were real and are fixed with a regression test each: a whitespace-only numeric field became a real zero, the component reconcile compared floating point sums exactly, the resume read interpolated the company code into SQL unquoted, and a one-sided invoice list was dropped without a mismatch flag. The fifth, a group-key collision in the production projection, was not reachable because the line hash is part of that key; the separator was still made consistent with the order path and the reason is recorded in the code rather than in a test that cannot fail.",
-    "The governed review at head 7002542d confirmed the four round-one fixes and returned REVISE on one blocking design defect: the scheduled sync selected the window CONTAINING today, so each seven-day window would have been fetched and SEALED on its first day, discarding the remaining six days of orders while the ledger reported the window complete. Both entry points now select only windows that have CLOSED, the backfill clamps a future --to rather than obeying it, and the helper that returned the containing window was deleted rather than left available. Tests now assert the open/closed boundary itself, which no test did before -- the reason the defect survived two earlier reviews. The reviewer's minor note is also fixed: a negative or fractional --limit reached slice(0, -1) and silently dropped the last outstanding pair.",
-    "The governed review at head 55132b33 returned REVISE on one blocking defect: the scheduled sync clamped --to to the last day of the newest closed window and then passed that day to an \"as of\" selector, which treats the window containing a date as still open. The two rules were each correct and disagreed by exactly one window, so the job skipped the week it exists to load, and with --windows 1 skipped it on the only run that would ever have loaded it. --to now names the newest window to LOAD and is selected by the window it falls inside, matching how the backfill already reads its own --to. The regression test asserts the exact selected window; the previous test asserted only that the newest selection ended before today, which stayed true while the defect was live."
+    "The existing clamp and windowsEndingAt selection already implement the intended behavior; this change only corrects its stale explanation."
   ],
   "stop_conditions_hit": []
 }
