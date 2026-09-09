@@ -20,6 +20,28 @@ export const HISTORICAL_RESTORATIONS = Object.freeze({
       'view api.source_resolution',
     ]),
   }),
+  // #2506. Preview applied these exact bytes in run 34290415305, dispatched at and
+  // applied from PR #2542 head commit 281b967986b7cca99b13722f4d9ed3c988902c9d --
+  // the same commit this branch still carries, so the file IS the applied body.
+  // The version was reserved by claim #2510 and is therefore not a version mismatch;
+  // this pin exists only so the applied-migration-edit guard can tell "the exact
+  // applied bytes" from "an edit to an applied version". Production producer
+  // provenance is deliberately NOT registered: `sourcePr`/`sourceMergeCommit` are
+  // omitted, so `validateHistoricalProductionProvenance` refuses this version until
+  // a later change registers the real merge commit. No production eligibility is
+  // granted or changed here.
+  '20260908214749': Object.freeze({
+    filename: 'supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql',
+    name: 'popsg_search_v2_bounded_paging',
+    previewProject: 'mvpkijzfmfcxhnzqogzs',
+    previewApplyRun: '34290415305',
+    previewDispatchCommit: '281b967986b7cca99b13722f4d9ed3c988902c9d',
+    previewAppliedCommit: '281b967986b7cca99b13722f4d9ed3c988902c9d',
+    statementBytes: 25052,
+    statementSha256: 'fe5982e1dd711ef7e136727323cb125d6b095ab83de9edd5eaa3ad28258fb780',
+    fileSha256: 'e79a608eedbfc31dab4c70acb2ad2709f3f4d56ee8d2bb7c3e6d43a96632968f',
+    objects: Object.freeze(['function public.search_style_guide_library_v2']),
+  }),
   // #2356. The protected version and exact migration bytes were authored on
   // PR #2523 before 20260907200221 reached main. This entry permits only those
   // exact bytes to survive the backdated-version guard; it does not mark the

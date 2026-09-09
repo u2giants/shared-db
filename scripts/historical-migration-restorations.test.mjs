@@ -24,6 +24,41 @@ test('pins the issue 2493 restoration without changing production eligibility',(
   )
 })
 
+test('pins the issue 2506 preview restoration without granting production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260908214749']
+  assert.equal(row.filename,'supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql')
+  assert.equal(row.name,'popsg_search_v2_bounded_paging')
+  assert.equal(row.previewProject,'mvpkijzfmfcxhnzqogzs')
+  assert.equal(row.previewApplyRun,'34290415305')
+  assert.equal(row.previewDispatchCommit,'281b967986b7cca99b13722f4d9ed3c988902c9d')
+  assert.equal(row.previewAppliedCommit,'281b967986b7cca99b13722f4d9ed3c988902c9d')
+  assert.equal(row.fileSha256,'e79a608eedbfc31dab4c70acb2ad2709f3f4d56ee8d2bb7c3e6d43a96632968f')
+  assert.equal(row.statementBytes,25052)
+  assert.equal(row.statementSha256,'fe5982e1dd711ef7e136727323cb125d6b095ab83de9edd5eaa3ad28258fb780')
+  assert.equal(Object.isFrozen(row),true)
+  assert.deepEqual(row.objects,['function public.search_style_guide_library_v2'])
+  // The on-disk file must BE the pinned bytes, so the pin cannot drift from the tree.
+  assert.equal(validateHistoricalRestorationFile(row.filename,readFileSync(row.filename,'utf8')),row)
+  // One byte more and the pin refuses: the entry authorizes content, never a version.
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,readFileSync(row.filename,'utf8')+'-- changed'+String.fromCharCode(10)),
+    /historical restoration file hash mismatch for 20260908214749/,
+  )
+  // Production producer provenance is deliberately unregistered for this version.
+  assert.throws(
+    ()=>validateHistoricalProductionProvenance(row.filename,readFileSync(row.filename,'utf8'),{
+      version:'20260908214749',
+      previewApplyRun:'34290415305',
+      previewDispatchCommit:'281b967986b7cca99b13722f4d9ed3c988902c9d',
+      previewAppliedCommit:'281b967986b7cca99b13722f4d9ed3c988902c9d',
+      sourcePr:2542,
+      sourceMergeCommit:'0'.repeat(40),
+      artifactFileSha256:row.fileSha256,
+    }),
+    /not registered for production producer provenance/,
+  )
+})
+
 test('pins the issue 2356 restoration without changing production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260907152838']
   assert.equal(row.filename,'supabase/migrations/20260907152838_dam_asset_freshness_current_state.sql')

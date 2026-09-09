@@ -1616,6 +1616,20 @@ class BehavioralSidecarTests(unittest.TestCase):
         self.assertNotIn("pg_temp.popdam_1479", sql)
         self.assertTrue(sql.lower().startswith("select "))
 
+    def test_popsg_forward_catalog_is_exact_body_and_security_bound(self):
+        def change(sidecar):
+            sidecar["checks"] = [{"id": "popsg_bounded", "kind": "catalog_contract", "contract": "popsg_search_v2_bounded_paging_v1", "expected_count": 1}]
+        temp, root, migration = self.fixture(change)
+        with temp:
+            sql = build_behavior_sql(self.load(root, migration))
+        forward = Path(__file__).resolve().parents[1] / "supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql"
+        import hashlib
+        expected = hashlib.md5(forward.read_text().split("$function$")[1].encode()).hexdigest()
+        self.assertIn(expected, sql)
+        for term in ["p.prosecdef", "p.provolatile='s'", "search_path=pg_catalog, auth", "not has_function_privilege('anon'", "has_function_privilege('authenticated'", "has_function_privilege('service_role'"]:
+            self.assertIn(term, sql)
+        self.assertTrue(sql.lower().startswith("select "))
+
     def test_unknown_catalog_contract_and_extra_sql_fail_closed(self):
         def unknown(sidecar):
             sidecar["checks"] = [{
