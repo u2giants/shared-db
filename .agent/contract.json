@@ -50,11 +50,11 @@
   "branch": "claude/issue-2440-chain-nightly-reconcile",
   "worker": "claude/orch-2440 migration author holding claim 2608",
   "dispatcher": "claude shared-db-orchestrator route local_9409a344-6910-4128-ae4c-a394b13a4077",
-  "base_sha": "960a9ef0d8918ff26be73cd2968f49e1a3634de1",
+  "base_sha": "7c32df1419db423e1310593ee9a748eb2c3d7409",
   "goal": "Stop the style-group asset-count reconcile running on the clock 2h15m before the rebuild that changes the membership it counts. Delete cron job nightly-reconcile-sg-asset-counts, turn nightly-rebuild-style-groups into a 10-minute poll, and rewrite public.queue_nightly_rebuild_style_groups as a three-armed driver: enqueue once per UTC day at or after 06:00 UTC, reconcile in 500-group chunks only when the rebuild reaches status completed with an unreconciled run_id, and reconcile unconditionally if the last one is older than 7 days so the new silent failure mode is bounded and observable.",
   "route": "shared-db-orchestrator",
   "work_type": "structural",
   "work_issue": 2440,
-  "generation": 2,
+  "generation": 3,
   "schema_version": 1
 }
