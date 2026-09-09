@@ -21,7 +21,7 @@
 // row that CHANGED after its window closed is the change-log unit's job, not this one's.
 
 import { readColdlionApiKey } from "../coldlion-sync-common.mjs";
-import { isoDate, lastClosedWindowIndex, recentClosedWindows, windowAtIndex } from "./lib/grid.mjs";
+import { isoDate, lastClosedWindowIndex, windowAtIndex, windowsEndingAt } from "./lib/grid.mjs";
 import { proveTarget } from "./lib/db.mjs";
 import { COMPANY_CODE, PAGE_SIZE } from "./lib/scopes.mjs";
 import { allScopes, ledgerKey, loadWindowScope, loadedWindows, scopeLabel } from "./lib/run-history.mjs";
@@ -64,7 +64,10 @@ export async function main(argv = process.argv.slice(2)) {
   const target = proveTarget();
   console.log(`target ${target.database} at ${target.host}`);
 
-  const windows = recentClosedWindows(args.to, args.windows);
+  // `--to` names the newest window to LOAD, already clamped to one that has closed, so it
+  // is selected by the window it falls INSIDE -- exactly as the backfill reads its own
+  // `--to`. Reading it as an "as of" moment instead would skip the week that just closed.
+  const windows = windowsEndingAt(args.to, args.windows);
   const done = loadedWindows({ companyCode: args.company });
   const work = [];
   for (const window of windows) {
@@ -73,7 +76,7 @@ export async function main(argv = process.argv.slice(2)) {
     }
   }
   console.log(
-    `${windows.length} closed window(s) as of ${args.to} (newest ends ${windows.at(-1).to}); ` +
+    `${windows.length} closed window(s) through ${args.to} (newest ends ${windows.at(-1).to}); ` +
       `${work.length} window/scope pair(s) outstanding`,
   );
   if (args.dryRun) return { outstanding: work.length, loaded: 0, failures: 0 };

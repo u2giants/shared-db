@@ -9,7 +9,7 @@ import test from "node:test";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-import { GRID_ANCHOR, isoDate, lastClosedWindowIndex, recentClosedWindows, windowAtIndex, windowContaining, windowRange } from "./coldlion-landing/lib/grid.mjs";
+import { GRID_ANCHOR, isoDate, lastClosedWindowIndex, recentClosedWindows, windowAtIndex, windowContaining, windowRange, windowsEndingAt } from "./coldlion-landing/lib/grid.mjs";
 import { ORDER_HISTORY, allScopes, prodHistoryScope } from "./coldlion-landing/lib/scopes.mjs";
 import { assertPagesComplete, buildPageUrl, fetchPage, fetchWindowScope, isPermanentStatus, requestParams, validatePage } from "./coldlion-landing/lib/http.mjs";
 import { assertExpectedTarget } from "./coldlion-landing/lib/db.mjs";
@@ -556,8 +556,24 @@ test("the scheduled sync trails more than one window by default", () => {
   const args = parseSyncArgs([]);
   assert.ok(args.windows >= 2, "an order edited days later falls in an older window");
   assert.throws(() => parseSyncArgs(["--windows", "0"]), /positive integer/);
-  const windows = recentClosedWindows(parseSyncArgs([]).to, args.windows);
+  const windows = windowsEndingAt(parseSyncArgs([]).to, args.windows);
   assert.equal(windows.at(-1).to < isoDate(new Date()), true, "the sync never selects the open week");
+});
+
+// The clamp and the selector each behaved correctly and disagreed by one window: the
+// clamp handed over the last DAY of the newest closed week, and an "as of" selector reads
+// the window around that day as the current one. The scheduled job therefore skipped the
+// very week it exists to pick up, and with `--windows 1` skipped it on the only run that
+// would ever have loaded it. Asserting "older than today" stayed true throughout, so the
+// assertion below is on the exact window, not on an inequality.
+test("the scheduled sync loads the week that just closed, not the one before it", () => {
+  const lastClosed = windowAtIndex(lastClosedWindowIndex(isoDate(new Date())));
+  const selected = windowsEndingAt(parseSyncArgs([]).to, 1);
+  assert.deepEqual(selected, [lastClosed], "the newest closed window must be selected");
+  assert.deepEqual(windowsEndingAt(parseSyncArgs(["--to", lastClosed.to]).to, 1), [lastClosed]);
+  // Any day inside the newest closed week names that same week.
+  assert.deepEqual(windowsEndingAt(lastClosed.from, 1), [lastClosed]);
+  assert.throws(() => windowsEndingAt(lastClosed.to, 0), /positive integer/);
 });
 
 // ---------------------------------------------------------------------------------

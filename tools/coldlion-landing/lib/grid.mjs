@@ -79,14 +79,31 @@ export function lastClosedWindowIndex(asOfIso) {
   return current - 1;
 }
 
+/**
+ * The `count` windows ending with the window that CONTAINS `toIso`, oldest first.
+ *
+ * `toIso` names a window to LOAD; it is not an "as of" moment. The two readings differ by
+ * exactly one window, and the difference is not cosmetic: feeding a date that has already
+ * been clamped onto a closed window into an "as of" selector classifies that closed window
+ * as the current one and drops it, so the week the scheduled run exists to pick up is the
+ * one week it never loads. The caller is responsible for having clamped `toIso` to a
+ * window that has closed.
+ */
+export function windowsEndingAt(toIso, count) {
+  if (!Number.isInteger(count) || count < 1) {
+    throw new Error("--windows must be a positive integer");
+  }
+  const last = windowContaining(toIso).index;
+  const first = Math.max(0, last - count + 1);
+  const windows = [];
+  for (let index = first; index <= last; index += 1) windows.push(windowAtIndex(index));
+  return windows;
+}
+
 /** The N most recent CLOSED windows as of `asOfIso`, oldest first. */
 export function recentClosedWindows(asOfIso, count) {
   if (!Number.isInteger(count) || count < 1) {
     throw new Error("--windows must be a positive integer");
   }
-  const last = lastClosedWindowIndex(asOfIso);
-  const first = Math.max(0, last - count + 1);
-  const windows = [];
-  for (let index = first; index <= last; index += 1) windows.push(windowAtIndex(index));
-  return windows;
+  return windowsEndingAt(windowAtIndex(lastClosedWindowIndex(asOfIso)).to, count);
 }

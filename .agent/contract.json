@@ -1,53 +1,90 @@
 {
   "schema_version": 1,
-  "work_issue": 2588,
-  "generation": 1,
-  "work_type": "source-data",
-  "route": "source-data-session",
-  "goal": "Load ColdLion sales-order and production-order history into the existing coldlion.* landing tables, one fixed 7-day window and one scope at a time, atomically and resumably from ledger evidence, with the vendor's silent page cap, malformed error contract and stage scoping handled explicitly rather than assumed away.",
-  "base_sha": "fbd49fe829a33a225805334a0cdba662dfd44084",
-  "dispatcher": "owner request 2026-09-08: build the loader",
-  "worker": "claude session 4dd6eb",
-  "branch": "claude/coldlio-api-table-population-4dd6eb",
-  "worktree": ".claude/worktrees/exciting-hawking-a3ff11",
+  "generation": 13,
+  "work_issue": 2506,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Preserve exact authorized PopSG Files and Guides search results, facets and filters while meeting the existing bounded preview response budget.",
+  "base_sha": "d883dc0cc64e6847260f2e5357c45446f23b6153",
+  "dispatcher": "codex shared-db.orch marker2536 route01a07ceb-249b-7dc0-8f3a-ad5091e3a085",
+  "worker": "claude pr2542-green successor under orchestrator marker 2597",
+  "branch": "codex/issue-2506-search-performance",
+  "worktree": "C:/tmp/shared-db-orch-2536-2506-performance",
   "allowed_paths": [
+    "supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql",
+    "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql",
+    "scripts/benchmark_popsg_search_v2.py",
+    "scripts/production-verification-sidecars/20260908214749.json",
+    "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
     ".agent/completion.json",
-    "tools/coldlion-landing/**",
-    "tools/coldlion-landing-history.test.mjs",
-    ".github/workflows/coldlion-landing-sync.yml",
-    ".github/workflows/coldlion-history-backfill.yml"
+    "scripts/production_catalog_verification.py",
+    "scripts/test_production_catalog_verification.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs"
   ],
   "file_writes": [
-    "tools/coldlion-landing/**",
-    "tools/coldlion-landing-history.test.mjs",
-    ".github/workflows/coldlion-landing-sync.yml",
-    ".github/workflows/coldlion-history-backfill.yml"
+    "supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql",
+    "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql",
+    "scripts/benchmark_popsg_search_v2.py",
+    "scripts/production-verification-sidecars/20260908214749.json",
+    "scripts/production_business_risk_gate.py",
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/test_production_catalog_verification.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "table public.style_guide_search_documents",
+    "table public.style_guide_files",
+    "table public.style_guide_render_queue",
+    "function public.has_app_access",
+    "function auth.uid",
+    "function auth.role"
+  ],
+  "db_writes": [
+    "function public.search_style_guide_library_v2"
+  ],
   "prohibited_actions": [
-    "Do not change the shared database structure. This work loads rows into landing tables that already exist; a schema change is a separate governed migration and no supabase/migrations file may be authored here.",
-    "Do not write to any database from this session, and do not run either loader against a live target. The workflows are the only sanctioned execution path and they are dispatch/schedule only.",
-    "Do not commit any real ColdLion payload, order, item, customer or vendor value. This repository is public and the fixtures must be synthetic.",
-    "Do not build sync-masters.mjs. The owner asked about sales orders and production orders; the masters half of Step 7 is out of scope.",
-    "Do not retire, rewrite or carry another session's handoff file in this change."
+    "Do not edit applied version20260907131610",
+    "Do not alter indexes,grants or other functions",
+    "Do not change exact counts,facets,authorization or filter semantics",
+    "Do not push during the coordinator hold or dispatch preview,merge,production without coordinator approval",
+    "Do not publish licensed row contents or credentials"
   ],
   "required_checks": [
-    "node --test tools/coldlion-landing-history.test.mjs",
-    "node --test tools/*.test.mjs",
-    "npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml",
-    "npx --yes js-yaml .github/workflows/coldlion-history-backfill.yml"
+    "bash scripts/check-sql.sh",
+    "python3 scripts/test_migration_derivation.py",
+    "python3 scripts/benchmark_popsg_search_v2.py",
+    "git diff --check"
   ],
   "assumptions": [
-    "The migration schema of 2026-09-05 is the authority for identity, constraints and column names, ahead of the 2026-08-19 field-decisions CSV, because owner decisions D14/D17 of 2026-09-01 and the 2026-09-01 API additions post-date that CSV.",
-    "The loader owns its own transaction boundary, so it uses its own psql invocation rather than the shared helper that forces --single-transaction on one path and no transaction on the other.",
-    "The database target is supplied as an explicit secret. No pooler hostname is assembled from a project ref, because a guessed host is how a sandbox assumption reached production in the 2026-07-17 outage."
+    "Claim2510 guards reserved forward version20260907183041",
+    "Prior worker stopped per2534; successor owns isolated target",
+    "Representative preview has217193active files and1773guides; no synthetic shared-preview load needed",
+    "Independent exact-head review and live governed deployment acceptance remain pending after implementation checks",
+    "Generation2 authorizes focused CI repair after generation1 implementation: meaningful named catalog verification and explicit semantic-audit disposition; generation1 remains immutable.",
+    "Registered catalog predicate changes source hash of detector module; regenerate bound baseline with unchanged detector behavior and historical inventory.",
+    "Generation4 authorizes integrating current origin/main and regenerating the two derived throughput-guard truth artifacts from the merged tree; no SQL, benchmark, sidecar or catalog semantics change, and generations1-3 remain immutable.",
+    "Generation5 authorizes only the governed migration-version supersession bookkeeping: the coordinator re-reserved forward version20260908195355 in place of20260907183041 under claim2510, and this generation integrates current origin/main0f22de12562b7250ebf70fb07502e0fbce429cb3 and rebinds the evidence pair. The executable SQL body, benchmark, sidecar, catalog predicate and audit semantics are unchanged; generations1-4 remain immutable.",
+    "Generation6 authorizes one further scoped repair inside the same allowed paths: the supersession left the forward migration path hard-coded in scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py, which raised FileNotFoundError in the offline guard suite. Only the path string moves from20260907183041 to20260908195355; no threshold, parity case or exact-body predicate changes, and generations1-5 remain immutable.",
+    "Generation7 authorizes integrating current origin/main d669c43eda033919091c532605ee1cf1f2e786e4 and the second governed migration-version supersession it forced: main's newly merged version20260908202651 sorts after reserved forward version20260908195355, so the coordinator re-reserved20260908214749 under claim2510 and the two scripts that hard-code the forward migration path were moved with it. Only the merge, the version rename and that path string change; the executable SQL body, benchmark thresholds, sidecar, catalog predicate and audit semantics are unchanged, and generations1-6 remain immutable.",
+    "Generation 8 answers the first governed review round at head 783db9d1. Its Critical finding claimed the guides-mode re-join on array[root_label,licensor_name,property_folder,style_guide_folder,style_guide_name] drops identities containing SQL NULL. That is not PostgreSQL's semantics: array equality treats NULL elements as equal and still separates NULL from empty string, so the re-join is already NULL-safe. The claim is now settled by execution rather than argument: scripts/benchmark_popsg_search_v2.py gained a --database-url option (the docker path unchanged and still the default) so the required exact-parity fixture, whose EDGE data sets property_folder to SQL NULL for a quarter of its rows, actually ran at this head and reported 160 exact full-JSON parity cases with 0 skipped, plus the unchanged 8s volume budget with both baselines timing out and both forward modes passing. That also retires the High finding about carried-forward evidence: the parity check is no longer carried forward. The Medium finding is answered by new contract 8 in the focused contract file, which pins a NULL-folder guide's page row, its re-joined child aggregates and its child-derived facets, and keeps it distinct from the same guide with empty-string folders. No migration SQL changed in generation 8; the executable body, thresholds, sidecar, catalog predicate and audit semantics are identical to generation 7, and generations 1-8 remain immutable.",
+    "Generation 9 answers the second governed review round at head 0744880d, where one slot approved and the other repeated the earlier Critical claim that the guides-mode whole-array identity re-join drops SQL NULL identities, and asked for a per-column IS NOT DISTINCT FROM rewrite. That rewrite was implemented and measured, and it is harmful: it defeats the hash join and took the guides forward query from 4.1s to past the unchanged 8s budget this migration exists to meet, so it was reverted. The claim itself is settled by execution at head 0744880d, not by argument: the repository's own 'supabase/tests against an ephemeral database' job ran the focused contract file on a real database and logged 'issue #2506 PopSG v2 search contracts: all 9 checks passed', where contract 8 asserts precisely that a guide with SQL NULL folders keeps its page row, its re-joined child aggregates and its child-derived facets while staying distinct from the empty-string identity. The volume fixture independently returns the identical guides digest for baseline and forward. Generation 9 therefore changes one header comment block outside the function body recording both reasons, and the sidecar file digest that follows from it. The executable SQL is byte-identical to generations 7 and 8, so prosrc and the catalog contract predicate are unchanged, and generations 1-9 remain immutable.",
+    "Generation 10 authorizes integrating current origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb and regenerating the one derived artifact that merge disturbed. Main merged #2606 (worktree reap liveness) and #2613, which made 'Agent work contract' a required status check and moved the preflight pinned floor to origin/main; neither touches this migration's objects. The only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side, and docs/verification/throughput-guard-truth-audit-20260828.json, which was regenerated from the merged tree rather than resolved by picking a side: main's 268 reviewed call sites plus this branch's one benchmark site give 269, with the recorded count and semantic digest recomputed. No SQL, benchmark threshold, parity case, sidecar, catalog predicate or audit semantic changed; the executable SQL is byte-identical to generations 7-9, and generations 1-9 remain immutable.",
+    "Generation 11 authorizes exactly one further scoped change, inside two newly allowed paths: registering migration 20260908214749 in scripts/historical-migration-restorations.mjs, with its test. The applied-migration-edit guard refuses this pull request for a TRUE reason -- the version is already in the PREVIEW ledger from run 34290415305 -- and its own refusal names the registry as the route for a file that IS the exact applied bytes. Byte identity is proved from preview's own evidence artifact, not from this branch: preview-migration-apply-281b9679.../supabase/migration-content-manifest.json records for this version the digest e79a608eedbfc31dab4c70acb2ad2709f3f4d56ee8d2bb7c3e6d43a96632968f, which is the fileSha256 registered. No guard is weakened: check-applied-migration-edit.mjs is untouched and the registry gains one frozen entry pinned to bytes. Production eligibility is not granted -- sourcePr and sourceMergeCommit are deliberately omitted so validateHistoricalProductionProvenance refuses this version. The executable SQL is byte-identical to generations 7-10, and generations 1-10 remain immutable.",
+    "generation 12 (2026-09-09): no code change. The branch was updated from main (merge commit 7cb3f8605cead39c9f602f38a307b6c588acbee4) because the guarded merge refused with \"pull request is not based on the current main tip\". The merge brought in one HANDOFF.d prose file from main and nothing else. base_sha is re-pinned to the current main tip and the report head is re-bound to the merge commit; only the two .agent files follow it."
   ],
   "stop_conditions": [
-    "Stop if the work would require a schema change; that is a separate governed migration.",
-    "Stop if a real ColdLion value would have to be committed to prove something.",
-    "Stop if the offline test suite cannot pass without secrets or database contact, rather than weakening the tests to make them green.",
-    "Stop before running either loader against any live database."
+    "Claim or marker ownership changes",
+    "Any necessary SQL object lies outside function public.search_style_guide_library_v2",
+    "A proposed optimization changes complete baseline JSON semantics",
+    "An evidence or production gate refuses; do not bypass or increase timeout"
   ]
 }
