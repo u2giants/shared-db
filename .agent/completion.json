@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260909005945"
   ],
-  "contract_ref": "refs/db-contracts/2440/3",
-  "contract_sha256": "53688e36205710268b80bc7ead254bc2eef5a260efb45883ff85de39ac4793e0",
-  "head_sha": "09e4bf0cebd19d3230b1d26ffcea35838502c801",
+  "contract_ref": "refs/db-contracts/2440/4",
+  "contract_sha256": "c613c5813a1283968ff7c9f58d99a9de7831bd442c74413caf4c5983ab3fa8dd",
+  "head_sha": "79a5239455661eb93f1318999a281a04c9a902c3",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -28,7 +28,7 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Re-run at head 09e4bf0c after a second update from main (merge of origin/main 7c32df14, which added no migrations). Guard B: no migration sorts before the base branch's newest version (source: git:origin/main). Guard B2 skipped loudly with no live-ledger source configured and is not claimed as clearance. Expected-count guard, verify-cost guard and the issue #1684 EOL reference guard all passed. Static checks passed; no DATABASE_URL was set in this run."
+      "evidence": "Re-run at head 79a52394 after a second update from main (merge of origin/main 7c32df14, which added no migrations). Guard B: no migration sorts before the base branch's newest version (source: git:origin/main). Guard B2 skipped loudly with no live-ledger source configured and is not claimed as clearance. Expected-count guard, verify-cost guard and the issue #1684 EOL reference guard all passed. Static checks passed; no DATABASE_URL was set in this run."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
@@ -38,12 +38,22 @@
     {
       "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at head 09e4bf0c with PR_NUMBER=2612 (the script refuses without it outside CI). Migration claim verified: #2608, version 20260909005945. The objects statically extracted from the migration are a subset of the claim's writes; refresh_style_group_counts_batch is over-declared and not touched."
+      "evidence": "Re-run at head 79a52394 with PR_NUMBER=2612 (the script refuses without it outside CI). Migration claim verified: #2608, version 20260909005945. The objects statically extracted from the migration are a subset of the claim's writes; refresh_style_group_counts_batch is over-declared and not touched."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
+    },
+    {
+      "command": "bash scratch/localcheck.sh (disposable local PostgreSQL cluster, port 54329)",
+      "exit_code": 0,
+      "evidence": "Function DDL plus the contract behaviour block applied to a throwaway cluster with stubbed admin_config, style_groups (1200 rows) and refresh_style_group_counts_batch. All steps passed, including the two new negative steps for the review HIGH (status running and status queued, each with last_reconciled_at null, trigger nothing) and the staleness bound (a queued operation untouched for 30 days does NOT suppress the floor). Chunk walk: 12 chunks, min 200, max 500, 4800 ids across 4 reconcile passes over 1200 groups. The review MEDIUM ordering step reported PARTIAL rather than OK because the run happened at 02:00 UTC and a contract test cannot move the clock, so the enqueue gate was shut and the ordering was not exercised by that run; the step says so itself instead of claiming unearned coverage."
+    },
+    {
+      "command": "positive control: same suite against the pre-fix function body taken from git",
+      "exit_code": 3,
+      "evidence": "ERROR: CONTRACT (#2440 review HIGH): the floor arm fired (reason = floor) while the rebuild was \"running\" with last_reconciled_at still null. The new test provably discriminates; it is not a test that passes because nothing is checked."
     }
   ],
   "assumptions_resolved": [
@@ -54,7 +64,11 @@
     "Issue 2440's scope block lists table public.admin_config under reads. The function already writes that table in the baseline body and continues to write exactly the same single row, key = 'BULK_OPERATIONS'. No new table is written. Stated in the migration header and the PR body rather than left to be discovered.",
     "The contract tests WERE executed, from empty, on a disposable local PostgreSQL cluster built the CI way (Supabase roles, extensions, pass-1 replay of every migration, then the captured pre-adoption baseline, then pass 2). That run reproduced the CI failure verbatim and identified its cause: the baseline is applied BETWEEN the two replay passes and its own CREATE OR REPLACE of public.queue_nightly_rebuild_style_groups reverted this migration's body (AFTER_PASS1_IS_NEW_BODY t, then AFTER_BASELINE_IS_NEW_BODY f), so the suite exercised the pre-#2440 armless body while every catalog and cron contract still passed. With the #2440 body actually installed the whole contract file passes end to end, including the positive reconcile and the 7-day floor, and the once-per-UTC-day gate evaluates false as designed. The fix removes the baseline's copy of the function, which is the remedy the baseline's own instructions name; no test and no guard was weakened. The two positive reconcile steps remain guarded on the size of public.style_groups so they skip rather than run a full recompute on a production-sized dataset.",
     "The worker-signalled mechanism preferred by the issue author is PopDAM application work in another repository and is not claimed here; nothing in this migration has to be undone to adopt it. Wiring an alert on last_reconciled_at is likewise application work.",
-    "Preview apply, independent review, merge and production promotion were not performed and belong to the orchestrator."
+    "Preview apply, independent review, merge and production promotion were not performed and belong to the orchestrator.",
+    "Review HIGH answered in the function itself: ARM 3 now also requires the rebuild not to be in flight. The staleness half of the in-flight test is not decoration - without it an operation abandoned at queued by a dead worker would suppress the floor forever, trading the reported bug for the unbounded silence the floor exists to bound.",
+    "Review MEDIUM answered in the same function: ARM 2 is evaluated before ARM 1.",
+    "Review LOW, chunk walk under READ COMMITTED: accepted, not changed, and answered in the PR body. Chunking is the deliberate alternative to one long snapshot; membership that moves mid-walk is reconciled by the next completed run.",
+    "Review LOW, authenticated EXECUTE: left in place and disclosed. No caller can be proven absent from this repository since PopDAM is a separate repository; the grant is pre-existing baseline ACL pinned by the contract test, and every arm is idempotent by run_id or floor, so the reachable surface is at most one recompute per completed run."
   ],
   "stop_conditions_hit": []
 }

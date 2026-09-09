@@ -10,7 +10,11 @@
     "public.update_bulk_operation replaces the rebuild-style-groups object wholesale, so the reconcile marker must be a separate top-level BULK_OPERATIONS key",
     "The worker-signalled variant of #2440 and the alert that consumes last_reconciled_at are PopDAM application work in another repository and are not claimed here",
     "Contract tests were executed from empty on a disposable local PostgreSQL cluster built the CI way, and pass with the new body installed",
-    "The Database Contract Tests lane applies supabase/ci-bootstrap/010_pre_adoption_baseline.sql BETWEEN its two migration replay passes, so a migration that replaces a baseline routine and succeeds in pass 1 is overwritten by the baseline. This migration therefore deletes the baseline's copy of public.queue_nightly_rebuild_style_groups, which is the remedy the baseline's own instructions name; the baseline grants are left as idempotent no-ops."
+    "The Database Contract Tests lane applies supabase/ci-bootstrap/010_pre_adoption_baseline.sql BETWEEN its two migration replay passes, so a migration that replaces a baseline routine and succeeds in pass 1 is overwritten by the baseline. This migration therefore deletes the baseline's copy of public.queue_nightly_rebuild_style_groups, which is the remedy the baseline's own instructions name; the baseline grants are left as idempotent no-ops.",
+    "Review HIGH: the floor arm ran while the rebuild was queued/running because ARM 1 returns without seeding last_reconciled_at. Fixed by gating ARM 3 on the operation not being in flight, where in flight means status running/queued AND the operation touched inside the floor window. Seeding last_reconciled_at on the enqueue was rejected deliberately: that field is the detector answer to when the counts last refreshed, and stamping it on an enqueue would make the detector lie.",
+    "Review MEDIUM: ARM 2 is now evaluated before ARM 1, so the 06:00 enqueue cannot overwrite a completed-but-unreconciled run. Cost is at most a ten-minute enqueue delay on the poll that reconciles.",
+    "Review LOW (chunk walk is not one snapshot under READ COMMITTED): accepted and not changed. The walk exists precisely so the reconcile does not hold one long snapshot; a repeatable-read snapshot would reintroduce the long transaction and the bloat this design avoids, and a membership row inserted mid-walk is picked up by the next completed-run reconcile at most one rebuild later. Answered in the PR body rather than silently ignored.",
+    "Review LOW (authenticated retains EXECUTE): left in place, disclosed. The grant is pre-existing baseline ACL, no caller can be proven absent from this repository because the consumer PopDAM is a separate repository, and the contract test pins the grant set. The exposed surface is bounded: every arm is idempotent by run_id or by the floor, so an authenticated caller can force at most one recompute per completed run, which pg_cron would run anyway."
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
@@ -51,10 +55,10 @@
   "worker": "claude/orch-2440 migration author holding claim 2608",
   "dispatcher": "claude shared-db-orchestrator route local_9409a344-6910-4128-ae4c-a394b13a4077",
   "base_sha": "7c32df1419db423e1310593ee9a748eb2c3d7409",
-  "goal": "Stop the style-group asset-count reconcile running on the clock 2h15m before the rebuild that changes the membership it counts. Delete cron job nightly-reconcile-sg-asset-counts, turn nightly-rebuild-style-groups into a 10-minute poll, and rewrite public.queue_nightly_rebuild_style_groups as a three-armed driver: enqueue once per UTC day at or after 06:00 UTC, reconcile in 500-group chunks only when the rebuild reaches status completed with an unreconciled run_id, and reconcile unconditionally if the last one is older than 7 days so the new silent failure mode is bounded and observable.",
+  "goal": "Stop the style-group asset-count reconcile running on the clock 2h15m before the rebuild that changes the membership it counts. Delete cron job nightly-reconcile-sg-asset-counts, turn nightly-rebuild-style-groups into a 10-minute poll, and rewrite public.queue_nightly_rebuild_style_groups as a three-armed driver: enqueue once per UTC day at or after 06:00 UTC, reconcile in 500-group chunks only when the rebuild reaches status completed with an unreconciled run_id, and reconcile unconditionally if the last one is older than 7 days so the new silent failure mode is bounded and observable. Generation 4 answers the slot-1 review: the floor arm no longer runs while the rebuild is in flight (the HIGH finding), the chained-reconcile condition is evaluated before the enqueue condition (the MEDIUM finding), and the contract file pins both, plus the staleness bound that keeps a dead worker from suppressing the floor forever.",
   "route": "shared-db-orchestrator",
   "work_type": "structural",
   "work_issue": 2440,
-  "generation": 3,
+  "generation": 4,
   "schema_version": 1
 }
