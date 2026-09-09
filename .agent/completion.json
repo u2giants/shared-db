@@ -1,113 +1,62 @@
 {
   "schema_version": 1,
-  "work_issue": 2506,
+  "work_issue": 2588,
   "outcome": "ready-for-merge",
-  "pr": 2542,
-  "migration_versions": [
-    "20260908214749"
-  ],
-  "contract_ref": "refs/db-contracts/2506/13",
-  "contract_sha256": "be367de9ada1c4c770c65a69bdf519d7d19480511d8f97b508ae715db41d5d6e",
-  "head_sha": "28ab7ae1e1c3c4fa33ed0144a53874a6f67c301a",
+  "pr": 2589,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2588/1",
+  "contract_sha256": "cbe915ab4acfb5e0274043166ded5f370b6ca0c4c28f82540ae3ffef173fb148",
+  "head_sha": "43c828359b6770aebca4eaf2ea5e49a250e563b4",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/benchmark_popsg_search_v2.py",
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs",
-    "scripts/production-verification-sidecars/20260908214749.json",
-    "scripts/production_business_risk_gate.py",
-    "scripts/production_catalog_verification.py",
-    "scripts/test_production_catalog_verification.py",
-    "supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql",
-    "supabase/tests/popsg_search_style_guide_library_v2_contracts.sql"
+    ".github/workflows/coldlion-history-backfill.yml",
+    ".github/workflows/coldlion-landing-sync.yml",
+    "tools/coldlion-landing-history.test.mjs",
+    "tools/coldlion-landing/README.md",
+    "tools/coldlion-landing/backfill-history.mjs",
+    "tools/coldlion-landing/lib/db.mjs",
+    "tools/coldlion-landing/lib/grid.mjs",
+    "tools/coldlion-landing/lib/http.mjs",
+    "tools/coldlion-landing/lib/load-window.mjs",
+    "tools/coldlion-landing/lib/project-order-history.mjs",
+    "tools/coldlion-landing/lib/project-prod-history.mjs",
+    "tools/coldlion-landing/lib/run-history.mjs",
+    "tools/coldlion-landing/lib/scopes.mjs",
+    "tools/coldlion-landing/lib/values.mjs",
+    "tools/coldlion-landing/sync-history.mjs"
   ],
-  "db_reads": [
-    "table public.style_guide_search_documents",
-    "table public.style_guide_files",
-    "table public.style_guide_render_queue",
-    "function public.has_app_access",
-    "function auth.uid",
-    "function auth.role"
-  ],
-  "db_writes": [
-    "function public.search_style_guide_library_v2"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node --test tools/coldlion-landing-history.test.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head ca3a4ac2 after integrating origin/main 75cd89fe: static SQL guards passed and Guard B accepts the branch, because reserved forward version 20260908214749 still sorts after the merged base newest version 20260908202651 (main added no migration). Guard B2 live-ledger input remained intentionally absent because this preparation performed no shared database write."
+      "evidence": "58 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo. Offline: no network, no secrets, no database contact. Covers the fixed grid, the stage-scoped and stage-less scopes, the silent page cap, the wire-400/body-500 contract as PERMANENT and unretried, both projections, the shape of the generated transaction, both workflows' triggers and refusals, the open-versus-closed window boundary, and the exact window the scheduled sync selects."
     },
     {
-      "command": "python3 scripts/test_migration_derivation.py",
+      "command": "node --test tools/*.test.mjs",
       "exit_code": 0,
-      "evidence": "42 tests passed in 0.363s at the merged head ca3a4ac2."
+      "evidence": "838 pass, 0 fail, 0 cancelled, 0 skipped, 0 todo, re-run after the round-seven fix. This is the same glob the required Tools Offline Tests check uses, so the new file is wired into CI by the glob rather than by a list somebody has to remember to extend."
     },
     {
-      "command": "python3 scripts/benchmark_popsg_search_v2.py",
+      "command": "npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml",
       "exit_code": 0,
-      "evidence": "Executed at implementation head ca0032a5 and unchanged at ca3a4ac2 (the merge touched no benchmark, fixture or migration byte) on a disposable local PostgreSQL 18.6 cluster created with initdb in a scratch directory and dropped afterwards; it never touched Supabase. This host has no docker binary, so the script's --database-url option was used; the docker path is unchanged and still the default. Result: 'PASS: 160 exact full-JSON parity cases; 0 skipped.' with the unchanged 8s budget â€” files baseline timeout at 8100ms, files forward pass at 4050ms (total 211323), guides baseline pass at 6119ms and guides forward pass at 3162ms, both returning the identical digest 6b5ed84981bbb49f0a8f18252f367531 over total 10860. The EDGE fixture sets property_folder to SQL NULL for a quarter of its rows, so identical baseline and forward output at volume is direct evidence that the guides-mode identity re-join preserves NULL identities."
+      "evidence": "Parsed without error. No local YAML parser existed in the repository, so the workflow was validated before commit rather than discovered broken by GitHub after push."
     },
     {
-      "command": "git diff --check",
+      "command": "npx --yes js-yaml .github/workflows/coldlion-history-backfill.yml",
       "exit_code": 0,
-      "evidence": "No whitespace errors at the merged head ca3a4ac2."
-    },
-    {
-      "command": "python3 scripts/test_production_catalog_verification.py",
-      "exit_code": 0,
-      "evidence": "Re-run at implementation head ca3a4ac2: 188 tests passed in 0.620s. The exact-body, signature, security and privilege verification remains enforced against forward migration path 20260908214749."
-    },
-    {
-      "command": "node --test scripts/throughput-guard/check-production-verification-sidecars.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
-      "exit_code": 0,
-      "evidence": "10 passed, 0 failed, 0 skipped at head ca3a4ac2."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "Re-run against origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb: status OK, all 44 sidecars passed, and the forward migration scans as version 20260908214749 with its matching sidecar."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "Re-run at the merged head ca3a4ac2: 'truth audit OK: call_sites=269'. Main's own #2613 commit added one reviewed call site to this artifact while this branch adds another, so the merged inventory was regenerated from the merged tree â€” main's 268 dispositions plus this branch's scripts/benchmark_popsg_search_v2.py site â€” with the recorded count and semantic digest recomputed. No disposition text changed on either side."
-    },
-    {
-      "command": "supabase/tests against an ephemeral database (CI)",
-      "exit_code": 0,
-      "evidence": "Run 34285650340 of the Database Contract Tests workflow, at head 0744880d, applied the branch to an ephemeral database and executed the focused contract file, logging 'issue #2506 PopSG v2 search contracts: all 9 checks passed' and 'PASS popsg_search_style_guide_library_v2_contracts.sql'. Contract 8, added on this branch, asserts that a guide whose licensor/property/style-guide folders are SQL NULL keeps its page row, its re-joined child aggregates (matched_file_count 1, file_extensions [\"pdf\"], tag_names [\"null-tag\"]) and its child-derived facets at count 2, and stays a separate identity from the same guide with empty-string folders. Head ca0032a5 changes only a header comment outside the function body and the sidecar digest, so the same job re-runs unchanged on it."
-    },
-    {
-      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
-      "exit_code": 0,
-      "evidence": "36 tests passed at this head (8 registry, 28 guard). The added registry test asserts both directions: the on-disk migration validates against the new entry, and one extra byte fails with 'historical restoration file hash mismatch for 20260908214749', so the entry authorizes one content and never the version. It also asserts that validateHistoricalProductionProvenance REFUSES this version with 'not registered for production producer provenance', because sourcePr and sourceMergeCommit are deliberately omitted."
-    },
-    {
-      "command": "node scripts/check-applied-migration-edit.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "Run at this head against the LIVE preview and production ledgers (SUPABASE_ACCESS_TOKEN supplied by 1Password reference). Output: 'ALLOWED: 20260908214749 is applied in preview, and this file is byte-for-byte the approved historical restoration registered in scripts/historical-migration-restorations.mjs (popsg_search_v2_bounded_paging).' followed by 'No version touched here is present in the preview or production ledger without sanction'. Exit 0. Before the entry the same command exited 1 in CI run 34290497454 with 'REFUSED: 20260908214749 applied in: preview (added)'."
+      "evidence": "Parsed without error."
     }
   ],
   "assumptions_resolved": [
-    "Current origin/main bc4caafab4f9b33480f920dd09abed8ef2e1cb6e was integrated by normal merge at implementation head 41f3e56884eac54d107dce59b91f16f2e837ef03; current main is its second parent and a proven ancestor. The only merge conflicts were the .agent evidence pair (this pull request keeps its own) and the two generated throughput-guard truth artifacts, which were regenerated from the merged tree rather than resolved by picking a side. No main migration touches public.search_style_guide_library_v2 or public.style_guide_search_documents, so no function body needed re-derivation.",
-    "Claim2510 still exclusively protects function public.search_style_guide_library_v2 and reserved forward version20260907183041; applied original version20260907131610 retains Git blob27809f68ef885fa3666457158bc4e6d9e7f33ca0.",
-    "Every scoped implementation and proof file retained its inherited Git blob after current-main integration; no SQL, benchmark, contract, sidecar, catalog predicate, or audit semantics changed.",
-    "No active worker remained in the recorded remote workspace, and no exact-head reviewer or coordination lock was present before preparation.",
-    "Independent exact-head review, governed forward preview, optimized authenticated preview API acceptance, guarded merge, ordered two-version production apply, and live business verification remain pending under the coordinator.",
-    "The prior SQL Guard B refusal is resolved by the coordinator-authorized supersession under claim #2510: reserved forward version 20260907183041 was re-reserved as 20260908195355, which sorts after current main newest version 20260907200221. The migration, its sidecar and the business risk gate reference were renamed together; the executable SQL body is byte-identical apart from the single header comment line naming the reservation.",
-    "Current origin/main 0f22de12562b7250ebf70fb07502e0fbce429cb3 was integrated by normal merge at implementation head 9d6bcc643c2f0794ed4a0cc3939727ef8f9c5174; the only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side and rebinds it to the merged head. No other file needed resolution.",
-    "The supersession initially left two source references behind: scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py still opened supabase/migrations/20260907183041_popsg_search_v2_bounded_paging.sql, which raised FileNotFoundError in the offline SQL migration guards suite. Both now name version 20260908195355; only the path string changed, and the benchmark thresholds, parity cases and exact-body predicate are untouched.",
-    "Current origin/main d669c43eda033919091c532605ee1cf1f2e786e4 was integrated by normal merge at 00cbc60317f7bac84ac399a9aa6a27411798eb10; current main is its second parent and a proven ancestor. The only conflicts were the single-slot .agent evidence pair, where this pull request keeps its own side and rebinds it to the merged head. No main migration touches public.search_style_guide_library_v2 or public.style_guide_search_documents, so no function body needed re-derivation.",
-    "That merge brought in version 20260908202651 from PR #2584, which sorts after reserved forward version 20260908195355 and refused SQL Guard B. The coordinator re-reserved 20260908214749 under claim #2510 (durable supersession ref refs/db-claim-supersessions/2510-20260908195355), renaming the migration and its sidecar together; the executable SQL body is byte-identical apart from the single header comment line naming the reservation. scripts/benchmark_popsg_search_v2.py and scripts/test_production_catalog_verification.py were moved with it, and only the path string changed.",
-    "The first governed review round at head 783db9d1 returned one APPROVE (glm-5.3) and one REVISE (grok-4.6) whose Critical finding asserted that the guides-mode array identity re-join drops SQL NULL identities. PostgreSQL array equality treats NULL elements as equal while still separating NULL from empty string, so the re-join was already correct; rather than argue the point, the required exact-parity fixture was made runnable without docker and executed at this head, passing all 160 cases over data that deliberately includes NULL property_folder guides, and a new focused contract pins the same behaviour. No migration SQL was changed.",
-    "The second review round's Critical finding, and its requested per-column IS NOT DISTINCT FROM rewrite, were both tested rather than argued. The rewrite was implemented and measured: it defeats the hash join and pushed the guides forward query from 4.1s to past the 8s budget, so it was reverted. The finding's premise is refuted by the repository's own ephemeral-database job at head 0744880d, which logged all 9 focused contracts passing including the new NULL-identity contract, and by the volume fixture returning an identical guides digest for baseline and forward. Head ca0032a5 records both reasons in a header comment so the point does not have to be relitigated.",
-    "Current origin/main 75cd89fee2107cd53d942eed04a699ca656e14eb was integrated by normal merge at implementation head ca3a4ac23982203c4d7d95a8ece04cc0a416fa0e; current main is its second parent and a proven ancestor. Main's two new merges are repository-maintenance work â€” #2606 worktree reap liveness, and #2613 which makes 'Agent work contract' a required status check and reads the preflight pinned floor from origin/main rather than the proposed head. Neither touches public.search_style_guide_library_v2, public.style_guide_search_documents, or any migration, so no function body needed re-derivation and the reserved forward version still sorts last. Conflicts were the single-slot .agent evidence pair (this pull request keeps its own side and rebinds it here) and the throughput-guard truth audit, regenerated from the merged tree.",
-    "The round-2 Critical is left to the round-3 reviewers rather than settled by the author. What changed is its legibility, not its disposition: the migration header now states in the file itself that the whole-array identity re-join is NULL-safe by PostgreSQL array-equality semantics and that the requested per-column IS NOT DISTINCT FROM rewrite was implemented, measured from 4.1s to past the unchanged 8s budget, and reverted; contract 8 in supabase/tests/popsg_search_style_guide_library_v2_contracts.sql pins the NULL-folder guide's page row, re-joined child aggregates and child-derived facets while keeping it distinct from the empty-string identity, and ran green on a real ephemeral database in CI run 34285650340; and the volume fixture, a quarter of whose rows carry SQL NULL property_folder, returns the identical guides digest 6b5ed84981bbb49f0a8f18252f367531 for baseline and forward. A fresh reviewer can check each of those without re-deriving them.",
-    "The 'SQL migration guards' refusal at head 281b9679 (run 34290497454, 23:24:58Z) is TRUE and cannot be cleared by retry: preview apply run 34290415305 put 20260908214749 in the preview ledger 90 seconds earlier, so the guard, which examines ADDED files on the same terms as modified ones, correctly reads the file as carrying an already-applied version. The guard's own refusal text names the remedy taken here. Byte identity is proved from preview's evidence rather than asserted: run 34290415305 is a workflow_dispatch at headSha 281b967986b7cca99b13722f4d9ed3c988902c9d -- this pull request's head -- its preview job logged 'Applying migration 20260908214749_popsg_search_v2_bounded_paging.sql' after 'content manifest verified', and the artifact it uploaded records for that version the digest e79a608eedbfc31dab4c70acb2ad2709f3f4d56ee8d2bb7c3e6d43a96632968f, identical to the registered fileSha256 and to this branch's file. The alternative -- superseding under a freshly reserved version -- was considered and rejected: it strands 20260908214749 as applied to preview but never on main, and an orphaned preview version blocks every later version in that lane. The migration author lease check is unaffected: claim #2510 reserves this exact version, so validateMigrationLease takes its ordinary path and never the historical-restoration path."
+    "The migration schema of 2026-09-05 was used as the authority throughout; the 2026-08-19 CSV was consulted only for the ingest/ignore rulings it still owns.",
+    "The loader carries its own psql invocation with ON_ERROR_STOP and no outer transaction wrapper, so each window's SQL owns its BEGIN/COMMIT and atomicity is not a side effect of how the helper was invoked.",
+    "Both workflows require an explicitly named database secret and refuse to run without it. No connection string is assembled from a project ref.",
+    "No database was contacted from this session and neither loader was run against a live target. The transaction shape is proven by asserting on the generated SQL, not by executing it.",
+    "sync-masters.mjs was not built, as the contract prohibits; the masters half of Step 7 remains open.",
+    "The governed review at head 71f31a32 returned REVISE with five findings. Four were real and are fixed with a regression test each: a whitespace-only numeric field became a real zero, the component reconcile compared floating point sums exactly, the resume read interpolated the company code into SQL unquoted, and a one-sided invoice list was dropped without a mismatch flag. The fifth, a group-key collision in the production projection, was not reachable because the line hash is part of that key; the separator was still made consistent with the order path and the reason is recorded in the code rather than in a test that cannot fail.",
+    "The governed review at head 7002542d confirmed the four round-one fixes and returned REVISE on one blocking design defect: the scheduled sync selected the window CONTAINING today, so each seven-day window would have been fetched and SEALED on its first day, discarding the remaining six days of orders while the ledger reported the window complete. Both entry points now select only windows that have CLOSED, the backfill clamps a future --to rather than obeying it, and the helper that returned the containing window was deleted rather than left available. Tests now assert the open/closed boundary itself, which no test did before -- the reason the defect survived two earlier reviews. The reviewer's minor note is also fixed: a negative or fractional --limit reached slice(0, -1) and silently dropped the last outstanding pair.",
+    "The governed review at head 55132b33 returned REVISE on one blocking defect: the scheduled sync clamped --to to the last day of the newest closed window and then passed that day to an \"as of\" selector, which treats the window containing a date as still open. The two rules were each correct and disagreed by exactly one window, so the job skipped the week it exists to load, and with --windows 1 skipped it on the only run that would ever have loaded it. --to now names the newest window to LOAD and is selected by the window it falls inside, matching how the backfill already reads its own --to. The regression test asserts the exact selected window; the previous test asserted only that the newest selection ended before today, which stayed true while the defect was live."
   ],
   "stop_conditions_hit": []
 }
