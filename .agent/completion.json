@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260909005945"
   ],
-  "contract_ref": "refs/db-contracts/2440/4",
-  "contract_sha256": "c613c5813a1283968ff7c9f58d99a9de7831bd442c74413caf4c5983ab3fa8dd",
-  "head_sha": "79a5239455661eb93f1318999a281a04c9a902c3",
+  "contract_ref": "refs/db-contracts/2440/5",
+  "contract_sha256": "70a50231c19d432ab915aabccbd365f1bc56f3b329db2493c319cf756672334a",
+  "head_sha": "aff94a2673de6dabb3806cbe00aba7d41d2695e0",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -28,7 +28,7 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Re-run at head 79a52394 after a second update from main (merge of origin/main 7c32df14, which added no migrations). Guard B: no migration sorts before the base branch's newest version (source: git:origin/main). Guard B2 skipped loudly with no live-ledger source configured and is not claimed as clearance. Expected-count guard, verify-cost guard and the issue #1684 EOL reference guard all passed. Static checks passed; no DATABASE_URL was set in this run."
+      "evidence": "Re-run at head 79a52394 and unchanged at head aff94a26, the third update from main (merge of origin/main f3c04e62, a docs-only commit that added no migrations). Guard B: no migration sorts before the base branch's newest version (source: git:origin/main). Guard B2 skipped loudly with no live-ledger source configured and is not claimed as clearance. Expected-count guard, verify-cost guard and the issue #1684 EOL reference guard all passed. Static checks passed; no DATABASE_URL was set in this run."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
@@ -38,7 +38,7 @@
     {
       "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at head 79a52394 with PR_NUMBER=2612 (the script refuses without it outside CI). Migration claim verified: #2608, version 20260909005945. The objects statically extracted from the migration are a subset of the claim's writes; refresh_style_group_counts_batch is over-declared and not touched."
+      "evidence": "Re-run at head 79a52394, unchanged at head aff94a26, with PR_NUMBER=2612 (the script refuses without it outside CI). Migration claim verified: #2608, version 20260909005945. The objects statically extracted from the migration are a subset of the claim's writes; refresh_style_group_counts_batch is over-declared and not touched."
     },
     {
       "command": "git diff --check",
