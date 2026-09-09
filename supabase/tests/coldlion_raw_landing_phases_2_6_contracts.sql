@@ -41,8 +41,9 @@ begin
   if not exists (
     select 1 from pg_constraint
     where conrelid='coldlion.merch_group_detail'::regclass and contype='p'
-      and pg_get_constraintdef(oid) like '%company_code%division_code%mg_type_code%mg_code%'
-  ) then raise exception 'four-part merch-group identity missing'; end if;
+      and pg_get_constraintdef(oid) =
+        'PRIMARY KEY (company_code, division_code, mg_type_code, mg_category, mg_code)'
+  ) then raise exception 'five-part merch-group identity missing'; end if;
 
   if not exists (
     select 1 from pg_constraint
