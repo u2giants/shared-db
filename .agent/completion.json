@@ -3,9 +3,7 @@
   "work_issue": 2439,
   "outcome": "ready-for-merge",
   "pr": 2654,
-  "migration_versions": [
-    "20260909202801"
-  ],
+  "migration_versions": ["20260909202801"],
   "contract_ref": "refs/db-contracts/2439/4",
   "contract_sha256": "46dc3616a8a0e543f97619e2d0162622ca311867866ca9dedae628cf94dfbab0",
   "head_sha": "77ef444d29ea7977bd988b56101cc007665a19cd",
@@ -19,10 +17,7 @@
     "scripts/test_post_batch_app_verification.py",
     "supabase/migrations/20260909202801_bulk_operation_runs_history_reissue.sql"
   ],
-  "db_reads": [
-    "function app.has_any_role",
-    "type app.app_role"
-  ],
+  "db_reads": ["function app.has_any_role", "type app.app_role"],
   "db_writes": [
     "table public.bulk_operation_runs",
     "column public.bulk_operation_runs.error",
@@ -36,41 +31,13 @@
     "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
   ],
   "checks": [
-    {
-      "command": "python -m unittest scripts/test_*.py",
-      "exit_code": 0,
-      "evidence": "930 tests passed with 8 environment-dependent skips, including old-version refusal, successor allowlisting, normalized-content identity, and the complete retired-version registry contract."
-    },
-    {
-      "command": "node --test scripts/check-migration-ledger-drift.test.mjs",
-      "exit_code": 0,
-      "evidence": "30 tests passed; the stranded original is classified retired with the exact successor and issue/claim reason."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards passed; the fresh version sorts after current main and introduces no forbidden verification read."
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "exit_code": 0,
-      "evidence": "Claim #2443 and reserved version 20260909202801 verified for PR #2654."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "Truth audit passed across 269 call sites."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
-      "exit_code": 0,
-      "evidence": "Completion report reconciles with immutable contract refs/db-contracts/2439/4."
-    }
+    {"command": "python -m unittest scripts/test_*.py", "exit_code": 0, "evidence": "930 tests passed with 8 environment-dependent skips, including old-version refusal, successor allowlisting, normalized-content identity, and the complete retired-version registry contract."},
+    {"command": "node --test scripts/check-migration-ledger-drift.test.mjs", "exit_code": 0, "evidence": "30 tests passed; the stranded original is classified retired with the exact successor and issue/claim reason."},
+    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL guards passed; the fresh version sorts after current main and introduces no forbidden verification read."},
+    {"command": "node scripts/check-migration-pr-lease.mjs", "exit_code": 0, "evidence": "Claim #2443 and reserved version 20260909202801 verified for PR #2654."},
+    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "Truth audit passed across 269 call sites."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
+    {"command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Completion report reconciles with immutable contract refs/db-contracts/2439/4."}
   ],
   "assumptions_resolved": [
     "Claim #2443 remains bound to the exact original object locks and fresh reserved version 20260909202801.",
