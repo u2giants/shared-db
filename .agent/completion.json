@@ -1,49 +1,34 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 2641,
   "outcome": "ready-for-merge",
-  "pr": 2654,
-  "migration_versions": ["20260909202801"],
-  "contract_ref": "refs/db-contracts/2439/4",
-  "contract_sha256": "46dc3616a8a0e543f97619e2d0162622ca311867866ca9dedae628cf94dfbab0",
-  "head_sha": "d48b82b2d2ac3324090ac49b8c7205560b29481a",
-  "evidence_note": "The atomically reissued claim has a fresh migration whose normalized content and Git blob exactly match the stranded original. Current main dceb584b was merged after an external landing invalidated the earlier review; only the single-slot .agent pair conflicted and was resolved to this PR's evidence, while all substantive main changes were retained. Fresh local proof passed at that merge commit. The original version remains permanently refused and classified retired. No preview, production, reviewer, or PR merge action was performed.",
+  "pr": 2642,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2641/1",
+  "contract_sha256": "f4f5737b4f68e13e66fabdeec99cc37542c3c2f33de565679a601bfe3f4e7545",
+  "head_sha": "4269bf323eb6e116f4a7fd6b43bea6b12fbd7594",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/check-migration-ledger-drift.test.mjs",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
-    "scripts/test_post_batch_app_verification.py",
-    "supabase/migrations/20260909202801_bulk_operation_runs_history_reissue.sql"
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/test_production_migration_guard.py"
   ],
-  "db_reads": ["function app.has_any_role", "type app.app_role"],
-  "db_writes": [
-    "table public.bulk_operation_runs",
-    "column public.bulk_operation_runs.error",
-    "column public.bulk_operation_runs.operation",
-    "column public.bulk_operation_runs.run_id",
-    "column public.bulk_operation_runs.stage",
-    "column public.bulk_operation_runs.status",
-    "index public.bulk_operation_runs_failures_idx",
-    "index public.bulk_operation_runs_operation_run_key",
-    "index public.bulk_operation_runs_operation_started_idx",
-    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
-    {"command": "python -m unittest scripts/test_*.py", "exit_code": 0, "evidence": "930 tests passed with 8 environment-dependent skips, including old-version refusal, successor allowlisting, normalized-content identity, and the complete retired-version registry contract."},
-    {"command": "node --test scripts/check-migration-ledger-drift.test.mjs", "exit_code": 0, "evidence": "30 tests passed; the stranded original is classified retired with the exact successor and issue/claim reason."},
-    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL guards passed; the fresh version sorts after current main and introduces no forbidden verification read."},
-    {"command": "node scripts/check-migration-pr-lease.mjs", "exit_code": 0, "evidence": "Claim #2443 and reserved version 20260909202801 verified for PR #2654."},
-    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "Truth audit passed across 272 call sites after integrating current main."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
-    {"command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Completion report reconciles with immutable contract refs/db-contracts/2439/4."}
+    {"command": "node --test scripts/historical-migration-restorations.test.mjs", "exit_code": 0, "evidence": "10 registry tests passed with no failures or skips after the current-main refresh, including exact issue 2543 and issue 2580 metadata and negative wrong-path and wrong-byte cases."},
+    {"command": "node --input-type=module -e <exact PR2631 blob validation>", "exit_code": 0, "evidence": "The registry accepted PR 2631 head 7ba30e4db1558d2dabf5997141ee6b98306f8e86 at the exact path, independently recomputed the file and statement digests and 61267 statement bytes, confirmed the exact claim 2630 object scope, and refused changed path or bytes."},
+    {"command": "python -m unittest scripts.test_production_migration_guard", "exit_code": 0, "evidence": "238 tests passed; issue 2543 and the current-main issue 2580 restoration remain production eligible while existing blocked and preview-only versions keep their refusals."},
+    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL checks passed under Git Bash against current origin/main b436dcb7; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."},
+    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 contract tests passed with no failures or skips."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors after the exact current-main b436dcb7 refresh and additive restoration-registry conflict resolution."}
   ],
   "assumptions_resolved": [
-    "Claim #2443 remains bound to the exact original object locks and fresh reserved version 20260909202801.",
-    "The successor migration has the same filtered Git blob cd53c1b02fa719bf1041e1fb0cbc6c85316a17cb as original version 20260908195056.",
-    "Old version 20260908195056 cannot enter a preview or production allowlist, alone or with the successor.",
-    "The structural recovery remains separate from PopDAM insertion and alert-delivery acceptance."
+    "Migration file SHA256 is 9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7; statement SHA256 is 0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719 over 61267 bytes.",
+    "Against current main b436dcb7b6310075a48b6ea1594ffc1b7c8020b6, the PR still changes exactly the two agent evidence files and the three issue 2543 registry/guard files; current-main issue 2580, issue 2466, and issue 2439 files were incorporated without widening this PR's diff.",
+    "PR 2631 head 7ba30e4db1558d2dabf5997141ee6b98306f8e86 still carries the exact repaired migration bytes and claim 2630 object scope.",
+    "Issue 2543, claim 2630, reserved migration version 20260909115140, PR 2631, preview, production, reviewer refs, and merge state remain untouched."
   ],
   "stop_conditions_hit": []
 }
