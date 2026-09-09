@@ -6,8 +6,6 @@ do $$
 declare
   v_run uuid;
   v_item uuid;
-  v_licensor uuid;
-  v_property uuid;
   v_row record;
   v_columns text[];
   v_viewdef text;
@@ -27,20 +25,17 @@ begin
   end if;
 
   select pg_get_viewdef('api.plm_item_list'::regclass, true) into v_viewdef;
-  if v_viewdef not like '%plm.item i%' then
-    raise exception '#2466: api.plm_item_list does not read plm.item';
+  if v_viewdef not like '%plm.item i%'
+     or v_viewdef not like '%core.licensor%'
+     or v_viewdef not like '%core.property%' then
+    raise exception '#2466: api.plm_item_list does not carry its canonical item/attribution joins';
   end if;
-
-  insert into core.licensor (name, code)
-  values ('ZZ2466 LICENSOR', 'ZZ2466L') returning id into v_licensor;
-  insert into core.property (licensor_id, name, code)
-  values (v_licensor, 'ZZ2466 PROPERTY', 'ZZ2466P') returning id into v_property;
 
   insert into plm.item (
     item_number, style_number, description, licensor_id, property_id,
     source_system, source_id, raw, updated_at
   ) values (
-    'ZZ2466ITEM', null, 'ZZ2466 DESCRIPTION', v_licensor, v_property,
+    'ZZ2466ITEM', null, 'ZZ2466 DESCRIPTION', null, null,
     'coldlion', 'ZZCO|ZZ001|ZZ2466ITEM',
     jsonb_build_object(
       'companyCode','ZZCO','divisionCode','ZZ001','itemNo','ZZ2466ITEM',
@@ -79,7 +74,7 @@ begin
       v_row.erp_updated_at, v_row.synced_at, v_row.source_system)
      is distinct from
      ('ZZ2466ITEM','ZZ2466ITEM','ZZ2466 DESCRIPTION','ZZCAT','ZZ01','ZZ06','ZZSIZE',
-      'ZZ2466L','ZZ2466P','ZZ001','ZZPACK1','["ZZPACK1", "ZZPACK2"]'::jsonb,true,
+      null,null,'ZZ001','ZZPACK1','["ZZPACK1", "ZZPACK2"]'::jsonb,true,
       '2024-05-06T07:08:09Z'::timestamptz,'2026-09-09T12:00:00Z'::timestamptz,'coldlion') then
     raise exception '#2466: canonical mapping/prepack/dismissed contract failed: %', row_to_json(v_row);
   end if;

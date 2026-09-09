@@ -1,5 +1,6 @@
 -- Issue #2466: repoint the stable 21-column item-list contract from the frozen
 -- DesignFlow mirror to canonical ColdLion-backed plm.item rows.
+-- derived-from: 20260715193000
 --
 -- The ColdLion detail landing is intentionally closed to application roles. The
 -- serving view is therefore a barrier/definer view: authenticated callers see
