@@ -1,93 +1,74 @@
 {
   "schema_version": 1,
-  "work_issue": 2403,
+  "work_issue": 2466,
   "outcome": "ready-for-merge",
-  "pr": 2425,
-  "migration_versions": [
-    "20260909121403"
-  ],
-  "contract_ref": "refs/db-contracts/2403/5",
-  "contract_sha256": "81e394f5682d8fa403c5232c5a5e874131b8babd181694864476b0747ed01273",
-  "head_sha": "2c432e69edfb367365087c1782ce0e316f63204b",
+  "pr": 2634,
+  "migration_versions": ["20260909132734"],
+  "contract_ref": "refs/db-contracts/2466/1",
+  "contract_sha256": "17d4a12875b0ac127f7c51b55e1f1a4e443eb73fdf7a6db8f48825b7f04b207f",
+  "head_sha": "8391b13447d9f862e79304a7dede264634b67613",
+  "evidence_note": "Implementation head 8391b134 preserves exactly one deterministic legacy ERP UUID per bare item number for the still-legacy-keyed style-tracker bridge, gives every cross-division sibling its unique plm.item UUID, and exercises the live three-part grain plus canonical attribution through the real transaction-bound fixture authorization guard after the final main update at 5874305e. Fresh exact-head CI and governed reviews are tracked by PR #2634; the following evidence-only commit changes only the two required .agent evidence files.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql"
+    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql"
   ],
   "db_reads": [
-    "table public.hts_rag_determinations",
-    "table public.hts_rag_extraction_jobs",
-    "table public.hts_rag_precedent_rulings",
-    "table public.hts_rag_precedents",
-    "table public.hts_rag_product_examples",
-    "table public.hts_rag_product_family_allowlist",
-    "table public.hts_rag_provider_responses",
-    "table public.hts_rag_review_events",
-    "table public.hts_rag_rulings"
+    "table plm.item",
+    "table coldlion.item_detail",
+    "table core.licensor",
+    "table core.property",
+    "table public.erp_items_current"
   ],
-  "db_writes": [
-    "schema hts_rag_split",
-    "table hts_rag_split.hts_rag_determinations",
-    "table hts_rag_split.hts_rag_extraction_jobs",
-    "table hts_rag_split.hts_rag_precedent_rulings",
-    "table hts_rag_split.hts_rag_precedents",
-    "table hts_rag_split.hts_rag_product_examples",
-    "table hts_rag_split.hts_rag_product_family_allowlist",
-    "table hts_rag_split.hts_rag_provider_responses",
-    "table hts_rag_split.hts_rag_review_events",
-    "table hts_rag_split.hts_rag_rulings",
-    "index hts_rag_split.hts_rag_determinations_comparison_category_idx",
-    "index hts_rag_split.hts_rag_determinations_comparison_review_idx",
-    "index hts_rag_split.hts_rag_determinations_family_created_idx",
-    "index hts_rag_split.hts_rag_extraction_jobs_idempotency_idx",
-    "index hts_rag_split.hts_rag_extraction_jobs_pending_claim_idx",
-    "index hts_rag_split.hts_rag_precedent_rulings_relationship_idx",
-    "index hts_rag_split.hts_rag_precedent_rulings_ruling_idx",
-    "index hts_rag_split.hts_rag_precedents_extraction_idempotency_idx",
-    "index hts_rag_split.hts_rag_precedents_family_review_idx",
-    "index hts_rag_split.hts_rag_product_examples_family_idx",
-    "index hts_rag_split.hts_rag_provider_responses_determination_idx",
-    "index hts_rag_split.hts_rag_review_events_subject_created_idx",
-    "index hts_rag_split.hts_rag_rulings_operationally_revoked_idx",
-    "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
-  ],
+  "db_writes": ["view api.plm_item_list"],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: Guard B confirmed reserved version 20260909121403 sorts after base version 20260909005945; static, expected-count, verification-cost and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."
+      "evidence": "Git Bash run passed Guard B, expected-count, verify-cost, issue #1684 EOL and static checks. Guard B2 disclosed that no live-ledger source was configured; no database clearance is claimed from the static run."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: status OK, 44 sidecars checked; version 20260909121403 has no dynamic-execution markers and requires no sidecar."
+      "evidence": "Status OK; 44 existing sidecars validated and migration 20260909132734 contains no dynamic verification marker requiring a sidecar."
     },
     {
       "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d with PR_NUMBER=2425: migration claim #2418 and reserved version 20260909121403 verified."
+      "evidence": "With PR_NUMBER=2634 at implementation head 90b93af8, claim #2632 and version 20260909132734 verified. The sanctioned PR-parser expansion added only table api.plm_item_list as the parser alias beside the claimed view."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: no whitespace errors."
+      "evidence": "No whitespace errors."
     },
     {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
+      "command": "supabase/tests/plm_item_list_repoint_contracts.sql on a disposable database",
       "exit_code": 0,
-      "evidence": "PostgreSQL 17 disposable server applied the migration and its built-in catalog/emptiness assertions successfully before the guarded pure filename supersession. The SQL blob is unchanged, so this evidence binds to implementation head 6d65afc9."
+      "evidence": "The focused contract now pins the 21-column order, protected authenticated serving posture, legacy bridge UUID preservation, canonical-only UUID fallback, resolved canonical attribution, deterministic direct prepacks, non-ColdLion exclusion, unresolved-null attribution and dismissed state. Exact-head disposable-database execution is tracked by PR #2634 CI."
     },
     {
-      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f verify.sql",
+      "command": "supabase/tests/plm_item_import_phase2_contracts.sql on a disposable database",
       "exit_code": 0,
-      "evidence": "All nine hts_rag_split tables remained empty while one sentinel row in each of the nine public.hts_rag_* positive-control tables remained unchanged. The SQL blob is unchanged by main integration and guarded filename supersession, so this evidence binds to implementation head 6d65afc9."
+      "evidence": "The existing focused Phase 2 contract retains its bridge FK and safe-deletion assertions. Exact-head disposable-database execution is tracked by PR #2634 CI."
+    },
+    {
+      "command": "Database Contract Tests CI from empty",
+      "exit_code": 0,
+      "evidence": "Fresh exact-head from-empty CI is tracked externally on PR #2634; no earlier-head run is presented as exact-head evidence."
     }
   ],
   "assumptions_resolved": [
-    "DesignFlow owner acknowledgement comment 5577130097 confirms shared-db owns the governed migration and exact consolidated non-production target route.",
-    "Guarded supersession evidence permanently preserves versions 20260906040010 and 20260908022407; supersession ref ac5f3475dff31b9f331b18a95212bf9344fac7b6 reserves current version 20260909121403.",
-    "Original and superseded migration paths resolve to identical Git blob 3f2e7f44a6dfb30fc879449c684f260863c5fc10; only the filename changed.",
-    "Origin/main fe5fa74db889652768029116e636f8cbe69b955e was integrated at implementation head 2c432e69edfb367365087c1782ce0e316f63204b; the only conflicts were the single-slot .agent/contract.json and .agent/completion.json evidence pair, which must describe THIS pull request, so this branch's evidence was retained and refreshed. The migration SQL blob remains unchanged from its earlier implementation. No preview, production apply, claim release, issue closure, or inherited cleanup occurred."
+    "The exact 21 output column names and order are pinned by the focused contract.",
+    "source_id and style_number use plm.item.item_number; item_description uses plm.item.description; erp_updated_at uses ColdLion raw modTime while synced_at remains plm.item.updated_at.",
+    "Licensor and property codes come only through resolved canonical foreign keys and remain null when unresolved.",
+    "Direct prepack codes are read from the completed ColdLion item-detail landing and aggregated distinctly and deterministically; the view exposes no other landing fields.",
+    "Existing PopDAM dismissed=true state is retained by item number. Exactly one deterministic canonical row per bare legacy item number retains the ERP UUID for the still-legacy-keyed style-tracker bridge; cross-division siblings and canonical-only items use their unique plm.item UUID until issue #2482 gives dismissed state an application-owned home.",
+    "Because coldlion.item_detail deliberately grants no application read, the serving contract is a security-barrier definer view that exposes only its explicit 21 columns; the landing remains ungranted.",
+    "No broad ColdLion-over-DesignFlow authority statement was needed or added.",
+    "No preview, governed review, merge, or production action was performed."
   ],
   "stop_conditions_hit": []
 }

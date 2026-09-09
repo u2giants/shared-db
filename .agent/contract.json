@@ -1,84 +1,64 @@
 {
-  "schema_version": 1,
-  "generation": 5,
-  "work_issue": 2403,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Create only the empty hts_rag_split schema and nine internally linked tables for the DesignFlow consolidated non-production target while preserving public.hts_rag_* and copying no rows.",
-  "base_sha": "fe5fa74db889652768029116e636f8cbe69b955e",
-  "dispatcher": "codex shared-db.orch marker2629 route01a085f2-a84f-7963-b474-e5770b149ecd",
-  "worker": "codex issue-2403 guarded merge worker",
-  "branch": "claude/issue-2403-hts-rag-split",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2403-hts-rag-split",
   "allowed_paths": [
-    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
+    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "file_writes": [
-    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
-    ".agent/contract.json",
-    ".agent/completion.json"
+  "assumptions": [
+    "The existing api.plm_item_list 21-column output contract is preserved exactly.",
+    "The approved mapping uses plm.item item_number, description, and modTime semantics, with unresolved attribution remaining null where the business rules require it.",
+    "The direct prepack load evidence linked from PopDAM issue 114 is sufficient for this narrow source transition.",
+    "Dismissed-state behavior must not be lost."
   ],
+  "base_sha": "71fe95d64a7e6ff1e4d822145271853a31d82b2d",
+  "branch": "codex/issue-2466-plm-item-list",
   "db_reads": [
-    "table public.hts_rag_determinations",
-    "table public.hts_rag_extraction_jobs",
-    "table public.hts_rag_precedent_rulings",
-    "table public.hts_rag_precedents",
-    "table public.hts_rag_product_examples",
-    "table public.hts_rag_product_family_allowlist",
-    "table public.hts_rag_provider_responses",
-    "table public.hts_rag_review_events",
-    "table public.hts_rag_rulings"
+    "table plm.item",
+    "table coldlion.item_detail",
+    "table core.licensor",
+    "table core.property",
+    "table public.erp_items_current"
   ],
   "db_writes": [
-    "schema hts_rag_split",
-    "table hts_rag_split.hts_rag_determinations",
-    "table hts_rag_split.hts_rag_extraction_jobs",
-    "table hts_rag_split.hts_rag_precedent_rulings",
-    "table hts_rag_split.hts_rag_precedents",
-    "table hts_rag_split.hts_rag_product_examples",
-    "table hts_rag_split.hts_rag_product_family_allowlist",
-    "table hts_rag_split.hts_rag_provider_responses",
-    "table hts_rag_split.hts_rag_review_events",
-    "table hts_rag_split.hts_rag_rulings",
-    "index hts_rag_split.hts_rag_determinations_comparison_category_idx",
-    "index hts_rag_split.hts_rag_determinations_comparison_review_idx",
-    "index hts_rag_split.hts_rag_determinations_family_created_idx",
-    "index hts_rag_split.hts_rag_extraction_jobs_idempotency_idx",
-    "index hts_rag_split.hts_rag_extraction_jobs_pending_claim_idx",
-    "index hts_rag_split.hts_rag_precedent_rulings_relationship_idx",
-    "index hts_rag_split.hts_rag_precedent_rulings_ruling_idx",
-    "index hts_rag_split.hts_rag_precedents_extraction_idempotency_idx",
-    "index hts_rag_split.hts_rag_precedents_family_review_idx",
-    "index hts_rag_split.hts_rag_product_examples_family_idx",
-    "index hts_rag_split.hts_rag_provider_responses_determination_idx",
-    "index hts_rag_split.hts_rag_review_events_subject_created_idx",
-    "index hts_rag_split.hts_rag_rulings_operationally_revoked_idx",
-    "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
+    "view api.plm_item_list"
   ],
+  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
+  "file_writes": [
+    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "generation": 1,
+  "goal": "Repoint api.plm_item_list to the canonical PLM item source while preserving its exact 21-column consumer contract and the approved attribution and dismissed-state behavior.",
   "prohibited_actions": [
-    "No production or DesignFlow target write",
-    "No reviewer call outside the governed exact-head runner",
-    "No change to public.hts_rag_* and no row copy",
-    "No merge, claim release, issue closure, or inherited cleanup"
+    "No preview apply, reviewer allocation, merge, or production promotion",
+    "No Supabase MCP or shared-database write",
+    "No broad assertion that ColdLion is always authoritative",
+    "No object or path outside claim 2632 and this contract"
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
     "node scripts/check-production-verification-sidecars.mjs --base origin/main",
     "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check"
+    "git diff --check",
+    "supabase/tests/plm_item_list_repoint_contracts.sql on a disposable database",
+    "supabase/tests/plm_item_import_phase2_contracts.sql on a disposable database",
+    "Database Contract Tests CI from empty"
   ],
-  "assumptions": [
-    "Issue comment 5577130097 confirms shared-db owns deployment to the DesignFlow consolidated non-production target reached by DB_*_SANDBOX in GCP lithe-breaker-323913",
-    "Claim2418 permanently protects versions 20260906040010 and 20260908022407 and now reserves 20260909121403 through guarded supersession",
-    "Implementation head 2c432e69edfb367365087c1782ce0e316f63204b contains current main fe5fa74db889652768029116e636f8cbe69b955e; the manager renamed only the migration filename from 20260908022407 to 20260909121403, and SQL statement bytes and semantics remain unchanged"
-  ],
-
+  "route": "shared-db-orchestrator",
+  "schema_version": 1,
   "stop_conditions": [
-    "Stop if origin main or the PR branch moves after exact-head review begins",
-    "Stop if any claimed object or migration byte must change",
-    "Stop if both governed reviewer slots cannot be drawn before either review runs",
-    "Stop if the target route acknowledgement or coordinator marker changes"
-  ]
+    "Claim 2632, reserved version 20260909132734, or coordinator route changes",
+    "A competing change touches api.plm_item_list or a contracted path",
+    "Implementation requires any object or path outside claim 2632 or this contract",
+    "The 21-column consumer contract cannot be preserved"
+  ],
+  "work_issue": 2466,
+  "work_type": "structural",
+  "worker": "codex issue-2466 migration author holding claim 2632",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2466-plm-item-list"
 }
