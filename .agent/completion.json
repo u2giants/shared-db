@@ -6,8 +6,8 @@
   "migration_versions": ["20260909132734"],
   "contract_ref": "refs/db-contracts/2466/1",
   "contract_sha256": "17d4a12875b0ac127f7c51b55e1f1a4e443eb73fdf7a6db8f48825b7f04b207f",
-  "head_sha": "a4cf1bf7cfa7abb1b8819517b39dcdcd3b2bf337",
-  "evidence_note": "Current-main integration head a4cf1bf7 preserves the reviewed implementation and passed the refreshed static SQL, verification-sidecar, migration-lease, and whitespace gates. Its fresh full from-empty Database Contract Tests run is tracked by PR #2634; later evidence-only commits change only the two required .agent evidence files.",
+  "head_sha": "7ed936c283a2ffe41357cf6bbe20e013de27e9e6",
+  "evidence_note": "Current-main integration head 7ed936c2 preserves the implementation after the final main update. Fresh exact-head CI and governed reviews are tracked by PR #2634; the following evidence-only commit changes only the two required .agent evidence files.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
