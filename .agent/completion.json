@@ -7,10 +7,8 @@
   "contract_ref": "refs/db-contracts/2311/1",
   "contract_sha256": "cf3199d92391d915e21d6e36623ebea9a12e016877dc754077d8b60bf07da31e",
   "head_sha": "1418482ee92fcd79824dea9dfe8934e8980f8e2a",
-  "evidence_note": "Text-only repair to two refusal messages in scripts/manage-migration-author-lanes.mjs plus four regression tests. No refusal CONDITION changed, no database object touched, and no migration added. head_sha names the implementation commit; the .agent evidence pair is added on top of it in the same pull request.",
+  "evidence_note": "Text-only repair to two refusal messages in scripts/manage-migration-author-lanes.mjs plus four regression tests. No refusal CONDITION changed, no database object touched, and no migration added. files_changed lists the pull request's non-.agent diff, which is what the Git evidence check compares against; head_sha names the implementation commit that this evidence pair reports on.",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs"
   ],
