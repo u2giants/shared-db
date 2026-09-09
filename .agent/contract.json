@@ -1,54 +1,63 @@
 {
+
   "schema_version": 1,
-  "work_issue": 2635,
-  "generation": 2,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Pilot the Issue 335 Phase 3 task-gate consumer contract in shared-db with protected structure paths, an operative rulebook route, CI enforcement, no-loss evidence, and a no-state rollback rehearsal.",
-  "base_sha": "e149bd0bac3aae0b3172468ec9b4a95fa2bc3a0d",
-  "dispatcher": "Albert Hazan via the current Codex Issue 335 continuation",
-  "worker": "Codex root task 01a08610-e776-7ac2-9f76-d0e37782e6d2",
-  "branch": "codex/issue-335-phase3-task-gates-01a086",
-  "worktree": "C:/repos/shared-db-worktrees/issue-335-phase3-task-gates-01a086",
+  "work_issue": 2493,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Recover inherited PR2526 under enforced contract governance, preserving its four-file implementation and adding six-kind helper and role runtime tests. This records prospective recovery authority; original implementation predates publication.",
+  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
+  "dispatcher": "shared-db-orchestrator/2536",
+  "worker": "codex-orch-2517-issue-2493",
+  "branch": "codex/issue-2493-source-resolution-new-kinds",
+  "worktree": "/tmp/shared-db-orch-2517-2493",
   "allowed_paths": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
+    "scripts/production-verification-sidecars/20260907154543.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
-    ".agent/contract.json",
-    ".agent/completion.json"
+    "scripts/production-verification-sidecars/20260907154543.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "table core.property",
+    "table core.character",
+    "table core.style_guide",
+    "table dam.asset",
+    "table core.licensor",
+    "table core.franchise",
+    "table plm.source_resolution",
+    "function plm.set_source_resolution",
+    "function api.set_source_resolution"
+  ],
+  "db_writes": [
+    "function plm.source_resolution_target_missing",
+    "view api.source_resolution"
+  ],
   "prohibited_actions": [
-    "No database read or write, migration author claim, preview apply, or production promotion",
-    "No direct push to main, required-check weakening, or merge before exact-head independent review",
-    "No change outside the seven named files"
+    "Do not edit applied migration bytes.",
+    "Do not rewrite or retire either existing setter or five-argument helper.",
+    "No production or preview writes outside governed coordinator gates.",
+    "No push during the coordinator hold."
   ],
   "required_checks": [
-    "bash scripts/tests/test-task-gates.sh",
-    "git diff --check origin/main...HEAD",
-    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
+    "git diff --check",
+    "node scripts/check-production-verification-sidecars.mjs",
+    "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "assumptions": [
-    "popcre/ai-devops is the public source of truth for the central gate engine and commit 4d83f9a5 is immutable",
-    "The 77 pre-pilot router headings remain reachable and one Task declaration heading is added, for 78 current headings across AGENTS, HANDOFF, and README",
-    "Albert authorized this cross-repository pilot in the current ai-devops Issue 335 continuation; generation 2 was published after reconciling current main and before the replacement exact-head governed review"
+    "Inherited implementation and earlier test patch predate this recovery contract; no retrospective publication claim.",
+    "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record."
   ],
   "stop_conditions": [
-    "Any scope expands into a database, migration, application-row, infrastructure, or production mutation",
-    "The central engine commit is unavailable or the focused fixture fails",
-    "origin/main moves so the recorded base is no longer the pull request merge base",
-    "A required check or exact-head independent reviewer refuses the final source"
-  ]
+    "Stop if migration bytes or setter definitions change.",
+    "Stop if test assertions fail.",
+    "Stop if scope extends beyond the four implementation files."
+  ],
+  "generation": 1
 }

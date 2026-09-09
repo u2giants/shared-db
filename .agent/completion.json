@@ -1,44 +1,56 @@
 {
   "schema_version": 1,
-  "work_issue": 2635,
+  "work_issue": 2493,
   "outcome": "ready-for-merge",
-  "pr": 2637,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2635/2",
-  "contract_sha256": "74ac55e01cc23b6bbc0a4f9e58ba39473332f3f8305670d163a2d26de8bf4d5a",
-  "head_sha": "7f9e028069d4d30d33915967ca8e70345c4acc05",
-  "evidence_note": "head_sha deliberately names the implementation head immediately before this metadata pair, as agent-work-contract-git-evidence requires; only .agent/contract.json and .agent/completion.json follow it. The branch was reconciled to exact current main e149bd0b before generation 2. No database or production state was read or changed.",
-  "files_changed": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh"
+  "pr": 2526,
+  "migration_versions": [
+    "20260907154543"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2493/1",
+  "contract_sha256": "55661be14b88cad817ec6f62e3b51ca5463863ffa1386e059b6a7344e92ec736",
+  "head_sha": "df910cceaf3e901f44ffa3fe08795c4e3eedf0fb",
+  "files_changed": [
+    "scripts/production-verification-sidecars/20260907154543.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+  ],
+  "db_reads": [
+    "table core.property",
+    "table core.character",
+    "table core.style_guide",
+    "table dam.asset",
+    "table core.licensor",
+    "table core.franchise",
+    "table plm.source_resolution",
+    "function plm.set_source_resolution",
+    "function api.set_source_resolution"
+  ],
+  "db_writes": [
+    "function plm.source_resolution_target_missing",
+    "view api.source_resolution"
+  ],
   "checks": [
     {
-      "command": "bash scripts/tests/test-task-gates.sh",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "10 passed / 0 failed at implementation head 7f9e0280 after current-main reconciliation: prose, code, rulebook, Supabase config, and migration classification; three protected bypass refusals; valid shipping flow; and a rollback positive control with unchanged source hash."
+      "evidence": "No whitespace errors after normal integration of current main fe5fa74db889652768029116e636f8cbe69b955e."
     },
     {
-      "command": "git diff --check origin/main...HEAD",
+      "command": "node scripts/check-production-verification-sidecars.mjs",
       "exit_code": 0,
-      "evidence": "No whitespace errors against exact generation-2 merge base e149bd0bac3a."
+      "evidence": "Hash-bound sidecar validation succeeded: status OK, 45 sidecars."
     },
     {
-      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+      "command": "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
       "exit_code": 0,
-      "evidence": "Contract is valid; immutable ref refs/db-contracts/2635/2 read back at e307942e with contract hash 74ac55e0."
+      "evidence": "Retained synthetic PostgreSQL 17 container database case2493runtime; all assertions passed at line 653 and rolled back, including five/seven-argument helper behavior, ten/twelve-argument setter compatibility, six-kind existing/missing/null targets, authenticated reads, dangling visibility, and anonymous denial."
     }
   ],
   "assumptions_resolved": [
-    "The pull request merge base is exact origin/main e149bd0bac3a, matching generation 2.",
-    "The central engine source is public popcre/ai-devops and is pinned in CI to merged commit 4d83f9a5.",
-    "All 77 pre-pilot router headings remain reachable and one new Task declaration heading makes 78 current headings across AGENTS, HANDOFF, and README.",
-    "The task-gate fixture performs no external mutation and its rollback changes only a disposable local policy copy."
+    "Inherited implementation retained; original work predates recovery contract publication.",
+    "Migration SHA256 remains 7cff10dcf68d2ba8993201790e8c276d517fd2410efa049e3e2026504abf6c50 after current-main integration.",
+    "Implementation is ready for coordinator review gates; independent exact-head review, fresh CI, preview and production/consumer acceptance remain pending and are not asserted by this report."
   ],
   "stop_conditions_hit": []
 }
