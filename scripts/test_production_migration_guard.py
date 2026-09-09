@@ -221,6 +221,9 @@ class GuardTests(unittest.TestCase):
     def test_issue_2356_historical_restoration_remains_production_eligible(self):
         self.assertEqual(parse_allowlist("20260907152838"), ["20260907152838"])
 
+    def test_issue_2580_historical_restoration_remains_production_eligible(self):
+        self.assertEqual(parse_allowlist("20260909084253"), ["20260909084253"])
+
     def test_bad_allowlists_are_blocked(self) -> None:
         values = [
             "",
