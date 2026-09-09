@@ -1,64 +1,70 @@
 {
   "allowed_paths": [
-    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
-    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    "supabase/migrations/20260909184115_popdam_item_state_and_prediction_identity.sql",
+    "supabase/tests/popdam_item_state_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "assumptions": [
-    "The existing api.plm_item_list 21-column output contract is preserved exactly.",
-    "The approved mapping uses plm.item item_number, description, and modTime semantics, with unresolved attribution remaining null where the business rules require it.",
-    "The direct prepack load evidence linked from PopDAM issue 114 is sufficient for this narrow source transition.",
-    "Dismissed-state behavior must not be lost."
+    "api.plm_item_list keeps exactly its existing 21-column consumer contract.",
+    "A canonical item is resolved by the three-part source_system, division_code, source_id identity and ultimately references plm.item.id.",
+    "Every legacy dismissed=true decision must map exactly once or the migration refuses before switching the view.",
+    "Existing prediction rows must survive removal of the cascading legacy foreign key; ambiguous or missing historical identities remain visible and explicitly unresolved.",
+    "Only service_role or an authenticated PopDAM administrator may change dismissal state, and raw source payloads remain unexposed."
   ],
-  "base_sha": "71fe95d64a7e6ff1e4d822145271853a31d82b2d",
-  "branch": "codex/issue-2466-plm-item-list",
+  "base_sha": "ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05",
+  "branch": "codex/issue-2644-popdam-item-state",
   "db_reads": [
     "table plm.item",
-    "table coldlion.item_detail",
-    "table core.licensor",
-    "table core.property",
-    "table public.erp_items_current"
+    "table public.erp_items_current",
+    "table public.product_category_predictions"
   ],
   "db_writes": [
-    "view api.plm_item_list"
+    "table public.popdam_item_state",
+    "function public.set_popdam_item_dismissed",
+    "view api.plm_item_list",
+    "table public.product_category_predictions",
+    "column public.product_category_predictions.plm_item_id",
+    "column public.product_category_predictions.item_identity_status",
+    "function public.resolve_product_category_prediction_item_identity",
+    "trigger product_category_predictions_resolve_item_identity on public.product_category_predictions",
+    "index public.idx_product_category_predictions_plm_item_id"
   ],
   "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
   "file_writes": [
-    "supabase/migrations/20260909132734_repoint_plm_item_list.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
-    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    "supabase/migrations/20260909184115_popdam_item_state_and_prediction_identity.sql",
+    "supabase/tests/popdam_item_state_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "generation": 1,
-  "goal": "Repoint api.plm_item_list to the canonical PLM item source while preserving its exact 21-column consumer contract and the approved attribution and dismissed-state behavior.",
+  "goal": "Give PopDAM durable canonical item dismissal state and preserve category prediction history before the frozen ERP tables are retired.",
   "prohibited_actions": [
-    "No preview apply, reviewer allocation, merge, or production promotion",
-    "No Supabase MCP or shared-database write",
-    "No broad assertion that ColdLion is always authoritative",
-    "No object or path outside claim 2632 and this contract"
+    "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
+    "No weakening of existing administrator-only controls",
+    "No raw source payload exposure",
+    "No deletion of existing product category prediction history",
+    "No object or path outside claim 2648 and this contract"
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
     "node scripts/check-production-verification-sidecars.mjs --base origin/main",
     "node scripts/check-migration-pr-lease.mjs",
     "git diff --check",
-    "supabase/tests/plm_item_list_repoint_contracts.sql on a disposable database",
-    "supabase/tests/plm_item_import_phase2_contracts.sql on a disposable database",
+    "supabase/tests/popdam_item_state_contracts.sql on a disposable database",
     "Database Contract Tests CI from empty"
   ],
   "route": "shared-db-orchestrator",
   "schema_version": 1,
   "stop_conditions": [
-    "Claim 2632, reserved version 20260909132734, or coordinator route changes",
-    "A competing change touches api.plm_item_list or a contracted path",
-    "Implementation requires any object or path outside claim 2632 or this contract",
-    "The 21-column consumer contract cannot be preserved"
+    "Claim 2648, reserved version 20260909184115, or coordinator route changes",
+    "A competing change touches any claimed object or contracted path",
+    "Implementation requires an object or path outside claim 2648 or this contract",
+    "Any legacy dismissed=true decision cannot resolve exactly once",
+    "The exact 21-column api.plm_item_list contract cannot be preserved"
   ],
-  "work_issue": 2466,
+  "work_issue": 2644,
   "work_type": "structural",
-  "worker": "codex issue-2466 migration author holding claim 2632",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2466-plm-item-list"
+  "worker": "codex issue2644-author holding claim 2648",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2644-popdam-item-state"
 }
