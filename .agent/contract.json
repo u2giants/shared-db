@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generation": 4,
+  "generation": 5,
   "work_issue": 2403,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Create only the empty hts_rag_split schema and nine internally linked tables for the DesignFlow consolidated non-production target while preserving public.hts_rag_* and copying no rows.",
-  "base_sha": "e149bd0bac3aae0b3172468ec9b4a95fa2bc3a0d",
+  "base_sha": "fe5fa74db889652768029116e636f8cbe69b955e",
   "dispatcher": "codex shared-db.orch marker2629 route01a085f2-a84f-7963-b474-e5770b149ecd",
   "worker": "codex issue-2403 guarded merge worker",
   "branch": "claude/issue-2403-hts-rag-split",
@@ -72,7 +72,7 @@
   "assumptions": [
     "Issue comment 5577130097 confirms shared-db owns deployment to the DesignFlow consolidated non-production target reached by DB_*_SANDBOX in GCP lithe-breaker-323913",
     "Claim2418 permanently protects versions 20260906040010 and 20260908022407 and now reserves 20260909121403 through guarded supersession",
-    "Implementation head 7c688930090d7ae3e770fd623c2b52ad0101cb2f contains current main e149bd0bac3aae0b3172468ec9b4a95fa2bc3a0d; the manager renamed only the migration filename from 20260908022407 to 20260909121403, and SQL statement bytes and semantics remain unchanged"
+    "Implementation head 2c432e69edfb367365087c1782ce0e316f63204b contains current main fe5fa74db889652768029116e636f8cbe69b955e; the manager renamed only the migration filename from 20260908022407 to 20260909121403, and SQL statement bytes and semantics remain unchanged"
   ],
 
   "stop_conditions": [
