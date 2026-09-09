@@ -4,8 +4,8 @@
   "outcome": "ready-for-merge",
   "pr": 2636,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2318/3",
-  "contract_sha256": "d9b72330ca85ff03b8773de03f06431a2751f5c3a654af13edb3c916a18d66d7",
+  "contract_ref": "refs/db-contracts/2318/4",
+  "contract_sha256": "a61e7f87489192fed46345a6cbdbd9c6f3c68dee48033102e35fc4fa4c9460ac",
   "head_sha": "0a6d3d008e492878af4d263fe40732433d4d701e",
   "evidence_note": "Generation 4. head_sha names 0a6d3d00, the last head at which every check other than the git-evidence file list was run; the only later commits are this evidence pair itself, which no report can name without naming its own SHA. The git-evidence checker compares files_changed against the whole PR diff including .agent/*, so the evidence pair itself is listed. Re-points the report at head a6fd30fa, the first update from main (origin/main after PR #2633 merged as e149bd0b). The .agent conflict against main was resolved in favour of this lane's own evidence pair; every non-.agent file is byte-identical to generation 2 at b0381830. Generation 2 added the throughput truth-audit dispositions for the three new source lines matching its `missing` pattern, which failed the Tools Offline Tests lane at generation 1 (run 34367211675). No SQL, no migration, no database access of any kind.",
   "files_changed": [
