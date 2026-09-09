@@ -6,8 +6,10 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2624/2",
   "contract_sha256": "d9dc11b51769a5f17cfb629e498142c05b709906552b06bd41fd8ab8f6e5fb0b",
-  "head_sha": "108a5e026de48681268285b4836223aa39876d49",
+  "head_sha": "efb431180183cd537e7f02662db1baf9cf18fce3",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/reap-merged-worktrees.mjs",
     "scripts/reap-merged-worktrees.test.mjs"
   ],
@@ -23,10 +25,15 @@
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors in the implementation diff; only advisory line-ending warnings were printed."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=269. The source comment uses absent-upstream wording, so this repository-wide database-absence audit remains unchanged."
     }
   ],
   "assumptions_resolved": [
-    "The immutable contract records that implementation commit 108a5e026de48681268285b4836223aa39876d49 was created locally before publication; the remote branch was verified absent until contract generation 1 was published, and generation 2 changed only the circular CI requirement before this evidence pair.",
+    "The immutable contract records that the initial implementation commit was created locally before publication; the remote branch was verified absent until contract generation 1 was published, generation 2 removed only the circular CI requirement, and implementation head efb431180183cd537e7f02662db1baf9cf18fce3 includes the scoped wording repair from CI.",
     "The integration fixture creates one clean local commit after pushing its upstream, measures exactly one commit ahead, and the planner returns KEEP with that count in the reason.",
     "The second integration fixture creates a clean local branch with no upstream, measures that state explicitly, and the planner returns KEEP with a no-upstream reason."
   ],
