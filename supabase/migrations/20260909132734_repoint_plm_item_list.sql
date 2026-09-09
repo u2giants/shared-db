@@ -9,7 +9,10 @@
 create or replace view api.plm_item_list
 with (security_invoker = false, security_barrier = true) as
 select
-  i.id,
+  -- Preserve the legacy UUID used by plm.style_tracker_item_bridge while that
+  -- bridge's FK still targets public.erp_items_current. Canonical-only items
+  -- fall back to their plm.item UUID, so the public contract remains non-null.
+  coalesce(legacy.id, i.id)                               as id,
   i.item_number                                           as source_id,
   i.item_number                                           as style_number,
   i.description                                           as item_description,
@@ -51,6 +54,7 @@ where i.source_system = 'coldlion';
 
 comment on view api.plm_item_list is
   'Canonical ColdLion-backed item list over plm.item. The 21-column Phase 1 contract is preserved. '
+  'Legacy-backed items retain their ERP UUID until the style-tracker bridge FK is repointed; canonical-only items use their plm.item UUID. '
   'ColdLion modification time remains distinct from the Supabase sync time; canonical attribution '
   'stays null when unresolved; direct item-detail prepacks are aggregated; frozen PopDAM dismissed '
   'state is retained until issue #2482 gives it a canonical application-owned home.';
