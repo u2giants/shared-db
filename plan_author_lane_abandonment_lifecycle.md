@@ -8,8 +8,8 @@ This is repository-maintenance work. It authorizes no database migration, databa
 
 | Step | Deliverable | State | Evidence |
 |---|---|---|---|
-| 1 | Extend relinquished-claim metadata and fail-closed parsing | ⬜ open | Not implemented |
-| 2 | Make capacity relinquishment machine-independent and recovery-gated | ⬜ open | Not implemented |
+| 1 | Extend relinquished-claim metadata and fail-closed parsing | ✅ complete | Phase A PR #2640; implementation commit `c039ca46e21528ef4d2ded2e7f8b5137dfd0aadf`; pre-cut census recorded on issue #2301; 528 focused manager/reconcile/lease tests passed |
+| 2 | Make capacity relinquishment machine-independent and recovery-gated | ✅ complete | Phase A PR #2640; clean/dirty/absent/remote and recovery/rollback scenarios passed; 57 exclusive-lease/scenario tests and 234 production-guard tests passed |
 | 3 | Add immutable terminal-retirement tombstones and resurrection guards | ⬜ open | Not implemented |
 | 4 | Separate capacity reconciliation from preview readiness | ⬜ open | Not implemented |
 | 5 | Add hourly and dispatch-time read-only detection | ⬜ open | Not implemented |
