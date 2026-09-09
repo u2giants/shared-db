@@ -1,64 +1,49 @@
 {
-  "stop_conditions": [
-    "Claim 2608 ownership, reserved version 20260909005945, or coordinator route changes",
-    "Main moves in a way that invalidates the re-derived function bodies or the branch evidence",
-    "SQL scope widens beyond the two claimed functions, or any required check refuses"
-  ],
-  "assumptions": [
-    "Claim 2608 reserves version 20260909005945 and objects function public.queue_nightly_rebuild_style_groups and function public.refresh_style_group_counts_batch; the second is over-declared and deliberately left untouched",
-    "public.queue_nightly_rebuild_style_groups has no prior migration file; its body is re-derived from supabase/ci-bootstrap/010_pre_adoption_baseline.sql rather than merged from a competing CREATE OR REPLACE",
-    "public.update_bulk_operation replaces the rebuild-style-groups object wholesale, so the reconcile marker must be a separate top-level BULK_OPERATIONS key",
-    "The worker-signalled variant of #2440 and the alert that consumes last_reconciled_at are PopDAM application work in another repository and are not claimed here",
-    "Contract tests were executed from empty on a disposable local PostgreSQL cluster built the CI way, and pass with the new body installed",
-    "The Database Contract Tests lane applies supabase/ci-bootstrap/010_pre_adoption_baseline.sql BETWEEN its two migration replay passes, so a migration that replaces a baseline routine and succeeds in pass 1 is overwritten by the baseline. This migration therefore deletes the baseline's copy of public.queue_nightly_rebuild_style_groups, which is the remedy the baseline's own instructions name; the baseline grants are left as idempotent no-ops.",
-    "Review HIGH: the floor arm ran while the rebuild was queued/running because ARM 1 returns without seeding last_reconciled_at. Fixed by gating ARM 3 on the operation not being in flight, where in flight means status running/queued AND the operation touched inside the floor window. Seeding last_reconciled_at on the enqueue was rejected deliberately: that field is the detector answer to when the counts last refreshed, and stamping it on an enqueue would make the detector lie.",
-    "Review MEDIUM: ARM 2 is now evaluated before ARM 1, so the 06:00 enqueue cannot overwrite a completed-but-unreconciled run. Cost is at most a ten-minute enqueue delay on the poll that reconciles.",
-    "Review LOW (chunk walk is not one snapshot under READ COMMITTED): accepted and not changed. The walk exists precisely so the reconcile does not hold one long snapshot; a repeatable-read snapshot would reintroduce the long transaction and the bloat this design avoids, and a membership row inserted mid-walk is picked up by the next completed-run reconcile at most one rebuild later. Answered in the PR body rather than silently ignored.",
-    "Review LOW (authenticated retains EXECUTE): left in place, disclosed. The grant is pre-existing baseline ACL, no caller can be proven absent from this repository because the consumer PopDAM is a separate repository, and the contract test pins the grant set. The exposed surface is bounded: every arm is idempotent by run_id or by the floor, so an authenticated caller can force at most one recompute per completed run, which pg_cron would run anyway."
-  ],
-  "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check"
-  ],
-  "prohibited_actions": [
-    "No preview apply, no merge, no production promotion, no review allocation",
-    "No shared database writes and no data seeding",
-    "No edit to any object outside claim 2608, and no edit to an already applied migration",
-    "No hand-picked migration version and no hand-edited claim block"
-  ],
-  "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups",
-    "function public.refresh_style_group_counts_batch"
-  ],
-  "db_reads": [
-    "table public.admin_config",
-    "table public.style_groups"
+  "schema_version": 1,
+  "work_issue": 2311,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Make the two lane-script refusals named in issue #2311 state the condition they actually failed on. A closed work issue with an open pull request was reported as a head change that had not happened, and a verdict recorded against an orchestrator-marker number was reported as a lease the reviewer did in fact hold. Append a specific cause to each, keeping the existing message prefixes so prior assertions and operator runbooks still match, and issue no fresh wire read from any error path.",
+  "base_sha": "71fe95d64a7e6ff1e4d822145271853a31d82b2d",
+  "dispatcher": "albert via claude session, repo-maintenance route (outside the structure/schema orchestrator, AGENTS.md 0.0-C)",
+  "worker": "claude repo-maintenance session working the five oldest unblocked non-orchestrator issues",
+  "branch": "claude/issue-2311-refusal-causes",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/cleanup-worktree-f356f1",
+  "allowed_paths": [
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260909005945_chain_style_group_counts_to_rebuild_completion.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql"
+    ".agent/completion.json"
   ],
-  "allowed_paths": [
-    "supabase/migrations/20260909005945_chain_style_group_counts_to_rebuild_completion.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql"
+  "db_reads": [],
+  "db_writes": [],
+  "prohibited_actions": [
+    "No database change of any kind: no migration, no schema edit, no preview apply, no production promotion",
+    "No change to any refusal CONDITION; only the text each refusal reports may change",
+    "No fresh GitHub wire read from an error path, which would spend the fixed 25-request review budget and could replace the real cause with its own",
+    "No weakening or deletion of an existing test or guard",
+    "No edit outside allowed_paths"
   ],
-  "worktree": "C:/repos/shared-db/.claude/worktrees/orch-2440",
-  "branch": "claude/issue-2440-chain-nightly-reconcile",
-  "worker": "claude/orch-2440 migration author holding claim 2608",
-  "dispatcher": "claude shared-db-orchestrator route local_9409a344-6910-4128-ae4c-a394b13a4077",
-  "base_sha": "7c32df1419db423e1310593ee9a748eb2c3d7409",
-  "goal": "Stop the style-group asset-count reconcile running on the clock 2h15m before the rebuild that changes the membership it counts. Delete cron job nightly-reconcile-sg-asset-counts, turn nightly-rebuild-style-groups into a 10-minute poll, and rewrite public.queue_nightly_rebuild_style_groups as a three-armed driver: enqueue once per UTC day at or after 06:00 UTC, reconcile in 500-group chunks only when the rebuild reaches status completed with an unreconciled run_id, and reconcile unconditionally if the last one is older than 7 days so the new silent failure mode is bounded and observable. Generation 4 answers the slot-1 review: the floor arm no longer runs while the rebuild is in flight (the HIGH finding), the chained-reconcile condition is evaluated before the enqueue condition (the MEDIUM finding), and the contract file pins both, plus the staleness bound that keeps a dead worker from suppressing the floor forever.",
-  "route": "shared-db-orchestrator",
-  "work_type": "structural",
-  "work_issue": 2440,
-  "generation": 6,
-  "schema_version": 1
+  "required_checks": [
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
+    "git diff --check"
+  ],
+  "assumptions": [
+    "scripts/manage-migration-author-lanes.mjs is a PROTECTED_SOURCE_PATH; no other open pull request touched it when this branch was cut, verified against all eight open PRs",
+    "The two named traps are the ones in issue #2311; both string sites were located on origin/main before editing and neither had been repaired",
+    "Appending to the message keeps the prefix intact, so the seven existing tests matching /changed after mutex acquisition/ remain valid coverage rather than being rewritten to fit",
+    "reviewTargetEligible costs wire requests through requireReviewWireCapacity, so the cause helpers deliberately re-inspect only already-fetched objects instead of re-asking",
+    "This is repo-maintenance under AGENTS.md 0.0-C, owned by a separately started repository session, not routed to the structure/schema orchestrator"
+  ],
+  "stop_conditions": [
+    "Any existing test in scripts/manage-migration-author-lanes.test.mjs fails",
+    "Another open pull request begins touching scripts/manage-migration-author-lanes.mjs",
+    "A required refusal condition, not just its wording, would have to change to satisfy the issue"
+  ]
 }
