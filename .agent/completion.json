@@ -1,70 +1,80 @@
 {
   "schema_version": 1,
-  "work_issue": 2580,
+  "work_issue": 2439,
   "outcome": "ready-for-merge",
-  "pr": 2627,
+  "pr": 2654,
   "migration_versions": [
-    "20260909084253"
+    "20260909202801"
   ],
-  "contract_ref": "refs/db-contracts/2580/4",
-  "contract_sha256": "e2a42979ba9cd27b7749f89cd2e6785ce91d5f3a3514deb00a322203418ebdaa",
-  "head_sha": "7a3af59348ffb537e3fa7597cc6c620ec7d89311",
-  "evidence_note": "The current-main implementation head preserves the migration and hash-bound sidecar bytes, individually pins that sidecar in the preview producer set, and now passes the exact historical-restoration guard merged through PR #2647. This evidence-only commit refreshes both required evidence files. No preview or production promotion was performed.",
+  "contract_ref": "refs/db-contracts/2439/3",
+  "contract_sha256": "64d937589c5b3dc929e3bd5af438c989c04519c062a0d90bc994f3aa0e72fa14",
+  "head_sha": "3d4195b252865502eb029b7c601892ba92fdad34",
+  "evidence_note": "The atomically reissued claim now has a fresh migration whose normalized content and Git blob exactly match the stranded original. The original version is permanently refused by the production guard and classified as retired by ledger drift reporting. No preview, production, reviewer, or merge action was performed.",
   "files_changed": [
-    ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/production-verification-sidecars/20260909084253.json",
-    "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql"
+    "scripts/check-migration-ledger-drift.test.mjs",
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py",
+    "supabase/migrations/20260909202801_bulk_operation_runs_history_reissue.sql"
   ],
   "db_reads": [
-    "table dflow.sample_shipment",
-    "table dflow.users",
-    "table dflow.customers"
+    "function app.has_any_role",
+    "type app.app_role"
   ],
   "db_writes": [
-    "table dflow.sample_shipment_notice",
-    "table dflow.sample_shipment_notice_recipient",
-    "function dflow.claim_sample_shipment_notice"
+    "table public.bulk_operation_runs",
+    "column public.bulk_operation_runs.error",
+    "column public.bulk_operation_runs.operation",
+    "column public.bulk_operation_runs.run_id",
+    "column public.bulk_operation_runs.stage",
+    "column public.bulk_operation_runs.status",
+    "index public.bulk_operation_runs_failures_idx",
+    "index public.bulk_operation_runs_operation_run_key",
+    "index public.bulk_operation_runs_operation_started_idx",
+    "policy \"Administrator read bulk_operation_runs\" on public.bulk_operation_runs"
   ],
   "checks": [
+    {
+      "command": "python -m unittest scripts.test_production_migration_guard",
+      "exit_code": 0,
+      "evidence": "237 tests passed, including old-version refusal, successor allowlisting, and normalized-content identity."
+    },
+    {
+      "command": "node --test scripts/check-migration-ledger-drift.test.mjs",
+      "exit_code": 0,
+      "evidence": "30 tests passed; the stranded original is classified retired with the exact successor and issue/claim reason."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards passed; the fresh version sorts after current main and introduces no forbidden verification read."
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "exit_code": 0,
+      "evidence": "Claim #2443 and reserved version 20260909202801 verified for PR #2654."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "Truth audit passed across 269 call sites."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
     },
     {
-      "command": "python -m pytest scripts/test_production_business_risk_gate.py::ProductionBusinessRiskGateTests::test_every_verification_sidecar_is_an_individually_pinned_producer -q",
-      "exit_code": 0,
-      "evidence": "1 passed; the sidecar inventory exactly equals the individually pinned producer set."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "OK for 45 sidecars; the hash-bound sidecar covers dynamic marker lines 95-96."
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "exit_code": 0,
-      "evidence": "Claim #2626 and migration version 20260909084253 remain bound at PR #2627."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards passed and accepted version 20260909084253 only through its exact hash-, byte-, statement-, newline-, and object-bound historical restoration entry."
-    },
-    {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Completion report validates against the immutable contract after the metadata refresh."
+      "evidence": "Completion report reconciles with immutable contract refs/db-contracts/2439/3."
     }
   ],
   "assumptions_resolved": [
-    "The implementation remains exactly within claim #2626 and migration 20260909084253.",
-    "The sidecar hash matches the migration body and covers both dynamic marker lines.",
-    "The sidecar is individually pinned as a preview producer, matching the repository's sanctioned evidence pattern.",
-    "The exact historical-restoration registry entry merged through PR #2647 permits only these hash-bound migration bytes and objects.",
-    "No preview or production promotion was performed."
+    "Claim #2443 remains bound to the exact original object locks and fresh reserved version 20260909202801.",
+    "The successor migration has the same filtered Git blob cd53c1b02fa719bf1041e1fb0cbc6c85316a17cb as original version 20260908195056.",
+    "Old version 20260908195056 cannot enter a preview or production allowlist, alone or with the successor.",
+    "The structural recovery remains separate from PopDAM insertion and alert-delivery acceptance."
   ],
   "stop_conditions_hit": []
 }
