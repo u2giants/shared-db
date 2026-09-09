@@ -1,1 +1,62 @@
-{"schema_version":1,"work_issue":2580,"outcome":"ready-for-merge","pr":2627,"migration_versions":["20260909084253"],"contract_ref":"refs/db-contracts/2580/1","contract_sha256":"d0e137f32d844e8240dceec0e7cc2937bd6a208aa3fe98a259dc19d1ed8589a8","head_sha":"49d9015ee065e2660e38623ab114e6ad5d8b72ca","evidence_note":"Evidence is anchored at the preserved implementation/sidecar evidence head c46b3102; later commits contain only governed agent metadata. No preview or promotion performed.","files_changed":["scripts/production-verification-sidecars/20260909084253.json","supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql"],"db_reads":["table dflow.sample_shipment","table dflow.users","table dflow.customers"],"db_writes":["table dflow.sample_shipment_notice","table dflow.sample_shipment_notice_recipient","function dflow.claim_sample_shipment_notice"],"checks":[{"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors."},{"command":"node scripts/check-production-verification-sidecars.mjs --base origin/main","exit_code":0,"evidence":"Hash-bound sidecar covers dynamic marker lines 95-96."},{"command":"node scripts/check-migration-pr-lease.mjs","exit_code":0,"evidence":"Claim #2626 and migration version 20260909084253 remain bound."},{"command":"node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json","exit_code":0,"evidence":"Completion report validates against the immutable contract."}],"assumptions_resolved":["The implementation remains exactly within claim #2626 and migration 20260909084253.","The sidecar hash matches the migration body and covers both dynamic marker lines.","No preview or production promotion was performed."],"stop_conditions_hit":[]}
+{
+  "schema_version": 1,
+  "work_issue": 2580,
+  "outcome": "ready-for-merge",
+  "pr": 2627,
+  "migration_versions": [
+    "20260909084253"
+  ],
+  "contract_ref": "refs/db-contracts/2580/1",
+  "contract_sha256": "6e15b37508e1a006b234190e377bb74b1c0d04e55e013304e7b5252a4a736110",
+  "head_sha": "f5826e5255f2b56b6c2dfecb9f7c60b0f2229105",
+  "evidence_note": "The repair head individually pins the existing hash-bound verification sidecar in the preview producer set. The migration SQL and sidecar bytes are unchanged. No preview or promotion was performed.",
+  "files_changed": [
+    "scripts/production-verification-sidecars/20260909084253.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql"
+  ],
+  "db_reads": [
+    "table dflow.sample_shipment",
+    "table dflow.users",
+    "table dflow.customers"
+  ],
+  "db_writes": [
+    "table dflow.sample_shipment_notice",
+    "table dflow.sample_shipment_notice_recipient",
+    "function dflow.claim_sample_shipment_notice"
+  ],
+  "checks": [
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "python -m pytest scripts/test_production_business_risk_gate.py::ProductionBusinessRiskGateTests::test_every_verification_sidecar_is_an_individually_pinned_producer -q",
+      "exit_code": 0,
+      "evidence": "1 passed; the sidecar inventory exactly equals the individually pinned producer set."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "OK for 45 sidecars; the hash-bound sidecar covers dynamic marker lines 95-96."
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "exit_code": 0,
+      "evidence": "Claim #2626 and migration version 20260909084253 remain bound."
+    },
+    {
+      "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
+      "exit_code": 0,
+      "evidence": "Completion report validates against the immutable contract after the metadata refresh."
+    }
+  ],
+  "assumptions_resolved": [
+    "The implementation remains exactly within claim #2626 and migration 20260909084253.",
+    "The sidecar hash matches the migration body and covers both dynamic marker lines.",
+    "The sidecar is now individually pinned as a preview producer, matching the repository's sanctioned evidence pattern.",
+    "No preview or production promotion was performed."
+  ],
+  "stop_conditions_hit": []
+}
