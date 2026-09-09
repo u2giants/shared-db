@@ -1,53 +1,40 @@
 {
   "schema_version": 1,
-  "work_issue": 2588,
-  "generation": 1,
-  "work_type": "source-data",
-  "route": "source-data-session",
-  "goal": "Load ColdLion sales-order and production-order history into the existing coldlion.* landing tables, one fixed 7-day window and one scope at a time, atomically and resumably from ledger evidence, with the vendor's silent page cap, malformed error contract and stage scoping handled explicitly rather than assumed away.",
-  "base_sha": "fbd49fe829a33a225805334a0cdba662dfd44084",
-  "dispatcher": "owner request 2026-09-08: build the loader",
-  "worker": "claude session 4dd6eb",
-  "branch": "claude/coldlio-api-table-population-4dd6eb",
-  "worktree": ".claude/worktrees/exciting-hawking-a3ff11",
+  "work_issue": 2616,
+  "generation": 2,
+  "work_type": "repository-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Clarify that ColdLion sync-history --to selects the newest closed window to load without changing behavior.",
+  "base_sha": "f3c04e628f53c8c08a08d9742e49d3bd276df864",
+  "dispatcher": "codex",
+  "worker": "codex",
+  "branch": "codex/coldlion-to-comment-v2",
+  "worktree": "C:/repos/shared-db-worktrees/coldlion-to-comment-v2",
   "allowed_paths": [
+    "tools/coldlion-landing/sync-history.mjs",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "tools/coldlion-landing/**",
-    "tools/coldlion-landing-history.test.mjs",
-    ".github/workflows/coldlion-landing-sync.yml",
-    ".github/workflows/coldlion-history-backfill.yml"
+    ".agent/completion.json"
   ],
   "file_writes": [
-    "tools/coldlion-landing/**",
-    "tools/coldlion-landing-history.test.mjs",
-    ".github/workflows/coldlion-landing-sync.yml",
-    ".github/workflows/coldlion-history-backfill.yml"
+    "tools/coldlion-landing/sync-history.mjs",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not change the shared database structure. This work loads rows into landing tables that already exist; a schema change is a separate governed migration and no supabase/migrations file may be authored here.",
-    "Do not write to any database from this session, and do not run either loader against a live target. The workflows are the only sanctioned execution path and they are dispatch/schedule only.",
-    "Do not commit any real ColdLion payload, order, item, customer or vendor value. This repository is public and the fixtures must be synthetic.",
-    "Do not build sync-masters.mjs. The owner asked about sales orders and production orders; the masters half of Step 7 is out of scope.",
-    "Do not retire, rewrite or carry another session's handoff file in this change."
+    "Do not change behavior, database structure, database data, workflow configuration, tests, or other session artifacts.",
+    "Do not contact a database or the ColdLion API.",
+    "Do not commit real ColdLion payload, order, item, customer, vendor, or credential values."
   ],
   "required_checks": [
     "node --test tools/coldlion-landing-history.test.mjs",
-    "node --test tools/*.test.mjs",
-    "npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml",
-    "npx --yes js-yaml .github/workflows/coldlion-history-backfill.yml"
+    "git diff --check"
   ],
   "assumptions": [
-    "The migration schema of 2026-09-05 is the authority for identity, constraints and column names, ahead of the 2026-08-19 field-decisions CSV, because owner decisions D14/D17 of 2026-09-01 and the 2026-09-01 API additions post-date that CSV.",
-    "The loader owns its own transaction boundary, so it uses its own psql invocation rather than the shared helper that forces --single-transaction on one path and no transaction on the other.",
-    "The database target is supplied as an explicit secret. No pooler hostname is assembled from a project ref, because a guessed host is how a sandbox assumption reached production in the 2026-07-17 outage."
+    "The existing clamp and windowsEndingAt selection already implement the intended behavior."
   ],
   "stop_conditions": [
-    "Stop if the work would require a schema change; that is a separate governed migration.",
-    "Stop if a real ColdLion value would have to be committed to prove something.",
-    "Stop if the offline test suite cannot pass without secrets or database contact, rather than weakening the tests to make them green.",
-    "Stop before running either loader against any live database."
+    "Stop if the requested wording requires a behavioral change, database access, or edits beyond the scoped comment and evidence pair."
   ]
 }
