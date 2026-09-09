@@ -1,54 +1,59 @@
 {
-  "schema_version": 1,
-  "generation": 1,
-  "work_issue": 2646,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Permit only the exact protected issue 2580 migration bytes to pass the backdated-version guard while preserving every ordinary collision and production safety refusal.",
-  "base_sha": "ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05",
-  "dispatcher": "codex repository session for PR 2627 dependency repair",
-  "worker": "codex issue-2646 historical restoration author",
-  "branch": "codex/issue-2646-2580-historical-restoration",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2646-2580-restoration",
   "allowed_paths": [
-    ".agent/completion.json",
+    "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
+    "supabase/tests/coldlion_master_landing_contracts.sql",
+    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql",
     ".agent/contract.json",
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs",
-    "scripts/test_production_migration_guard.py"
-  ],
-  "file_writes": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs",
-    "scripts/test_production_migration_guard.py"
-  ],
-  "db_reads": [],
-  "db_writes": [],
-  "prohibited_actions": [
-    "Do not alter or rename migration 20260909084253 or its sidecar bytes.",
-    "Do not weaken the ordinary backdated-version guard or authorize any unregistered path or byte sequence.",
-    "Do not classify version 20260909084253 as preview-only or hard-blocked for production.",
-    "Do not mutate preview, production, claim 2626, reviewer refs, PR 2627, or issue 2580."
-  ],
-  "required_checks": [
-    "node --test scripts/historical-migration-restorations.test.mjs",
-    "node --input-type=module -e <exact PR2627 blob validation>",
-    "python -m unittest scripts.test_production_migration_guard",
-    "bash scripts/check-sql.sh",
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-    "git diff --check"
+    ".agent/completion.json"
   ],
   "assumptions": [
-    "PR 2627 migration blob at head 9f7f6e690b26cbd0db5759d9777d6be0ba2fa338 is the preserved protected implementation.",
-    "The original migration has one terminal newline, which is part of its exact byte contract.",
-    "This registry-only repair is repository maintenance and authorizes no database action.",
-    "The structural PR will integrate this prerequisite before obtaining fresh exact-head CI and reviews."
+    "mg_category is a required source identity component for every ColdLion merchandise-group detail row.",
+    "The existing three-column foreign key to coldlion.merch_group_header remains unchanged.",
+    "No dependent foreign key may rely on the obsolete four-column primary key.",
+    "Existing rows must remain intact; null categories or duplicate five-part identities make the migration fail closed."
   ],
+  "base_sha": "b7f141400a5ccab99527b96ab41ab53421bdf88b",
+  "branch": "codex/issue-2622-merch-group-detail-key",
+  "db_reads": [],
+  "db_writes": [
+    "table coldlion.merch_group_detail"
+  ],
+  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
+  "file_writes": [
+    "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
+    "supabase/tests/coldlion_master_landing_contracts.sql",
+    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "generation": 1,
+  "goal": "Preserve all ColdLion merchandise-group detail rows by making category part of their durable identity without weakening the header relationship.",
+  "prohibited_actions": [
+    "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
+    "No source-data load or licensed source value",
+    "No change to the merchandise-group header relationship",
+    "No object or path outside claim 2650 and this contract"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-migration-pr-lease.mjs",
+    "git diff --check",
+    "supabase/tests/coldlion_master_landing_contracts.sql on a disposable database",
+    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql on a disposable database",
+    "Database Contract Tests CI from empty"
+  ],
+  "route": "shared-db-orchestrator",
+  "schema_version": 1,
   "stop_conditions": [
-    "Stop if exact path, file digest, statement digest, byte count, terminal-newline state, or object scope differs from PR 2627.",
-    "Stop if the repair requires editing structural SQL, replaying preview, or bypassing a safety guard.",
-    "Stop if current main moves before the maintenance PR is published and checked."
-  ]
+    "Claim 2650, reserved version 20260909194231, or coordinator route changes",
+    "A competing change touches coldlion.merch_group_detail or a contracted path",
+    "Implementation requires an object or path outside claim 2650 or this contract",
+    "Any existing row has a null category or collides under the five-part identity",
+    "Any dependent foreign key relies on the obsolete four-column primary key"
+  ],
+  "work_issue": 2622,
+  "work_type": "structural",
+  "worker": "codex issue2622-author holding claim 2650",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2622-merch-group-detail-key"
 }
