@@ -93,6 +93,19 @@ begin
     raise exception '#2644: missing identity did not fail the entire batch atomically';
   end if;
 
+  v_failed := false;
+  begin
+    perform public.set_popdam_item_dismissed(
+      array['coldlion|ZZ001|ZZ2644ITEM', 'coldlion|ZZ001|ZZ2644ITEM'], false
+    );
+  exception when others then
+    v_failed := true;
+  end;
+  if not v_failed
+     or (select dismissed from api.plm_item_list where source_id = 'ZZ2644ITEM') is distinct from true then
+    raise exception '#2644: duplicate identities did not refuse without changing state';
+  end if;
+
   perform public.set_popdam_item_dismissed(array['coldlion|ZZ001|ZZ2644ITEM'], false);
   if (select dismissed from api.plm_item_list where source_id = 'ZZ2644ITEM') is distinct from false then
     raise exception '#2644: restore -> fresh view read failed';
