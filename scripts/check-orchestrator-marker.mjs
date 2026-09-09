@@ -76,6 +76,7 @@
 import { execFileSync } from 'node:child_process'
 import { runGitHubCommand } from './lib/github-transport.mjs'
 import { parseRoutingBlock, validateRouting } from './lib/orchestrator-routing.mjs'
+import { validateAdmission } from './lib/orchestrator-admission.mjs'
 import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 
@@ -202,7 +203,21 @@ export function evaluateRouting(markers, predecessorRouteIdOf = () => null) {
     handover && /^\d+$/.test(handover) ? predecessorRouteIdOf(Number(handover)) : null
 
   const { valid, problems, routing } = validateRouting(fields, { predecessorRouteId })
-  if (valid) return { problems: [], warnings: [], routing }
+
+  // #2318. Routing answers "where do I send work". Admission answers the
+  // earlier question nothing asked: was this session ever allowed to hold the
+  // role? Unauthorized marker #2312 passed every routing check because its
+  // block was well-formed. A marker that cannot state admissible grounds is
+  // INVALID, which is not "no orchestrator" -- it means do not route to it and
+  // do not take the role yourself. Path A either way.
+  const admission = validateAdmission(fields, { createdAt: marker.createdAt })
+  const admissionProblems = admission.problems.map((p) => `marker #${marker.number}: ${p}`)
+  const admissionWarnings = admission.warnings.map((w) => `marker #${marker.number}: ${w}`)
+
+  if (valid && admission.required && !admission.admissible) {
+    return { problems: admissionProblems, warnings: admissionWarnings, routing: null }
+  }
+  if (valid) return { problems: [], warnings: admissionWarnings, routing }
 
   const grandfathered =
     marker.createdAt && marker.createdAt.slice(0, 10) < CONTRACT_EFFECTIVE_DATE
@@ -221,7 +236,7 @@ export function evaluateRouting(markers, predecessorRouteIdOf = () => null) {
       routing: null,
     }
   }
-  return { problems: prefixed, warnings: [], routing: null }
+  return { problems: [...prefixed, ...admissionProblems], warnings: admissionWarnings, routing: null }
 }
 
 /**

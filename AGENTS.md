@@ -1339,8 +1339,13 @@ machine: EDGE-DEV
 started: 2026-08-26T14:39:25Z
 handover_issue: 1579
 briefing: HANDOFF.d/2026-08-26T1409Z-edge-dev-codex-orchestrator-1579-fresh-session.md
+authorization: owner-current-chat 2026-08-26T14:38:00Z
 ```
 ````
+
+`authorization:` was added 2026-09-10 by issue #2318 and is covered in section 11d. It is the
+only field that is not part of routing: it states **on what grounds this session holds the
+role**, not where to send work.
 
 `route_id` is the **declared address**, and its shape depends on the engine. The guard validates
 that shape and nothing else — see the "what this does NOT do" note at the end of this section:
@@ -1382,7 +1387,9 @@ contract exists to prevent. If `--resolve` will not give you an address, you do 
 
 ### Starting as the orchestrator
 
-Open the marker with a complete, valid routing block **recording your own new `route_id`**.
+Open the marker with a complete, valid routing block **recording your own new `route_id`** and
+an admissible `authorization:` (section 11d). If you cannot state admissible grounds, do not
+open a marker at all — run as an ordinary session and queue the structural work.
 A successor that copies its predecessor's id is rejected by the guard — that copy is exactly
 how delegations kept arriving at a closed session.
 
@@ -1416,6 +1423,55 @@ never "it was received".**
 ⚠️ **Markers opened before 2026-08-27 are grandfathered by the PR guard only** — they could
 not carry a block that did not exist. `--resolve` **never** grandfathers: such a marker still
 carries no address and still cannot be routed to. Edit it to add the block, or close it.
+
+### 11d. ADMISSION — on what grounds you hold the role
+
+**Added 2026-09-10, issue #2318.** Routing answers "where do I send work". Nothing answered the
+earlier question: **was this session ever allowed to hold the role?**
+
+On 2026-09-04 a DesignFlow application session hit a shared-db constraint defect, opened
+orchestrator marker #2312, and ran a structural repair. Albert had never authorized it. The
+marker guard could not have caught it: #2312 was the only open marker and its routing block was
+well-formed, so every check passed. The finding recorded in the closeout is exact — **structural
+work need does not confer orchestrator authority; the marker itself was evidence of an
+unauthorized assumption, not evidence that authority existed.**
+
+#### The only two admissible grounds
+
+| Value | Meaning |
+|---|---|
+| `owner-current-chat <ISO-8601 instant>` | Albert authorized **this** session to hold the orchestrator, in the conversation this session is running in. Not a past chat, not another session's chat, not a standing document. |
+| `owner-authorized-handover #<marker issue>` | Direct succession from the named predecessor marker. It must be the **same** issue this marker declares as `handover_issue:`, so a session cannot cite a handover it is not continuing. |
+
+#### What is refused, by name, and why
+
+- **a `db-work` label** — it routes work *to* an orchestrator; it never creates one.
+- **being delegated to / task traffic** — a delegating session cannot grant a role it does not
+  own. This is the exact inference that produced #2312.
+- **a structural need, a needed migration, being blocked on schema** — that is the reason to
+  QUEUE work for an orchestrator, not grounds to become one.
+- **a handoff document** — it records what a predecessor did; it cannot confer a role.
+- **working in this repository, no marker being open, your own judgement, blank** — none of
+  these is authorization. Blank is never a default: it reads as answered and grants nothing.
+
+An **unrecognised** value fails closed. Free text is how "the task needed it" would have passed.
+
+#### What it does and does not do
+
+It cannot PREVENT a session opening a marker issue — markers are claimed outside any pull
+request, exactly as marker collisions are. It cannot prove Albert said the words; no repository
+check can. What it does is make the grounds a **required, typed, published** field, so a silent
+assumption becomes a written, refutable assertion — and so the inferences that actually happened
+are impossible to write down as valid.
+
+A marker that cannot state admissible grounds is **`invalid`**, which per the table above is not
+`none`: do not route to it, and do not take the role yourself. **Path A either way** — run as a
+non-orchestrator session and queue the work.
+
+⚠️ **Markers opened before 2026-09-10 are grandfathered for a MISSING field only, with a
+warning** — a live orchestrator must not be failed for a field that did not exist when it
+started. A pre-existing marker that writes a refused ground still fails. An unreadable creation
+date is treated as in force, never as grandfathered.
 
 ---
 
