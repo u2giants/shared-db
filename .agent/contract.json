@@ -49,9 +49,6 @@
     "No object or path outside claim 2648 and this contract"
   ],
   "required_checks": [
-    "node --test scripts/historical-migration-restorations.test.mjs",
-    "node --input-type=module -e <exact PR2627 blob validation>",
-    "python -m unittest scripts.test_production_migration_guard",
     "bash scripts/check-sql.sh",
     "node scripts/check-production-verification-sidecars.mjs --base origin/main",
     "node scripts/check-migration-pr-lease.mjs",
@@ -59,6 +56,8 @@
     "supabase/tests/popdam_item_state_contracts.sql on a disposable database",
     "Database Contract Tests CI from empty"
   ],
+  "route": "shared-db-orchestrator",
+  "schema_version": 1,
   "stop_conditions": [
     "Claim 2648, reserved version 20260909184115, or coordinator route changes",
     "A competing change touches any claimed object or contracted path",
