@@ -50,10 +50,22 @@ begin
     raise exception '#2466: authenticated can bypass the serving view and read coldlion.item_detail';
   end if;
 
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values (pg_backend_pid(), txid_current(), 'core.licensor', 'scrape_consolidation',
+          gen_random_uuid(), repeat('2', 64), 'issue-2466-contract',
+          array['name','code','status'], clock_timestamp() + interval '1 minute');
   insert into core.licensor (name, code, status)
   values ('ZZ2466 LICENSOR', 'ZZ2466LIC', 'active') returning id into v_licensor;
+  insert into plm.licensing_write_authorization
+    (backend_pid, transaction_id, target_table, write_kind, plan_id, plan_hash,
+     actor, protected_columns, expires_at)
+  values (pg_backend_pid(), txid_current(), 'core.property', 'licensing_review_create',
+          gen_random_uuid(), repeat('4', 64), 'issue-2466-contract',
+          array['licensor_id','name','code','status'], clock_timestamp() + interval '1 minute');
   insert into core.property (licensor_id, name, code, status)
-  values (v_licensor, 'ZZ2466 PROPERTY', 'ZZ2466PROP', 'active') returning id into v_property;
+  values (v_licensor, 'ZZ2466 PROPERTY', 'ZZ2466PROP', 'potential') returning id into v_property;
 
   insert into plm.item (
     item_number, style_number, description, licensor_id, property_id,
