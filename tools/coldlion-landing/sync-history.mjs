@@ -21,7 +21,7 @@
 // row that CHANGED after its window closed is the change-log unit's job, not this one's.
 
 import { readColdlionApiKey } from "../coldlion-sync-common.mjs";
-import { isoDate, recentClosedWindows } from "./lib/grid.mjs";
+import { isoDate, lastClosedWindowIndex, recentClosedWindows, windowAtIndex } from "./lib/grid.mjs";
 import { proveTarget } from "./lib/db.mjs";
 import { COMPANY_CODE, PAGE_SIZE } from "./lib/scopes.mjs";
 import { allScopes, ledgerKey, loadWindowScope, loadedWindows, scopeLabel } from "./lib/run-history.mjs";
@@ -43,9 +43,18 @@ export function parseArgs(argv) {
         throw new Error(`unknown argument ${flag}`);
     }
   }
-  if (!args.to) args.to = isoDate(new Date());
+  // CLAMPED, exactly as the backfill clamps it. `--to` is an "as of" date, and an
+  // "as of" date in the future selects windows that have not closed in reality. The
+  // vendor answers a future window with an empty envelope, completion is "proved",
+  // and the week is sealed as loaded with zero rows -- the same silent loss the
+  // header describes, reached through an argument instead of through the default.
+  const lastClosed = windowAtIndex(lastClosedWindowIndex(isoDate(new Date())));
+  if (!args.to || args.to > lastClosed.to) args.to = lastClosed.to;
   if (!Number.isInteger(args.windows) || args.windows < 1) {
     throw new Error("--windows must be a positive integer");
+  }
+  if (!Number.isInteger(args.pageSize) || args.pageSize < 1) {
+    throw new Error("--page-size must be a positive whole number");
   }
   return args;
 }

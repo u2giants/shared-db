@@ -19,6 +19,17 @@ export const REQUEST_TIMEOUT_MS = 120_000;
 export const REQUEST_PAUSE_MS = 3_000;
 export const MAX_ATTEMPTS = 3;
 
+// 429 and 408 are NOT permanent. The wire status decides permanence because the vendor
+// answers a refused history request with a 400 whose body lies about being a 500 -- that
+// is a statement about a malformed REQUEST, not about every 4xx. A throttling answer and
+// a request timeout say "later", so treating them as terminal would abandon a window the
+// vendor never refused.
+export const TRANSIENT_CLIENT_STATUSES = [408, 429];
+
+export function isPermanentStatus(status) {
+  return status >= 400 && status < 500 && !TRANSIENT_CLIENT_STATUSES.includes(status);
+}
+
 export function delay(ms) {
   return ms > 0 ? new Promise((done) => setTimeout(done, ms)) : Promise.resolve();
 }
@@ -110,7 +121,7 @@ export async function fetchPage(url, apiKey, { fetchImpl = fetch, timeoutMs = RE
         const error = new Error(`${url.pathname} returned non-JSON on wire HTTP ${response.status}`);
         error.httpStatus = response.status;
         error.bodyStatus = null;
-        error.permanent = response.status >= 400 && response.status < 500;
+        error.permanent = isPermanentStatus(response.status);
         throw error;
       }
       const bodyStatus = Number.isInteger(payload?.status) ? payload.status : null;
@@ -121,7 +132,7 @@ export async function fetchPage(url, apiKey, { fetchImpl = fetch, timeoutMs = RE
         error.httpStatus = response.status;
         error.bodyStatus = bodyStatus;
         // THE WIRE STATUS DECIDES. The body's 500 on a 400 is the documented vendor lie.
-        error.permanent = response.status >= 400 && response.status < 500;
+        error.permanent = isPermanentStatus(response.status);
         throw error;
       }
       return { payload, httpStatus: response.status, bodyStatus };
@@ -151,7 +162,11 @@ export async function fetchWindowScope({
   companyCode = COMPANY_CODE,
   size = PAGE_SIZE,
   fetchImpl = fetch,
-  requestGate = async () => {},
+  // The vendor agreement is one request at a time with a pause between them
+  // (docs/coldlion-history-endpoints-shape.md). A backfill is hundreds of windows
+  // times four scopes, so an unpaced walk is the shape that gets a key throttled.
+  // The gate defaults to that pause instead of to nothing.
+  requestGate = () => delay(pauseMs),
   timeoutMs = REQUEST_TIMEOUT_MS,
   pauseMs = REQUEST_PAUSE_MS,
 }) {

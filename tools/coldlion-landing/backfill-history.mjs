@@ -52,6 +52,9 @@ export function parseArgs(argv) {
   if (args.limit !== Infinity && (!Number.isInteger(args.limit) || args.limit < 1)) {
     throw new Error("--limit must be a positive whole number");
   }
+  if (!Number.isInteger(args.pageSize) || args.pageSize < 1) {
+    throw new Error("--page-size must be a positive whole number");
+  }
   if (args.stage && !PROD_STAGES.includes(args.stage)) {
     throw new Error(`--stage must be one of ${PROD_STAGES.join(", ")}`);
   }

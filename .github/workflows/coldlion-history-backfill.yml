@@ -77,6 +77,7 @@ jobs:
           FROM: ${{ github.event.inputs.from }}
           TO: ${{ github.event.inputs.to }}
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai
           COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
         run: |
           set -euo pipefail
@@ -97,6 +98,7 @@ jobs:
       - name: Backfill
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai
           COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
           FROM: ${{ github.event.inputs.from }}
           TO: ${{ github.event.inputs.to }}

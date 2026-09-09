@@ -9,7 +9,8 @@ import test from "node:test";
 
 import { GRID_ANCHOR, isoDate, lastClosedWindowIndex, recentClosedWindows, windowAtIndex, windowContaining, windowRange } from "./coldlion-landing/lib/grid.mjs";
 import { ORDER_HISTORY, allScopes, prodHistoryScope } from "./coldlion-landing/lib/scopes.mjs";
-import { assertPagesComplete, buildPageUrl, fetchPage, fetchWindowScope, requestParams, validatePage } from "./coldlion-landing/lib/http.mjs";
+import { assertPagesComplete, buildPageUrl, fetchPage, fetchWindowScope, isPermanentStatus, requestParams, validatePage } from "./coldlion-landing/lib/http.mjs";
+import { assertExpectedTarget } from "./coldlion-landing/lib/db.mjs";
 import { bigint, canonical, date, num, sourceHash, splitTokens, sqlText, text } from "./coldlion-landing/lib/values.mjs";
 import { projectOrderHistoryWindow, splitInvoiceTokens } from "./coldlion-landing/lib/project-order-history.mjs";
 import { projectProdHistoryWindow, quantitiesAgree, selectLookup } from "./coldlion-landing/lib/project-prod-history.mjs";
@@ -485,14 +486,14 @@ test("no stage is invented for sales history anywhere in the transaction", () =>
   assert.match(sql, /stage_code is not distinct from null/);
 });
 
-test("production history asserts component quantities only after the components exist", () => {
+function prodSql() {
   counter = 0;
   const runId = "22222222-2222-4222-8222-222222222222";
   const projected = projectProdHistoryWindow(
     [prodRow(), prodRow({ prepackItemNo: "PPK-2", ppkDetailQty: 6, subItemNo: "SKU-2" })],
     { runId, fetchedAt: "2026-09-08T00:00:00Z", requestedStage: "ISS", observedAt: "2026-09-08T00:00:00Z", newId: ids },
   );
-  const sql = buildProdHistoryLoadSql({
+  return buildProdHistoryLoadSql({
     window: windowAtIndex(0),
     scope: prodHistoryScope("ISS"),
     runId,
@@ -506,6 +507,10 @@ test("production history asserts component quantities only after the components 
     durationMs: 1000,
     notes: "lines=1",
   });
+}
+
+test("production history asserts component quantities only after the components exist", () => {
+  const sql = prodSql();
   const components = sql.indexOf("insert into coldlion.prod_history_component");
   const assertion = sql.indexOf("set component_quantities_asserted = true");
   assert.ok(components > 0 && assertion > components, "the guard reads components that must already exist");
@@ -604,4 +609,62 @@ test("a one-sided invoice list is flagged rather than dropped in silence", () =>
 test("the resumable ledger read quotes the company code it was given", () => {
   const sql = loadedWindowsSql("TEST'CO");
   assert.match(sql, /company_code = 'TEST''CO'/);
+});
+
+
+// ---------------------------------------------------------------------------------
+// Regressions found by the second governed review of this change (PR #2589)
+// ---------------------------------------------------------------------------------
+
+test("an as-of date in the future cannot make the sync seal an unfinished week", () => {
+  const today = isoDate(new Date());
+  const defaulted = parseSyncArgs([]);
+  assert.equal(
+    parseSyncArgs(["--to", "2999-01-01"]).to,
+    defaulted.to,
+    "a future end date selects weeks the vendor answers empty, and an empty week seals as loaded",
+  );
+  assert.equal(defaulted.to < today, true);
+});
+
+test("both entry points refuse a page size that is not a positive whole number", () => {
+  for (const bad of ["0", "-1", "2.5", "not-a-number"]) {
+    assert.throws(() => parseSyncArgs(["--page-size", bad]), /positive whole number/);
+    assert.throws(() => parseBackfillArgs(["--from", "2019-01-01", "--page-size", bad]), /positive whole number/);
+  }
+});
+
+test("a throttle or a request timeout is not treated as a permanent refusal", () => {
+  assert.equal(isPermanentStatus(400), true, "a malformed history request is refused for good");
+  assert.equal(isPermanentStatus(404), true);
+  assert.equal(isPermanentStatus(408), false, "a request timeout says later, not never");
+  assert.equal(isPermanentStatus(429), false, "abandoning a throttled window loses the week");
+  assert.equal(isPermanentStatus(500), false);
+});
+
+test("a writer refuses to run unless the database it is pointed at is the declared one", () => {
+  const url = "postgresql://u:p@db.qsllyeztdwjgirsysgai.supabase.co:5432/postgres";
+  assert.doesNotThrow(() =>
+    assertExpectedTarget({ expectedProjectRef: "qsllyeztdwjgirsysgai", databaseUrl: url }),
+  );
+  assert.throws(
+    () => assertExpectedTarget({ expectedProjectRef: "someotherproject", databaseUrl: url }),
+    /project/i,
+    "a URL for a different project must be refused, not written to",
+  );
+  assert.throws(() => assertExpectedTarget({ expectedProjectRef: "", databaseUrl: url }), /COLDLION_EXPECTED_PROJECT_REF/);
+  assert.throws(() => assertExpectedTarget({ expectedProjectRef: "qsllyeztdwjgirsysgai", databaseUrl: "" }), /DATABASE_URL/);
+});
+
+test("evidence for a production line sealed by an earlier window is skipped, not forced", () => {
+  const sql = prodSql();
+  for (const target of ["prod_history_component", "prod_history_last_lookup"]) {
+    const insert = sql.slice(sql.indexOf(`insert into coldlion.${target}`));
+    assert.match(
+      insert.slice(0, 4000),
+      /join coldlion\.prod_history_line p on p\.id = m\.id and not p\.component_quantities_asserted/,
+      `${target} would abort the whole window against a sealed parent, and every retry with it`,
+    );
+  }
+  assert.match(sql, /already sealed by an earlier window/, "a skip nobody can see is a silent loss");
 });

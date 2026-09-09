@@ -24,9 +24,28 @@ to reconcile by hand.
 ## Running it
 
 Both entry points need `DATABASE_URL` (or `SUPABASE_DB_URL`) and the ColdLion
-API key — `COLDLION_API_KEY`, or 1Password via the documented reference. The
-target database is proved before any write, and a database with no `coldlion`
-schema is refused.
+API key — `COLDLION_API_KEY`, or 1Password via the documented reference. They
+also need `COLDLION_EXPECTED_PROJECT_REF`: the loader refuses to run unless the
+connection string it was handed actually names that project. A database with no
+`coldlion` schema is refused as well, but that is a weaker check — an unrelated
+Supabase project could also have the schema.
+
+### The two repository secrets
+
+The workflows below are the only sanctioned way to run this against the real
+database, and they read exactly two secrets, both of which must exist in this
+repository's Actions secrets before either workflow can start:
+
+| Secret | What it must contain |
+| --- | --- |
+| `SUPABASE_DB_URL_PRODUCTION` | A full Postgres connection string for the production project `qsllyeztdwjgirsysgai`, connecting as a role that owns (or has full write on) the `coldlion` schema. The landing tables are protected by triggers, not by row-level security, so the role must not be `anon` or `authenticated`. |
+| `COLDLION_API_KEY` | The ColdLion API key, sent as `X-API-Key`. |
+
+`SUPABASE_DB_URL_PRODUCTION` is a URL, not a password: it is deliberately not
+the same secret as `SUPABASE_DB_PASSWORD_PRODUCTION`, which the licensor and
+property workflows use with the Supabase CLI. Only the repository owner can
+create it. Both workflows refuse to start when either secret is missing, rather
+than connecting to nothing and reporting success.
 
 Ongoing sync — re-reads the most recent windows, skipping any already loaded:
 
@@ -85,8 +104,12 @@ stated cause.
 ## Tests
 
 `tools/coldlion-landing-history.test.mjs` covers the grid, the scopes, both
-vendor defects, both projections and the shape of the generated transaction. It
-runs offline with no secrets and no database, as part of the tools offline suite.
+vendor defects, both projections and the shape of the generated transaction.
+`tools/coldlion-landing-workflows.test.mjs` covers the two workflows: their
+triggers, the declared target beside every credential, the missing-secret
+refusals, the offline tests running before any write, and the serialisation.
+Both run offline with no secrets and no database, as part of the tools offline
+suite.
 
 No real ColdLion values appear in this directory. The fixtures are synthetic and
 the loaders print counts, scopes and window dates only — this repository is

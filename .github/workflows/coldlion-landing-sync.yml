@@ -61,6 +61,7 @@ jobs:
       - name: Refuse to run without an explicit target
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai
           COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
         run: |
           set -euo pipefail
@@ -72,6 +73,7 @@ jobs:
       - name: Sync
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL_PRODUCTION }}
+          COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai
           COLDLION_API_KEY: ${{ secrets.COLDLION_API_KEY }}
           WINDOWS: ${{ github.event.inputs.windows || '3' }}
           DRY_RUN: ${{ github.event.inputs.dry_run }}

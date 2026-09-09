@@ -63,7 +63,47 @@ export function queryRows(sql, options = {}) {
  * a "successful" load into a database missing coldlion.window_ledger is a load into
  * nothing.
  */
+export const PRODUCTION_PROJECT_REF = "qsllyeztdwjgirsysgai";
+
+/**
+ * NAME THE TARGET, do not merely describe it.
+ *
+ * A preview database is built from these same migrations, so "the coldlion schema
+ * exists" is satisfied by exactly the database this loader must never write to. The
+ * caller therefore has to declare which project it means, and the declaration is
+ * checked against the connection string rather than against the loader's own hopes.
+ * Fail closed: an undeclared target is refused, so forgetting the variable can never
+ * degrade into writing wherever the URL happens to point.
+ */
+export function assertExpectedTarget({
+  expectedProjectRef = process.env.COLDLION_EXPECTED_PROJECT_REF,
+  databaseUrl = process.env.DATABASE_URL,
+} = {}) {
+  const ref = String(expectedProjectRef ?? "").trim();
+  if (!ref) {
+    throw new Error(
+      "COLDLION_EXPECTED_PROJECT_REF is not set; refusing to write to an undeclared database",
+    );
+  }
+  const url = String(databaseUrl ?? "").trim();
+  if (!url) throw new Error("DATABASE_URL is not set; refusing to write");
+  let host;
+  try {
+    host = new URL(url).host;
+  } catch {
+    throw new Error("DATABASE_URL is not a parseable connection URL; refusing to write");
+  }
+  // The project ref appears in the host of a direct connection and in the user of a
+  // pooled one, so both spellings are accepted -- and nothing else is. The URL is
+  // never printed; only the ref that was expected.
+  if (!url.includes(ref)) {
+    throw new Error(`the connection does not name project ${ref}; refusing to write`);
+  }
+  return { expectedProjectRef: ref, host };
+}
+
 export function proveTarget(options = {}) {
+  const expected = assertExpectedTarget(options);
   const [row] = queryRows(
     `select current_database(),
             coalesce(inet_server_addr()::text, 'local'),
@@ -76,7 +116,7 @@ export function proveTarget(options = {}) {
   if (Number(tables) === 0) {
     throw new Error(`target ${database} has no coldlion schema; refusing to load`);
   }
-  return { database, host, coldlionTables: Number(tables) };
+  return { database, host, coldlionTables: Number(tables), expectedProjectRef: expected.expectedProjectRef };
 }
 
 /**

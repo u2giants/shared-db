@@ -408,18 +408,57 @@ update coldlion.sync_run
 commit;`;
 }
 
-function insertSql({ target, constraint, spec, stageName, mapName, parentColumn, count }) {
+function insertSql({
+  target,
+  constraint,
+  spec,
+  stageName,
+  mapName,
+  parentColumn,
+  count,
+  parentTable,
+}) {
   const columns = spec.map(([column]) => column);
   const select = columns.map((column) => `s.${column}`).join(", ");
+  // A production line identity can recur in a later window, and its evidence is SEALED
+  // once its quantities are asserted: the immutability trigger refuses even an identical
+  // component, and it fires before ON CONFLICT can absorb the duplicate. Without this
+  // join the whole later window aborts, every retry aborts the same way, and that week
+  // can never load. Sealed parents keep the evidence they already have; only parents
+  // whose evidence is still open receive rows.
+  const openParent = parentTable
+    ? `
+    join ${parentTable} p on p.id = m.id and not p.component_quantities_asserted`
+    : "";
   return `with ins as (
   insert into ${target} (${parentColumn ? `${parentColumn}, ` : ""}${columns.join(", ")})
   select ${parentColumn ? `m.id, ` : ""}${select}
     from ${stageName} s
-    ${parentColumn ? `join ${mapName} m on m.local_id = s.line_local_id` : ""}
+    ${parentColumn ? `join ${mapName} m on m.local_id = s.line_local_id` : ""}${openParent}
   on conflict on constraint ${constraint} do nothing
   returning 1 as one
 )
 insert into _inserted (grain, n) select ${sqlText(count)}, count(*) from ins;`;
+}
+
+/**
+ * Say out loud, in the run log, when a window carried production lines whose evidence was
+ * already sealed by an earlier window. Their child rows were skipped on purpose above;
+ * silence would make that indistinguishable from a vendor that sent nothing.
+ */
+function sealedRecurrenceNoticeSql() {
+  return `do $sealed$
+declare
+  v_n bigint;
+begin
+  select count(*) into v_n
+    from _map_line m
+    join coldlion.prod_history_line l on l.id = m.id
+   where l.component_quantities_asserted;
+  if v_n > 0 then
+    raise notice 'skipped component and lookup evidence for % production line(s) already sealed by an earlier window', v_n;
+  end if;
+end $sealed$;`;
 }
 
 // ---------------------------------------------------------------------------------
@@ -592,6 +631,7 @@ export function buildProdHistoryLoadSql({
       stageName: "_stage_component",
       mapName: "_map_line",
       parentColumn: "line_id",
+      parentTable: "coldlion.prod_history_line",
       count: "prod_history_component",
     }),
     stageSql("_stage_lookup", PROD_LOOKUP_SPEC, LOCAL_AND_PARENT, lookups),
@@ -602,8 +642,10 @@ export function buildProdHistoryLoadSql({
       stageName: "_stage_lookup",
       mapName: "_map_line",
       parentColumn: "line_id",
+      parentTable: "coldlion.prod_history_line",
       count: "prod_history_last_lookup",
     }),
+    sealedRecurrenceNoticeSql(),
     assertionSql(assertable),
     pageLedgerSql({ scope, window, runId, companyCode, pages }),
     epilogue({ scope, window, runId, companyCode, completion, finishedAt, durationMs, notes }),
