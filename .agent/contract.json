@@ -1,54 +1,84 @@
 {
   "schema_version": 1,
-  "work_issue": 2635,
-  "generation": 2,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Pilot the Issue 335 Phase 3 task-gate consumer contract in shared-db with protected structure paths, an operative rulebook route, CI enforcement, no-loss evidence, and a no-state rollback rehearsal.",
-  "base_sha": "e149bd0bac3aae0b3172468ec9b4a95fa2bc3a0d",
-  "dispatcher": "Albert Hazan via the current Codex Issue 335 continuation",
-  "worker": "Codex root task 01a08610-e776-7ac2-9f76-d0e37782e6d2",
-  "branch": "codex/issue-335-phase3-task-gates-01a086",
-  "worktree": "C:/repos/shared-db-worktrees/issue-335-phase3-task-gates-01a086",
+  "generation": 5,
+  "work_issue": 2403,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Create only the empty hts_rag_split schema and nine internally linked tables for the DesignFlow consolidated non-production target while preserving public.hts_rag_* and copying no rows.",
+  "base_sha": "fe5fa74db889652768029116e636f8cbe69b955e",
+  "dispatcher": "codex shared-db.orch marker2629 route01a085f2-a84f-7963-b474-e5770b149ecd",
+  "worker": "codex issue-2403 guarded merge worker",
+  "branch": "claude/issue-2403-hts-rag-split",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2403-hts-rag-split",
   "allowed_paths": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
+    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
+    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "table public.hts_rag_determinations",
+    "table public.hts_rag_extraction_jobs",
+    "table public.hts_rag_precedent_rulings",
+    "table public.hts_rag_precedents",
+    "table public.hts_rag_product_examples",
+    "table public.hts_rag_product_family_allowlist",
+    "table public.hts_rag_provider_responses",
+    "table public.hts_rag_review_events",
+    "table public.hts_rag_rulings"
+  ],
+  "db_writes": [
+    "schema hts_rag_split",
+    "table hts_rag_split.hts_rag_determinations",
+    "table hts_rag_split.hts_rag_extraction_jobs",
+    "table hts_rag_split.hts_rag_precedent_rulings",
+    "table hts_rag_split.hts_rag_precedents",
+    "table hts_rag_split.hts_rag_product_examples",
+    "table hts_rag_split.hts_rag_product_family_allowlist",
+    "table hts_rag_split.hts_rag_provider_responses",
+    "table hts_rag_split.hts_rag_review_events",
+    "table hts_rag_split.hts_rag_rulings",
+    "index hts_rag_split.hts_rag_determinations_comparison_category_idx",
+    "index hts_rag_split.hts_rag_determinations_comparison_review_idx",
+    "index hts_rag_split.hts_rag_determinations_family_created_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_idempotency_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_pending_claim_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_relationship_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_ruling_idx",
+    "index hts_rag_split.hts_rag_precedents_extraction_idempotency_idx",
+    "index hts_rag_split.hts_rag_precedents_family_review_idx",
+    "index hts_rag_split.hts_rag_product_examples_family_idx",
+    "index hts_rag_split.hts_rag_provider_responses_determination_idx",
+    "index hts_rag_split.hts_rag_review_events_subject_created_idx",
+    "index hts_rag_split.hts_rag_rulings_operationally_revoked_idx",
+    "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
+  ],
   "prohibited_actions": [
-    "No database read or write, migration author claim, preview apply, or production promotion",
-    "No direct push to main, required-check weakening, or merge before exact-head independent review",
-    "No change outside the seven named files"
+    "No production or DesignFlow target write",
+    "No reviewer call outside the governed exact-head runner",
+    "No change to public.hts_rag_* and no row copy",
+    "No merge, claim release, issue closure, or inherited cleanup"
   ],
   "required_checks": [
-    "bash scripts/tests/test-task-gates.sh",
-    "git diff --check origin/main...HEAD",
-    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-migration-pr-lease.mjs",
+    "git diff --check"
   ],
   "assumptions": [
-    "popcre/ai-devops is the public source of truth for the central gate engine and commit 4d83f9a5 is immutable",
-    "The 77 pre-pilot router headings remain reachable and one Task declaration heading is added, for 78 current headings across AGENTS, HANDOFF, and README",
-    "Albert authorized this cross-repository pilot in the current ai-devops Issue 335 continuation; generation 2 was published after reconciling current main and before the replacement exact-head governed review"
+    "Issue comment 5577130097 confirms shared-db owns deployment to the DesignFlow consolidated non-production target reached by DB_*_SANDBOX in GCP lithe-breaker-323913",
+    "Claim2418 permanently protects versions 20260906040010 and 20260908022407 and now reserves 20260909121403 through guarded supersession",
+    "Implementation head 2c432e69edfb367365087c1782ce0e316f63204b contains current main fe5fa74db889652768029116e636f8cbe69b955e; the manager renamed only the migration filename from 20260908022407 to 20260909121403, and SQL statement bytes and semantics remain unchanged"
   ],
+
   "stop_conditions": [
-    "Any scope expands into a database, migration, application-row, infrastructure, or production mutation",
-    "The central engine commit is unavailable or the focused fixture fails",
-    "origin/main moves so the recorded base is no longer the pull request merge base",
-    "A required check or exact-head independent reviewer refuses the final source"
+    "Stop if origin main or the PR branch moves after exact-head review begins",
+    "Stop if any claimed object or migration byte must change",
+    "Stop if both governed reviewer slots cannot be drawn before either review runs",
+    "Stop if the target route acknowledgement or coordinator marker changes"
   ]
 }

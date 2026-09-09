@@ -1,44 +1,93 @@
 {
   "schema_version": 1,
-  "work_issue": 2635,
+  "work_issue": 2403,
   "outcome": "ready-for-merge",
-  "pr": 2637,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2635/2",
-  "contract_sha256": "74ac55e01cc23b6bbc0a4f9e58ba39473332f3f8305670d163a2d26de8bf4d5a",
-  "head_sha": "7f9e028069d4d30d33915967ca8e70345c4acc05",
-  "evidence_note": "head_sha deliberately names the implementation head immediately before this metadata pair, as agent-work-contract-git-evidence requires; only .agent/contract.json and .agent/completion.json follow it. The branch was reconciled to exact current main e149bd0b before generation 2. No database or production state was read or changed.",
-  "files_changed": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh"
+  "pr": 2425,
+  "migration_versions": [
+    "20260909121403"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2403/5",
+  "contract_sha256": "81e394f5682d8fa403c5232c5a5e874131b8babd181694864476b0747ed01273",
+  "head_sha": "2c432e69edfb367365087c1782ce0e316f63204b",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql"
+  ],
+  "db_reads": [
+    "table public.hts_rag_determinations",
+    "table public.hts_rag_extraction_jobs",
+    "table public.hts_rag_precedent_rulings",
+    "table public.hts_rag_precedents",
+    "table public.hts_rag_product_examples",
+    "table public.hts_rag_product_family_allowlist",
+    "table public.hts_rag_provider_responses",
+    "table public.hts_rag_review_events",
+    "table public.hts_rag_rulings"
+  ],
+  "db_writes": [
+    "schema hts_rag_split",
+    "table hts_rag_split.hts_rag_determinations",
+    "table hts_rag_split.hts_rag_extraction_jobs",
+    "table hts_rag_split.hts_rag_precedent_rulings",
+    "table hts_rag_split.hts_rag_precedents",
+    "table hts_rag_split.hts_rag_product_examples",
+    "table hts_rag_split.hts_rag_product_family_allowlist",
+    "table hts_rag_split.hts_rag_provider_responses",
+    "table hts_rag_split.hts_rag_review_events",
+    "table hts_rag_split.hts_rag_rulings",
+    "index hts_rag_split.hts_rag_determinations_comparison_category_idx",
+    "index hts_rag_split.hts_rag_determinations_comparison_review_idx",
+    "index hts_rag_split.hts_rag_determinations_family_created_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_idempotency_idx",
+    "index hts_rag_split.hts_rag_extraction_jobs_pending_claim_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_relationship_idx",
+    "index hts_rag_split.hts_rag_precedent_rulings_ruling_idx",
+    "index hts_rag_split.hts_rag_precedents_extraction_idempotency_idx",
+    "index hts_rag_split.hts_rag_precedents_family_review_idx",
+    "index hts_rag_split.hts_rag_product_examples_family_idx",
+    "index hts_rag_split.hts_rag_provider_responses_determination_idx",
+    "index hts_rag_split.hts_rag_review_events_subject_created_idx",
+    "index hts_rag_split.hts_rag_rulings_operationally_revoked_idx",
+    "index hts_rag_split.hts_rag_rulings_ruling_date_idx"
+  ],
   "checks": [
     {
-      "command": "bash scripts/tests/test-task-gates.sh",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "10 passed / 0 failed at implementation head 7f9e0280 after current-main reconciliation: prose, code, rulebook, Supabase config, and migration classification; three protected bypass refusals; valid shipping flow; and a rollback positive control with unchanged source hash."
+      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: Guard B confirmed reserved version 20260909121403 sorts after base version 20260909005945; static, expected-count, verification-cost and EOL guards passed. Live-ledger Guard B2 did not run without a configured ledger and is not claimed as clearance."
     },
     {
-      "command": "git diff --check origin/main...HEAD",
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "No whitespace errors against exact generation-2 merge base e149bd0bac3a."
+      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: status OK, 44 sidecars checked; version 20260909121403 has no dynamic-execution markers and requires no sidecar."
     },
     {
-      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+      "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "Contract is valid; immutable ref refs/db-contracts/2635/2 read back at e307942e with contract hash 74ac55e0."
+      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d with PR_NUMBER=2425: migration claim #2418 and reserved version 20260909121403 verified."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "Re-run on the candidate tree integrated with origin/main fe5fa74d: no whitespace errors."
+    },
+    {
+      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f supabase/migrations/20260909121403_hts_rag_split_isolated_schema.sql",
+      "exit_code": 0,
+      "evidence": "PostgreSQL 17 disposable server applied the migration and its built-in catalog/emptiness assertions successfully before the guarded pure filename supersession. The SQL blob is unchanged, so this evidence binds to implementation head 6d65afc9."
+    },
+    {
+      "command": "psql --no-psqlrc -q -v ON_ERROR_STOP=1 -f verify.sql",
+      "exit_code": 0,
+      "evidence": "All nine hts_rag_split tables remained empty while one sentinel row in each of the nine public.hts_rag_* positive-control tables remained unchanged. The SQL blob is unchanged by main integration and guarded filename supersession, so this evidence binds to implementation head 6d65afc9."
     }
   ],
   "assumptions_resolved": [
-    "The pull request merge base is exact origin/main e149bd0bac3a, matching generation 2.",
-    "The central engine source is public popcre/ai-devops and is pinned in CI to merged commit 4d83f9a5.",
-    "All 77 pre-pilot router headings remain reachable and one new Task declaration heading makes 78 current headings across AGENTS, HANDOFF, and README.",
-    "The task-gate fixture performs no external mutation and its rollback changes only a disposable local policy copy."
+    "DesignFlow owner acknowledgement comment 5577130097 confirms shared-db owns the governed migration and exact consolidated non-production target route.",
+    "Guarded supersession evidence permanently preserves versions 20260906040010 and 20260908022407; supersession ref ac5f3475dff31b9f331b18a95212bf9344fac7b6 reserves current version 20260909121403.",
+    "Original and superseded migration paths resolve to identical Git blob 3f2e7f44a6dfb30fc879449c684f260863c5fc10; only the filename changed.",
+    "Origin/main fe5fa74db889652768029116e636f8cbe69b955e was integrated at implementation head 2c432e69edfb367365087c1782ce0e316f63204b; the only conflicts were the single-slot .agent/contract.json and .agent/completion.json evidence pair, which must describe THIS pull request, so this branch's evidence was retained and refreshed. The migration SQL blob remains unchanged from its earlier implementation. No preview, production apply, claim release, issue closure, or inherited cleanup occurred."
   ],
   "stop_conditions_hit": []
 }
