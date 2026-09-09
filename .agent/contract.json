@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2318,
-  "generation": 4,
+  "generation": 5,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Close the gap that let unauthorized orchestrator marker #2312 pass every check on 2026-09-04: nothing anywhere asked on what grounds the orchestrator role had been taken. Add an `authorization:` field to the orchestrator routing block with exactly two admissible grounds (owner authorization in the current chat, or an owner-authorized handover naming the marker actually being continued), refuse by name each inference that produced #2312, fail closed on unrecognised free text, and wire it into check-orchestrator-marker.mjs so a marker without admissible grounds resolves as INVALID rather than routable. Document it in AGENTS.md.",
@@ -27,7 +27,7 @@
   "required_checks": [
     "node --test scripts/lib/orchestrator-admission.test.mjs",
     "node --test scripts/check-orchestrator-marker.test.mjs",
-    "node --test scripts/lib/orchestrator-routing.test.mjs",
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
     "node scripts/check-throughput-truth-audit.mjs",
     "git diff --check"
   ],
