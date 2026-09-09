@@ -1,44 +1,55 @@
 {
   "schema_version": 1,
-  "work_issue": 2635,
+  "work_issue": 2501,
   "outcome": "ready-for-merge",
-  "pr": 2637,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2635/2",
-  "contract_sha256": "74ac55e01cc23b6bbc0a4f9e58ba39473332f3f8305670d163a2d26de8bf4d5a",
-  "head_sha": "7f9e028069d4d30d33915967ca8e70345c4acc05",
-  "evidence_note": "head_sha deliberately names the implementation head immediately before this metadata pair, as agent-work-contract-git-evidence requires; only .agent/contract.json and .agent/completion.json follow it. The branch was reconciled to exact current main e149bd0b before generation 2. No database or production state was read or changed.",
-  "files_changed": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh"
+  "pr": 2527,
+  "migration_versions": [
+    "20260907154630"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2501/1",
+  "contract_sha256": "0d679ca506b6ab4e813dcb8f11a4325703ca14e9771c9a5f13c1486d3416ae65",
+  "head_sha": "6af9f8c1f8b3a938469f0811e877c53edd311318",
+  "files_changed": [
+    "supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+  ],
+  "db_reads": [
+    "table public.assets",
+    "table public.style_groups",
+    "table public.asset_effective_tags",
+    "function public.get_effective_filter_counts_unchecked_1703",
+    "function public.require_dam_access",
+    "function public.assets_thumbnail_min_date"
+  ],
+  "db_writes": [
+    "function public.get_filter_counts",
+    "function public.get_effective_filter_counts",
+    "function public.filter_effective_assets"
+  ],
   "checks": [
     {
-      "command": "bash scripts/tests/test-task-gates.sh",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "10 passed / 0 failed at implementation head 7f9e0280 after current-main reconciliation: prose, code, rulebook, Supabase config, and migration classification; three protected bypass refusals; valid shipping flow; and a rollback positive control with unchanged source hash."
+      "evidence": "Static SQL guards passed after the normal current-main merge; the migration and both durable contracts retain the 8s timeout, force_custom_plan, and mutually exclusive tag-leading list arm. Live-ledger input was intentionally absent because this preparation performed no shared database write."
     },
     {
-      "command": "git diff --check origin/main...HEAD",
+      "command": "PYTHONPATH=scripts python3 -m unittest scripts.test_check_pass2_routine_supersession scripts.test_migration_derivation scripts.test_production_catalog_verification",
       "exit_code": 0,
-      "evidence": "No whitespace errors against exact generation-2 merge base e149bd0bac3a."
+      "evidence": "247 tests passed in 4.708s, including the successful-routine provenance regression that prevents pass-2 from restoring obsolete helper bodies."
     },
     {
-      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
       "exit_code": 0,
-      "evidence": "Contract is valid; immutable ref refs/db-contracts/2635/2 read back at e307942e with contract hash 74ac55e0."
+      "evidence": "44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo on the refreshed implementation."
     }
   ],
   "assumptions_resolved": [
-    "The pull request merge base is exact origin/main e149bd0bac3a, matching generation 2.",
-    "The central engine source is public popcre/ai-devops and is pinned in CI to merged commit 4d83f9a5.",
-    "All 77 pre-pilot router headings remain reachable and one new Task declaration heading makes 78 current headings across AGENTS, HANDOFF, and README.",
-    "The task-gate fixture performs no external mutation and its rollback changes only a disposable local policy copy."
+    "Current origin/main fe5fa74db889652768029116e636f8cbe69b955e was integrated by normal merge at implementation head 6af9f8c1f8b3a938469f0811e877c53edd311318; current main is its second parent and a proven ancestor.",
+    "PR #2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3 remains in ancestry, preserving the successful-routine provenance repair.",
+    "The migration and two contract-test Git blobs remain exactly 27d0e83f2eab3375c6ca182fc08dd3bd7b44cea7, 2f0f3db38b639a124dcdc2698c615b43e4b6e7a0, and c45a25a84356e5340a84e73e36a2cef2c8bc8a6a; no implementation bytes, object scope, claim, or reserved version changed.",
+    "No local or recorded remote worker remained for this branch, and no active reviewer/ref targeted the inherited c952b31f head before ownership was taken.",
+    "Independent exact-head review, representative authenticated cold/warm preview, guarded merge, production apply, and authenticated API count/latency acceptance remain pending under the coordinator."
   ],
   "stop_conditions_hit": []
 }
