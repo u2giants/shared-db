@@ -26,6 +26,14 @@ An assortment head and a prepack member are different business objects. The asso
 
 Assortment membership is the controlling test, not the shape of the style number. Style-number length and format correlate with assortment status but misclassify in both directions and must not be used as the rule. Measured on 2026-09-07, the shape heuristic missed **41** assortments carrying normal-looking item numbers and wrongly discarded genuine components. Replacing it with the stock record's own `prepackCode` gave **1,846** prepack heads and **4,662** prepack members with only **3** items in both sets — effectively disjoint, and decidable from evidence rather than from a guess.
 
+### Source authority: ColdLion outranks DesignFlow
+
+**Settled — Albert Hazan, 2026-09-08, given in session and recorded here because it existed nowhere in the repository.** ColdLion is always authoritative over DesignFlow. Where the two disagree on any item fact, ColdLion wins; DesignFlow is a downstream copy and is never the reason to keep a value ColdLion contradicts.
+
+This settles how prepack codes are sourced. The 1,454 prepack codes visible today on the frozen item-master snapshot reached us through DesignFlow, which had itself taken them from ColdLion's own nightly prepack association sync — so the apparent conflict was never ColdLion missing the data, only our reading it at second hand. ColdLion's stock feed carries roughly 7,161 prepack-bearing rows, about five times more. The correct move is therefore to cut over to ColdLion and build the missing loader, not to hold the cutover to protect the stale copy. The loader is tracked at u2giants/popdam3#114; the destination column already exists and is empty.
+
+Do not write placeholder text into a prepack code field to mark rows for later. A placeholder is indistinguishable from a real code to every consumer that reads the column, and an empty column with a tracked loader is the honest state.
+
 ### Prepack head and prepack member are two different fields
 
 **Verified 2026-09-07. This matters for prepack work in flight.**
