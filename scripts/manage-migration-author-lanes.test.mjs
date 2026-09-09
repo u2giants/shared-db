@@ -6670,3 +6670,57 @@ test('a standing verdict with a genuinely different record still refuses, and is
   assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/must not be voided/)
   assert.deepEqual(error.verdictArtifactCreated,{ref:'refs/db-review-verdicts/2355-2415-'+'a'.repeat(40),sha:'b'.repeat(40),confirmed:true})
 })
+
+// #2311. Both refusals below used to name a menu of possible causes and leave the
+// operator to guess. In the field that cost real time twice: a closed work issue
+// with an open PR was reported as a head change that had not happened, and a
+// verdict recorded against an orchestrator-marker number was reported as a lease
+// the reviewer did in fact hold. Each test asserts the specific cause AND that the
+// misleading alternative is not what the message blames.
+test('#2311 a closed work issue with an open PR says so, and does not blame the head',()=>{
+  const io=mergedPrIo(),openPr={state:'open',merged:false,merge_commit_sha:'',head:{sha:MERGED_HEAD}}
+  io.getPr=()=>openPr
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'closed'},pr:openPr,evidence:[]}]))
+  let error=null
+  assert.throws(()=>{try{assignNextReviewer(mergedRequest,io)}catch(caught){error=caught;throw caught}},/changed after mutex acquisition/)
+  assert.match(error.message,/work issue #1769 is closed while PR #1809 is still open/)
+  assert.match(error.message,/Reopen issue #1769, or merge the pull request first/)
+  assert.match(error.message,/orchestrator marker rather than the work issue/)
+  assert.doesNotMatch(error.message,/head is now/,'the head did not move, so the refusal must not say it did')
+})
+
+test('#2311 a head that really did move is named with both SHAs, not the issue state',()=>{
+  const io=mergedPrIo(),moved={state:'open',merged:false,merge_commit_sha:'',head:{sha:'c'.repeat(40)}}
+  io.getPr=()=>moved
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:moved,evidence:[]}]))
+  let error=null
+  assert.throws(()=>{try{assignNextReviewer(mergedRequest,io)}catch(caught){error=caught;throw caught}},/changed after mutex acquisition/)
+  assert.match(error.message,new RegExp(`PR #1809 head is now ${'c'.repeat(40)}, not the requested ${MERGED_HEAD}`))
+  assert.doesNotMatch(error.message,/work issue #1769 is/,'the issue is open, so the refusal must not blame it')
+})
+
+test('#2311 a verdict refused on the active lease names the assignment the lease actually holds',()=>{
+  const other='e'.repeat(40)
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active/'))return other
+    return null
+  }})
+  io.commits.set(other,{message:'db-coordination reviewer-cursor sequence=8 reviewer=muse-spark-1.2-contributor issue=2320 pr=2415 head='+'a'.repeat(40)+' slot=1'})
+  let error=null
+  assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
+  assert.match(error.message,/active lease holds the assignment for issue #2320, PR #2415/)
+  assert.match(error.message,/this verdict is for issue #2355, PR #2415/)
+  assert.match(error.message,/an orchestrator marker is not the work issue/)
+})
+
+test('#2311 a reviewer with no active lease at all is told that, not told it holds a different one',()=>{
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    return null
+  }})
+  let error=null
+  assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
+  assert.match(error.message,/holds no active lease at all/)
+  assert.doesNotMatch(error.message,/the assignment for issue/,'there is no other assignment to name')
+})
