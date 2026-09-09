@@ -1,44 +1,65 @@
 {
   "schema_version": 1,
-  "work_issue": 2635,
+  "work_issue": 2507,
   "outcome": "ready-for-merge",
-  "pr": 2637,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2635/2",
-  "contract_sha256": "74ac55e01cc23b6bbc0a4f9e58ba39473332f3f8305670d163a2d26de8bf4d5a",
-  "head_sha": "7f9e028069d4d30d33915967ca8e70345c4acc05",
-  "evidence_note": "head_sha deliberately names the implementation head immediately before this metadata pair, as agent-work-contract-git-evidence requires; only .agent/contract.json and .agent/completion.json follow it. The branch was reconciled to exact current main e149bd0b before generation 2. No database or production state was read or changed.",
-  "files_changed": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh"
+  "pr": 2638,
+  "migration_versions": [
+    "20260909162929"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2507/2",
+  "contract_sha256": "98a098d7bb0b810ce65eab186506eb97ad78bc19fbf348be5812e7331195caf4",
+  "head_sha": "53bf9596e06872d9c4d0645c7b55d7984d6f3417",
+  "evidence_note": "The implementation head follows one merge from current main fe5fa74d and the repository's atomic claim-version supersession. Only this evidence pair follows it. No preview, production, review, or merge action was taken.",
+  "files_changed": [
+    "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
+    "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
+  ],
+  "db_reads": [
+    "table public.style_guide_files",
+    "function public.claim_style_guide_pdf_text"
+  ],
+  "db_writes": [
+    "table public.style_guide_pdf_text",
+    "function public.complete_style_guide_pdf_text_v2",
+    "table public.style_guide_search_documents"
+  ],
   "checks": [
     {
-      "command": "bash scripts/tests/test-task-gates.sh",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "10 passed / 0 failed at implementation head 7f9e0280 after current-main reconciliation: prose, code, rulebook, Supabase config, and migration classification; three protected bypass refusals; valid shipping flow; and a rollback positive control with unchanged source hash."
+      "evidence": "Static SQL checks passed after the sanctioned migration re-reservation; the new version sorts after current main and no prohibited verification read or EOL dependency was introduced. Live-ledger checks were not configured and are not claimed."
     },
     {
-      "command": "git diff --check origin/main...HEAD",
+      "command": "supabase test db supabase/tests/popsg_pdf_terminal_outcome_contracts.sql",
       "exit_code": 0,
-      "evidence": "No whitespace errors against exact generation-2 merge base e149bd0bac3a."
+      "evidence": "Hosted ephemeral PostgreSQL run 34377089006 executed the focused file at implementation head 53bf9596: all 6 issue #2507 assertions passed and rolled back; the complete database-contract job passed in 5m16s. The local invocation could not connect because this host has no Docker runtime, so the isolated hosted result is the retained runtime proof."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid; immutable ref refs/db-contracts/2635/2 read back at e307942e with contract hash 74ac55e0."
+      "evidence": "Generation-2 recovery contract is valid and immutable ref refs/db-contracts/2507/2 read back at 6e7f7a13 with canonical hash 98a098d7."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors against exact current-main merge base fe5fa74db889652768029116e636f8cbe69b955e."
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "exit_code": 0,
+      "evidence": "Claim #2578 verified for issue #2507 at reserved version 20260909162929."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "Status OK; the new migration has no catalog-only verification markers requiring a production sidecar."
     }
   ],
   "assumptions_resolved": [
-    "The pull request merge base is exact origin/main e149bd0bac3a, matching generation 2.",
-    "The central engine source is public popcre/ai-devops and is pinned in CI to merged commit 4d83f9a5.",
-    "All 77 pre-pilot router headings remain reachable and one new Task declaration heading makes 78 current headings across AGENTS, HANDOFF, and README.",
-    "The task-gate fixture performs no external mutation and its rollback changes only a disposable local policy copy."
+    "The branch was reconciled once to exact current main fe5fa74db889652768029116e636f8cbe69b955e before verification.",
+    "The atomic recovery expanded claim #2578 to both new columns and renewed it through 2026-09-10T04:24:50.384Z.",
+    "The atomic supersession retained permanent reservation 20260908134917 and added reserved version 20260909162929 without changing SQL behavior.",
+    "The hosted isolated contract run proves extracted, failed, skipped, stale-content, spent-claim, role-grant, and single-document refresh behavior without touching preview or production."
   ],
   "stop_conditions_hit": []
 }

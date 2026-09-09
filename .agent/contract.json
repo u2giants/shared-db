@@ -1,54 +1,56 @@
 {
   "schema_version": 1,
-  "work_issue": 2635,
   "generation": 2,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Pilot the Issue 335 Phase 3 task-gate consumer contract in shared-db with protected structure paths, an operative rulebook route, CI enforcement, no-loss evidence, and a no-state rollback rehearsal.",
-  "base_sha": "e149bd0bac3aae0b3172468ec9b4a95fa2bc3a0d",
-  "dispatcher": "Albert Hazan via the current Codex Issue 335 continuation",
-  "worker": "Codex root task 01a08610-e776-7ac2-9f76-d0e37782e6d2",
-  "branch": "codex/issue-335-phase3-task-gates-01a086",
-  "worktree": "C:/repos/shared-db-worktrees/issue-335-phase3-task-gates-01a086",
+  "work_issue": 2507,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Recover the inherited PopSG PDF v2 terminal-outcome change under the current orchestrator, preserving its behavior while re-reserving its migration after current-main reconciliation.",
+  "base_sha": "fe5fa74db889652768029116e636f8cbe69b955e",
+  "dispatcher": "codex orchestrator marker 2629",
+  "worker": "codex issue_2507 recovery",
+  "branch": "codex/issue-2507-popsg-pdf-v2",
+  "worktree": "C:/repos/shared-db-2507",
   "allowed_paths": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
+    "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
   ],
   "file_writes": [
-    ".ai-devops/task-gates.json",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "docs/verification/phase-3-task-gates-pilot.md",
-    "scripts/tests/test-task-gates.sh",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
+    "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "table public.style_guide_files",
+    "function public.claim_style_guide_pdf_text"
+  ],
+  "db_writes": [
+    "table public.style_guide_pdf_text",
+    "function public.complete_style_guide_pdf_text_v2",
+    "table public.style_guide_search_documents"
+  ],
   "prohibited_actions": [
-    "No database read or write, migration author claim, preview apply, or production promotion",
-    "No direct push to main, required-check weakening, or merge before exact-head independent review",
-    "No change outside the seven named files"
+    "Do not start an extraction workload, corpus rebuild, or data backfill.",
+    "Do not change or remove the existing complete_style_guide_pdf_text RPC.",
+    "Do not apply to preview or production, review or merge the pull request, or touch licensed data.",
+    "Do not broaden grants beyond service_role or alter unrelated queue work."
   ],
   "required_checks": [
-    "bash scripts/tests/test-task-gates.sh",
-    "git diff --check origin/main...HEAD",
-    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
+    "bash scripts/check-sql.sh",
+    "supabase test db supabase/tests/popsg_pdf_terminal_outcome_contracts.sql",
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+    "git diff --check"
   ],
   "assumptions": [
-    "popcre/ai-devops is the public source of truth for the central gate engine and commit 4d83f9a5 is immutable",
-    "The 77 pre-pilot router headings remain reachable and one Task declaration heading is added, for 78 current headings across AGENTS, HANDOFF, and README",
-    "Albert authorized this cross-repository pilot in the current ai-devops Issue 335 continuation; generation 2 was published after reconciling current main and before the replacement exact-head governed review"
+    "Migration 20260905104802 remains the base PDF contract and its existing completion RPC remains callable for staggered clients.",
+    "The sanctioned claim supersession from 20260908134917 to 20260909162929 changes only the reserved migration identity, not the SQL behavior.",
+    "A failed result remains transiently reclaimable under the existing maximum-attempt policy, while skipped and extracted results remain terminal until content identity changes."
   ],
   "stop_conditions": [
-    "Any scope expands into a database, migration, application-row, infrastructure, or production mutation",
-    "The central engine commit is unavailable or the focused fixture fails",
-    "origin/main moves so the recorded base is no longer the pull request merge base",
-    "A required check or exact-head independent reviewer refuses the final source"
+    "Stop if the implementation requires changing claim_style_guide_pdf_text or any database object outside claim 2578.",
+    "Stop if existing rows cannot be preserved without a backfill or destructive rewrite.",
+    "Stop before preview, external review, merge, or production promotion until the orchestrator explicitly releases that stage."
   ]
 }
