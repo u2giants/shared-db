@@ -4,6 +4,9 @@
 
 Measured from `origin/main` at `71fe95d64a7e` on 2026-09-09. No existing router
 text was trimmed; the one router change is a short route to the installed gate.
+Before guarded review the branch was reconciled to current `origin/main` at
+`e149bd0bac3a`; that intervening merge changed only the `.agent` evidence pair
+and two lane scripts, so these router measurements remain the exact baseline.
 
 | Surface | Before | After | Headings | SHA-256 |
 |---|---:|---:|---:|---|
