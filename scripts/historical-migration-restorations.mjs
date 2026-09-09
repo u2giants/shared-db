@@ -5,6 +5,22 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2501. The protected version and exact migration bytes were authored on
+  // PR #2527 before 20260907200221 reached main. This entry permits only those
+  // exact bytes to survive the backdated-version guard. It does not mark the migration
+  // preview-only or otherwise change its production eligibility.
+  '20260907154630': Object.freeze({
+    filename: 'supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql',
+    name: 'popdam_tag_totals_cold_plan',
+    statementBytes: 10781,
+    statementSha256: '08d1e2f6a71c44c7231dcef4cacb60326dbd128491cefc6e753d59eea609c099',
+    fileSha256: '90f49bc0d9cb34e44f3a795f1b15c05add6edcb0a24c261852fa9a106f615ead',
+    objects: Object.freeze([
+      'function public.filter_effective_assets',
+      'function public.get_effective_filter_counts',
+      'function public.get_filter_counts',
+    ]),
+  }),
   // #2506. Preview applied these exact bytes in run 34290415305, dispatched at and
   // applied from PR #2542 head commit 281b967986b7cca99b13722f4d9ed3c988902c9d --
   // the same commit this branch still carries, so the file IS the applied body.

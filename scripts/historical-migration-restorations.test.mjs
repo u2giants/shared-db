@@ -3,6 +3,28 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HISTORICAL_RESTORATIONS, validateHistoricalProductionProvenance, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
+test('pins the issue 2501 restoration without changing production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260907154630']
+  assert.equal(row.filename,'supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql')
+  assert.equal(row.fileSha256,'90f49bc0d9cb34e44f3a795f1b15c05add6edcb0a24c261852fa9a106f615ead')
+  assert.equal(row.statementBytes,10781)
+  assert.equal(row.statementSha256,'08d1e2f6a71c44c7231dcef4cacb60326dbd128491cefc6e753d59eea609c099')
+  assert.equal(Object.isFrozen(row),true)
+  assert.deepEqual(row.objects,[
+    'function public.filter_effective_assets',
+    'function public.get_effective_filter_counts',
+    'function public.get_filter_counts',
+  ])
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260907154630_wrong.sql','select 1;'),
+    /not an approved exact historical restoration/,
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,'select 1;'),
+    /historical restoration file hash mismatch for 20260907154630/,
+  )
+})
+
 test('pins the issue 2506 preview restoration without granting production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260908214749']
   assert.equal(row.filename,'supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql')
