@@ -11,8 +11,10 @@
 --
 -- derived-from: the baseline body of queue_nightly_rebuild_style_groups() carried in
 -- supabase/ci-bootstrap/010_pre_adoption_baseline.sql. That function has no prior file
--- under supabase/migrations/; the baseline copy is its only source in this repository,
--- and the body below is re-derived from it line by line, not merged into.
+-- under supabase/migrations/; the baseline copy was its only source in this repository,
+-- and the body below is re-derived from it line by line, not merged into. This migration
+-- takes ownership of the function and removes that baseline copy -- see "THE CI BASELINE
+-- COPY IS REMOVED BY THIS CHANGE" below.
 --
 -- THE DEFECT (as recorded on #2440)
 -- ---------------------------------------------------------------------------------
@@ -160,9 +162,28 @@
 -- unreconciled completed run while the floor keeps the safety net. Nothing here has to be
 -- undone for that.
 --
--- ROLLBACK: a new forward migration restoring the baseline body from
--- supabase/ci-bootstrap/010_pre_adoption_baseline.sql, re-scheduling job 7 at `0 6 * * *`
--- and re-creating `nightly-reconcile-sg-asset-counts` at `45 3 * * *` with its original
+-- THE CI BASELINE COPY IS REMOVED BY THIS CHANGE
+-- ---------------------------------------------------------------------------------
+-- supabase/ci-bootstrap/010_pre_adoption_baseline.sql carried the pre-adoption body of
+-- queue_nightly_rebuild_style_groups() because no migration in this repository created
+-- that function. This migration creates it, so the baseline copy is deleted here.
+--
+-- This is not cosmetic. The "Database Contract Tests" lane applies the baseline BETWEEN
+-- the two migration replay passes (see .github/workflows/database-contract-tests.yml,
+-- "WHY BETWEEN THE PASSES AND NOT BEFORE PASS 1"). A migration that replaces a baseline
+-- routine and SUCCEEDS in pass 1 is therefore silently overwritten by the baseline's own
+-- CREATE OR REPLACE, and the suite then tests the pre-adoption body while every catalog
+-- and cron contract still passes. That is exactly what happened to this file: the
+-- requirement-1 contract failed because the OLD clock-driven body was the one running.
+-- The baseline's own instructions name this remedy -- "a migration has started creating
+-- an object the baseline also creates. Delete it from the baseline rather than leaving
+-- both." The two grants blocks are left in place; they are idempotent no-ops against the
+-- function this migration creates.
+--
+-- ROLLBACK: a new forward migration restoring the pre-adoption body, which is preserved
+-- in this repository's git history of supabase/ci-bootstrap/010_pre_adoption_baseline.sql
+-- immediately before this migration's commit, re-scheduling job 7 at `0 6 * * *` and
+-- re-creating `nightly-reconcile-sg-asset-counts` at `45 3 * * *` with its original
 -- command. The marker key can be left in admin_config harmlessly.
 --
 -- Contracts: supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql
