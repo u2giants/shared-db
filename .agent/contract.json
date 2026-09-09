@@ -13,7 +13,7 @@
     "Existing prediction rows must survive removal of the cascading legacy foreign key; ambiguous or missing historical identities remain visible and explicitly unresolved.",
     "Only service_role or an authenticated PopDAM administrator may change dismissal state, and raw source payloads remain unexposed."
   ],
-  "base_sha": "b436dcb7b6310075a48b6ea1594ffc1b7c8020b6",
+  "base_sha": "7fc819f9a773f97ad6cc74f9e5028d3ce76b0aa9",
   "branch": "codex/issue-2644-popdam-item-state",
   "db_reads": [
     "table plm.item",
@@ -41,7 +41,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 6,
+  "generation": 7,
   "goal": "Give PopDAM durable canonical item dismissal state and preserve category prediction history before the frozen ERP tables are retired.",
   "prohibited_actions": [
     "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
