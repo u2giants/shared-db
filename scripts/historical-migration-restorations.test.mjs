@@ -3,6 +3,34 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HISTORICAL_RESTORATIONS, validateHistoricalProductionProvenance, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
+test('pins the issue 2543 restoration without changing production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260909115140']
+  assert.equal(row.filename,'supabase/migrations/20260909115140_opa_coherent_complete_capture.sql')
+  assert.equal(row.fileSha256,'9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7')
+  assert.equal(row.statementBytes,61267)
+  assert.equal(row.statementSha256,'0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719')
+  assert.equal(Object.isFrozen(row),true)
+  assert.deepEqual(row.objects,[
+    'table plm.opa_capture',
+    'table plm.opa_capture_scope',
+    'table plm.opa_property_character_capture',
+    'function plm.begin_opa_capture',
+    'function plm.load_opa_capture_chunk',
+    'function plm.finalize_opa_capture',
+    'function api.source_capture_inventory_exact',
+    'table api.source_capture_inventory',
+    'view api.source_capture_inventory',
+  ])
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260909115140_wrong.sql','select 1;\n'),
+    /not an approved exact historical restoration/,
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,'select 1;\n'),
+    /historical restoration file hash mismatch for 20260909115140/,
+  )
+})
+
 test('pins the issue 2506 preview restoration without granting production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260908214749']
   assert.equal(row.filename,'supabase/migrations/20260908214749_popsg_search_v2_bounded_paging.sql')
