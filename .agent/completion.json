@@ -1,48 +1,44 @@
 {
   "schema_version": 1,
-  "work_issue": 2311,
+  "work_issue": 2635,
   "outcome": "ready-for-merge",
-  "pr": 2633,
+  "pr": 2637,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2311/1",
-  "contract_sha256": "cf3199d92391d915e21d6e36623ebea9a12e016877dc754077d8b60bf07da31e",
-  "head_sha": "1418482ee92fcd79824dea9dfe8934e8980f8e2a",
-  "evidence_note": "Text-only repair to two refusal messages in scripts/manage-migration-author-lanes.mjs plus four regression tests. No refusal CONDITION changed, no database object touched, and no migration added. files_changed lists the pull request's non-.agent diff, which is what the Git evidence check compares against; head_sha names the implementation commit that this evidence pair reports on.",
+  "contract_ref": "refs/db-contracts/2635/2",
+  "contract_sha256": "74ac55e01cc23b6bbc0a4f9e58ba39473332f3f8305670d163a2d26de8bf4d5a",
+  "head_sha": "7f9e028069d4d30d33915967ca8e70345c4acc05",
+  "evidence_note": "head_sha deliberately names the implementation head immediately before this metadata pair, as agent-work-contract-git-evidence requires; only .agent/contract.json and .agent/completion.json follow it. The branch was reconciled to exact current main e149bd0b before generation 2. No database or production state was read or changed.",
   "files_changed": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    ".ai-devops/task-gates.json",
+    ".github/workflows/task-gates.yml",
+    "AGENTS.md",
+    "docs/verification/phase-3-task-gates-pilot.md",
+    "scripts/tests/test-task-gates.sh"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "command": "bash scripts/tests/test-task-gates.sh",
       "exit_code": 0,
-      "evidence": "tests 486, pass 486, fail 0, duration_ms 2162. The suite held 482 tests before this change and none was edited, deleted or relaxed; the four added tests are #2311 cases. Re-run at head 1418482e."
+      "evidence": "10 passed / 0 failed at implementation head 7f9e0280 after current-main reconciliation: prose, code, rulebook, Supabase config, and migration classification; three protected bypass refusals; valid shipping flow; and a rollback positive control with unchanged source hash."
     },
     {
-      "command": "git diff --check",
+      "command": "git diff --check origin/main...HEAD",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors against exact generation-2 merge base e149bd0bac3a."
     },
     {
-      "command": "discrimination check: each added test also asserts the MISLEADING alternative is absent",
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "assert.doesNotMatch(/head is now/) on the closed-issue case, assert.doesNotMatch(/work issue #1769 is/) on the moved-head case, and assert.doesNotMatch(/the assignment for issue/) on the no-lease case. Without these a message that simply appended every cause at once would pass, which is the defect being repaired rather than a fix for it."
-    },
-    {
-      "command": "node scripts/check-pr-source-collisions.mjs (equivalent manual read of PROTECTED_SOURCE_PATHS against every open PR)",
-      "exit_code": 0,
-      "evidence": "scripts/manage-migration-author-lanes.mjs is the single member of PROTECTED_SOURCE_PATHS. All eight open pull requests at branch-cut time (2631, 2627, 2607, 2583, 2557, 2527, 2526, 2425) were queried with `gh pr view <n> --json files`; none touches that path, so this branch takes the protected source uncontended."
+      "evidence": "Contract is valid; immutable ref refs/db-contracts/2635/2 read back at e307942e with contract hash 74ac55e0."
     }
   ],
   "assumptions_resolved": [
-    "Both trap sites named by issue #2311 were located on origin/main at 71fe95d6 and neither had been repaired: reviewIssueEligible/assertReviewRequestEligible for trap 1, and the active-lease comparison inside recordReviewVerdict for trap 2.",
-    "The existing message prefixes are preserved, so the seven prior assertions matching /changed after mutex acquisition/ still pass unmodified and remain real coverage.",
-    "Neither cause helper issues a wire read. reviewTargetEligible charges against the fixed 25-request review budget through requireReviewWireCapacity, and a budget refusal raised from an error path would replace the real cause with its own; the helpers therefore re-inspect only the issue, PR and requested head already fetched by the caller.",
-    "reviewActiveLeaseCause parses the lease commit through the existing parseReviewCursor and falls back to naming the raw SHA if that commit is unreadable, so an unparseable lease still produces a specific message rather than throwing a second error over the first.",
-    "No refusal condition was changed. Every input that was refused before is still refused; only the reported reason is different.",
-    "Repo-maintenance under AGENTS.md 0.0-C. No database read or write, no migration version reserved, and no author-lane claim required."
+    "The pull request merge base is exact origin/main e149bd0bac3a, matching generation 2.",
+    "The central engine source is public popcre/ai-devops and is pinned in CI to merged commit 4d83f9a5.",
+    "All 77 pre-pilot router headings remain reachable and one new Task declaration heading makes 78 current headings across AGENTS, HANDOFF, and README.",
+    "The task-gate fixture performs no external mutation and its rollback changes only a disposable local policy copy."
   ],
   "stop_conditions_hit": []
 }
