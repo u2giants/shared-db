@@ -27,6 +27,16 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 > independence, fresh mutex recheck, atomic transition and cleanup refusals are
 > unchanged.
 
+> **Silent-reclaim budget, 2026-09-10 (issue #2697).** The 25-request ceiling
+> here is unchanged and still governs assignment and replacement. It never
+> governed `--reclaim-silent-reviewer`, which was added later and whose request
+> count was never derived; charged against 25 it refused at request 24 every
+> time, so a dead reviewer lease could not be released. That path is now
+> measured and given its own derived ceiling of 28 (14 pre-mutex plus a
+> 14-request mutex-held section), with one duplicate fresh PR read removed
+> rather than paid for, in
+> `docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md`.
+
 > **Superseded ceiling, 2026-08-29 (issue #1812, PR #1813).** Everything below
 > was verified against a **19**-request ceiling, which was correct for a single
 > reviewer slot only. The mandatory second independent reviewer
