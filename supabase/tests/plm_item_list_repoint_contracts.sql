@@ -114,9 +114,9 @@ begin
       v_row.erp_updated_at, v_row.synced_at, v_row.source_system)
      is distinct from
      (v_legacy,'ZZ2466ITEM','ZZ2466ITEM','ZZ2466 DESCRIPTION','ZZCAT','ZZ01','ZZ06','ZZSIZE',
-      'ZZ2466LIC','ZZ2466PROP','ZZ001','ZZPACK1','["ZZPACK1", "ZZPACK2"]'::jsonb,true,
+      'ZZ2466LIC','ZZ2466PROP','ZZ001','ZZPACK1','["ZZPACK1", "ZZPACK2"]'::jsonb,false,
       '2024-05-06T07:08:09Z'::timestamptz,'2026-09-09T12:00:00Z'::timestamptz,'coldlion') then
-    raise exception '#2466: canonical mapping/legacy identity/prepack/dismissed contract failed: %', row_to_json(v_row);
+    raise exception '#2466/#2644: canonical mapping/legacy identity/prepack/PopDAM-owned dismissal contract failed: %', row_to_json(v_row);
   end if;
 
   insert into plm.item (item_number, description, source_system, source_id, raw)
@@ -162,7 +162,7 @@ begin
     raise exception '#2466: authenticated serving-view read returned % fixture rows, expected 3', v_count;
   end if;
 
-  raise notice '#2466 PASSED: 21 columns, protected authenticated serving, legacy identity, canonical mappings, direct prepacks, source filter, null attribution and dismissed state.';
+  raise notice '#2466/#2644 PASSED: 21 columns, protected authenticated serving, legacy identity, canonical mappings, direct prepacks, source filter, null attribution and PopDAM-owned dismissal state.';
 end;
 $$;
 
