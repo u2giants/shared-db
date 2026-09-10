@@ -7,7 +7,7 @@
   "db_writes": [],
   "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
   "file_writes": ["AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "generation": 7,
+  "generation": 8,
   "goal": "Publish a fresh-developer-grade closeout for orchestrator marker 2629 and correct the live rulebook's description of exact immutable non-ledger derivations without changing executable code or database state.",
   "prohibited_actions": ["No database, preview, production, cloud, migration-ledger, or migration-ref mutation", "Do not edit any SQL migration, script, workflow, or configuration", "Do not weaken derivation, review, handoff, merge, or cleanup safeguards", "Do not run the worktree reaper with --apply", "Do not close marker 2629 before this pull request merges"],
   "required_checks": ["node scripts/check-handoff-contract.mjs", "node --test scripts/check-handoff-contract.test.mjs", "git diff --check"],
