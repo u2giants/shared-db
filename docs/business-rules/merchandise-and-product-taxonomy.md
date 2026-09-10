@@ -120,7 +120,12 @@ name, instead of `merchGroup05`, the code. Before measuring a Licensor or
 Property population, check which field this rule names, then read that one. See
 [`unmapped-licensor-population.md`](unmapped-licensor-population.md).
 
-Merchandise-group codes are unique only inside their Division and merchandise-group type. `FR`, for example, has represented different kinds of object in different contexts and must never be resolved from the letters alone.
+For general merchandise-group entity resolution, codes are scoped by Division and
+merchandise-group type. `FR`, for example, has represented different kinds of object in
+different contexts and must never be resolved from the letters alone. **For the newer
+MG01–MG03 product hierarchy, JamieLynn confirmed 2026-09-10 that `mgCategory` is an
+additional scope:** values may recur across categories, but should be unique within the
+applicable division/category branch.
 
 MG10 means Demographic, also called Age Group, in the three current divisions. It is a flat attribute, not a level in the Product Type hierarchy. This library does not yet define the approved Age Group vocabulary; that vocabulary is **Unknown** until confirmed.
 
@@ -149,6 +154,39 @@ completion. Categories are resolved at read time and are not written onto item r
 | Garden | W Garden |
 
 Seven categories cover **twenty** MG01 Product Types. Category constrains dependent choices such as valid sizes. A Product Type may not belong to two categories unless the business explicitly changes this rule.
+
+### ColdLion merchandise-group detail identity — Settled vendor rule
+
+The settled POP rule above defines how POP resolves an item's `mgCategory`. JamieLynn
+confirmed on 2026-09-10 that the same category dimension is also part of ColdLion's
+`/merchGroupDetails` record identity. **`mgCategory` must be included.** Rows that share
+company, division, merchandise-group type and code but differ by category are separate
+ColdLion records; they are not rows for POP to merge or choose between. The business
+grain is therefore `(company, division, mgType, mgCategory, mgCode)`.
+
+JamieLynn also explained the business meaning: MG01–MG03 are the new codes and standards
+POP had ColdLion implement in early 2025. Some code values intentionally recur across
+categories, but they should be unique within the applicable division and category. The
+division and `mgCategory`, with the MG01 choice, determine which MG02 and MG03 values are
+valid. In plain terms, the same-looking code can mean different things in different
+category branches; category is a scope for the hierarchy, not a cosmetic label.
+
+This explains the live shape measured 2026-09-09/10: explicit `active=Y` and `active=N`
+requests for `companyCode=EDGEHOME` returned 1,384 rows (1,376 active and 8 inactive),
+while the old four-field projection produced only 1,038 combinations. Adding
+`mgCategory` produced 1,384 distinct five-field identities. No source payload is stored
+in this public repository.
+
+**Still Unknown:** JamieLynn asked for clarification on the exact `mgCode` reuse question,
+and said the possible placeholder rows came from a sheet provided to Brian but she does
+not believe they are used. That recollection does not establish a current loader rule.
+Her note that Uma helped make DesignFlow and ColdLion consistent confirms shared
+cross-system standards and reduced redundancy, but does not authorize collapsing any
+category-specific ColdLion rows or settle blank-description/placeholder semantics.
+
+**Historical evidence:** an older 2026-07-23 sample found `mgCategory` empty on the
+sampled detail rows. That observation is retained as historical and does not override the
+current live result.
 
 The category names shown above are migration-authoritative display labels. A governed
 rewording ships in a new `shared-db` migration; replay intentionally restores the declared
