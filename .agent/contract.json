@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 1,
+  "generation": 2,
   "work_issue": 2579,
   "work_type": "structural",
   "route": "exclusive-db-lane",
@@ -15,6 +15,7 @@
     ".agent/contract.json",
     ".github/workflows/shared-supabase-migrations.yml",
     "config/db-data-admin-property-source-coverage.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/check-db-data-admin-property-source-coverage.mjs",
     "scripts/check-db-data-admin-property-source-coverage.test.mjs",
@@ -32,6 +33,7 @@
     ".agent/contract.json",
     ".github/workflows/shared-supabase-migrations.yml",
     "config/db-data-admin-property-source-coverage.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/check-db-data-admin-property-source-coverage.mjs",
     "scripts/check-db-data-admin-property-source-coverage.test.mjs",

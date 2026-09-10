@@ -6,12 +6,15 @@
   "migration_versions": [
     "20260910155753"
   ],
-  "contract_ref": "refs/db-contracts/2579/1",
-  "contract_sha256": "341e995ae50777acd9bb8d6d0b4f9dd00459d9c2c6272a27ab060d73ee17ff14",
-  "head_sha": "a800290a6ecd1545d435cc1928a522815ca4c2d5",
+  "contract_ref": "refs/db-contracts/2579/2",
+  "contract_sha256": "f31170e56c5d7f8078b9cd05a0bea6c1c4e66c7f837af94e3184599ed557b2e2",
+  "head_sha": "6233a9886f2e28e81e8b252282207bac48b3be1a",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/shared-supabase-migrations.yml",
     "config/db-data-admin-property-source-coverage.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/check-db-data-admin-property-source-coverage.mjs",
     "scripts/check-db-data-admin-property-source-coverage.test.mjs",
@@ -84,7 +87,9 @@
     "This repository is public. The migration, the tests, the manifest and the validator output contain no licensed label, row, URL, contract or raw evidence; every value in the contract test is invented (ZZTEST / example.invalid).",
     "Three files outside the original object claim were changed because a repository guard demands it and refuses otherwise: docs/verification/throughput-guard-truth-baseline-20260828.json (detector source hash), scripts/production_business_risk_gate.py (mandatory producer-path registration) and .github/workflows/shared-supabase-migrations.yml (wiring the new validator into CI so it is a gate). None of them weakens a guard.",
     "A defect found and fixed during implementation: the finalize loader originally recorded a completeness rejection and then raised, which would have rolled the rejection back and left the capture in 'loading'. It now returns the rejection payload, so the refusal is durable.",
-    "A second defect found and fixed: the contract test's negative check used the literal '_inferred_', which can never match the real table names ending in '_inferred'. It now names plm.wwe_asset_property_inferred, plm.wwe_character_property_inferred and plm.wwe_style_guide_property_inferred exactly."
+    "A second defect found and fixed: the contract test's negative check used the literal '_inferred_', which can never match the real table names ending in '_inferred'. It now names plm.wwe_asset_property_inferred, plm.wwe_character_property_inferred and plm.wwe_style_guide_property_inferred exactly.",
+    "CI repair after the first push: the api.source_capture_inventory view body still carried the `and (p_table_name is null or c.relname = p_table_name)` predicate copied from api.source_capture_inventory_exact. A view takes no parameter, so the entire migration aborted with `column \"p_table_name\" does not exist` and never applied. That single error produced all four database contract failures - the TrackerPlus landing tables were never created, and the pre-existing view kept classifying every plm.marvel_* and plm.wwe_* table as 'other'. The predicate was removed from the view only; the function keeps it, and no contract expectation was changed to make a test pass.",
+    "The claim on issue #2679 was amended through the supported path `--expand-active-claim-from-pr`, never by hand, adding the two TrackerPlus staff-read policies and api.source_capture_inventory as declared writes. Contract generation 2 (refs/db-contracts/2579/2) adds docs/verification/throughput-guard-truth-audit-20260828.json to allowed_paths: the truth-audit inventory needed the one new call site introduced by scripts/check-db-data-admin-property-source-coverage.mjs:188, which reports the reserved migration missing only after a direct fs.existsSync test, so it is dispositioned 'excluded'."
   ],
   "assumptions_resolved": [
     {
@@ -128,5 +133,6 @@
       "detail": "scripts/test_migration_derivation.py failed naming api.source_capture_inventory and api.source_capture_inventory_exact until -- derived-from: 20260909115140 was added; the suite then reported 44 passed."
     }
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "generation": 2
 }
