@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict } from './manage-migration-author-lanes.mjs'
+import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, MAX_REVIEWER_CONCURRENCY, reviewerLeaseCount, describeReviewerAtCap, reviewActiveRefs, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -877,15 +877,40 @@ test('merged-head replacement reuses the bounded target snapshot instead of rere
 // fabricated reviews, Codex on 2026-09-06 for an exhausted account), so this
 // fixture occupies whatever ACTIVE_REVIEWERS currently holds. All-busy must fail
 // closed.
+// True when `busy` shows the reviewer holding at least one live lease. Since
+// #2693 `busy.has()` answers a different question -- "is this reviewer AT the
+// per-reviewer concurrency cap" -- so liveness checks must count leases.
+const holdsLiveLease=(busy,name)=>reviewerLeaseCount(busy,name)>0
+
+// Fills every still-free slot of `name` with an unrelated live lease so the
+// reviewer sits AT MAX_REVIEWER_CONCURRENCY (#2693). Pool-exhaustion fixtures
+// used to park a single lease per reviewer; that is no longer exhaustion.
+function parkReviewerAtCap(io,heads,name,index){
+  for(let slot=1;slot<=MAX_REVIEWER_CONCURRENCY;slot+=1){
+    const ref=reviewActiveRef(name,slot)
+    if(io.refs.has(ref))continue
+    const issue=7000+index*10+slot,pr=8000+index*10+slot,headSha=`ba${index}${slot}`.padEnd(40,'0')
+    heads.set(pr,headSha)
+    io.refs.set(ref,io.makeOwnerCommit(`db-coordination reviewer-lease generation=${index+1} reviewer=${name} issue=${issue} pr=${pr} head=${headSha} sequence=${9000+index*10+slot}`))
+  }
+}
+
 function busyIo(){
-  // Each active rotation reviewer holds one live assignment: an open PR, still
-  // at the head it was given, with no verdict recorded.
+  // Each active rotation reviewer is filled to the per-reviewer concurrency cap
+  // (#2693): MAX_REVIEWER_CONCURRENCY live assignments, each an open PR still at
+  // the head it was given, with no verdict recorded. Before #2693 one lease per
+  // reviewer exhausted the pool; now it takes the cap, and that is the point.
   const io=reviewIo(), heads=new Map()
   ACTIVE_REVIEWERS.forEach((row,index)=>{
     const issue=500+index, pr=600+index, headSha=`fee${index}`.padEnd(40,'0')
     heads.set(pr,headSha)
     const sha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=${index+1} reviewer=${row.name} issue=${issue} pr=${pr} head=${headSha} sequence=${index+1}`)
     io.refs.set(reviewActiveRef(row.name),sha)
+    for(let slot=2;slot<=MAX_REVIEWER_CONCURRENCY;slot+=1){
+      const otherIssue=500+index+100*slot,otherPr=600+index+100*slot,otherHead=`fee${index}${slot}`.padEnd(40,'0')
+      heads.set(otherPr,otherHead)
+      io.refs.set(reviewActiveRef(row.name,slot),io.makeOwnerCommit(`db-coordination reviewer-lease generation=${index+1} reviewer=${row.name} issue=${otherIssue} pr=${otherPr} head=${otherHead} sequence=${900+index*10+slot}`))
+    }
   })
   io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:heads.get(Number(number))??'abcdef9'}})
   return {io,heads}
@@ -1525,9 +1550,13 @@ test('released slot-2 replacement with slot-1 approval and a reinstated reviewer
   // The next rotation candidate is busy elsewhere, making the freshly
   // reinstated Grok record materially necessary to the successful draw.
   const busyReviewers=['muse-spark-1.3-contributor','gemini-3.8-flash-high']
+  // #2693: "busy elsewhere" means AT the per-reviewer concurrency cap, so each
+  // of these names holds MAX_REVIEWER_CONCURRENCY unrelated live leases.
   for(const [index,name] of busyReviewers.entries()){
-    const busySha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${name} issue=9550 pr=${busyPr} head=${busyHead} sequence=${9550+index}`)
-    io.refs.set(reviewActiveRef(name),busySha)
+    for(let slot=1;slot<=MAX_REVIEWER_CONCURRENCY;slot+=1){
+      const busySha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${name} issue=${9550+index*10+slot} pr=${busyPr} head=${busyHead} sequence=${9550+index*10+slot}`)
+      io.refs.set(reviewActiveRef(name,slot),busySha)
+    }
   }
   const unrelatedRetiredSha=io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${retiredName} issue=${busyPr} pr=${busyPr} head=${busyHead} sequence=9549`)
   io.refs.set(reviewActiveRef(retiredName),unrelatedRetiredSha)
@@ -1699,8 +1728,13 @@ test('replacement retry never overwrites an unrelated live successor lease',()=>
   const first=replaceFailedReviewer(replacementRequest,io),replacementRef=reviewActiveRef(first.reviewer)
   const liveSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=88 reviewer=${first.reviewer} issue=88 pr=188 head=${failedReview.headSha}`)
   io.refs.set(replacementRef,liveSha);io.refs.set(failedRef,failedSha)
-  assert.throws(()=>replaceFailedReviewer(replacementRequest,io),/unrelated live lease/)
-  assert.equal(io.refs.get(replacementRef),liveSha);assert.equal(io.refs.get(failedRef),failedSha)
+  // #2693: the successor is still UNDER MAX_REVIEWER_CONCURRENCY, so the retry
+  // parks its lease in a free slot rather than refusing. The invariant under
+  // test is unchanged: the unrelated live lease is never overwritten.
+  const retry=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(retry.reviewer,first.reviewer)
+  assert.equal(io.refs.get(replacementRef),liveSha,'the unrelated live lease must survive untouched')
+  assert.ok(reviewActiveRefs(first.reviewer).slice(1).some((ref)=>io.refs.get(ref)===retry.replacementSha),'the retry must land in a different slot')
 })
 
 test('replacement refuses a PR close arriving after mutex acquisition',()=>{
@@ -2084,6 +2118,10 @@ test('replacement exhausts the active rotation, then refuses',()=>{
 test('release frees a terminally failed lease when every reviewer slot is full',()=>{
   const io=failedReviewIo()
   for(let n=0;n<ACTIVE_REVIEWERS.length-1;n+=1)assignNextReviewer({issue:2100+n,pr:2200+n,headSha:`${n+1}`.repeat(40)},io)
+  // "every reviewer slot is full" now means every reviewer is AT the
+  // per-reviewer concurrency cap (#2693), not holding a single lease.
+  const parked=new Map()
+  ACTIVE_REVIEWERS.forEach((row,index)=>parkReviewerAtCap(io,parked,row.name,index+60))
   io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
   io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
   io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
@@ -2093,8 +2131,9 @@ test('release frees a terminally failed lease when every reviewer slot is full',
   try{replaceFailedReviewer(replacementRequest,io)}catch(error){refusal=error}
   assert.match(refusal?.message??'',/no replacement reviewer is available|no other reviewer is available/)
   assert.match(refusal.message,new RegExp(`1 of ${ACTIVE_REVIEWERS.length} already failed on this exact head`))
-  assert.match(refusal.message,new RegExp(`${ACTIVE_REVIEWERS.length-1} of ${ACTIVE_REVIEWERS.length} hold other live leases`))
-  assert.match(refusal.message,/glm-5\.3 #2100\/PR #2200/)
+  assert.match(refusal.message,new RegExp(`${ACTIVE_REVIEWERS.length-1} of ${ACTIVE_REVIEWERS.length} reached the per-reviewer concurrency cap MAX_REVIEWER_CONCURRENCY=${MAX_REVIEWER_CONCURRENCY}`))
+  assert.match(refusal.message,new RegExp(`glm-5\.3 ${MAX_REVIEWER_CONCURRENCY}/${MAX_REVIEWER_CONCURRENCY}`))
+  assert.match(refusal.message,/#2100\/PR #2200/)
   const cursorBefore=io.refs.get(REVIEW_CURSOR_REF)
   const released=releaseFailedReviewer(replacementRequest,io)
   assert.equal(released.reviewer,'grok-4.6')
@@ -2161,7 +2200,7 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   io.readReviewStates=()=>states
   const before=new Map(io.refs),report=reviewerCapacityReport(io,now)
   assert.deepEqual(report.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','live'])
-  assert.deepEqual(report.summary,{total:6,free:0,live:3,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(report.summary,{total:6,reviewers:6,atCap:0,free:0,live:3,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
   assert.deepEqual(io.refs,before,'capacity report must be read-only')
   // The OTHER route to 'stale-reclaimable': the reviewed head moved out from
   // under a lease this same pass just called live. No recorded verdict involved.
@@ -2175,7 +2214,7 @@ test('capacity report classifies free, live, stale, aged, and unknown leases wit
   snapshot.delete(reviewActiveRef(freed));io.refs.delete(reviewActiveRef(freed))
   const withFree=reviewerCapacityReport(io,now)
   assert.deepEqual(withFree.reviewers.map((row)=>row.classification),['live','stale-reclaimable','suspect-aged','unknown','stale-reclaimable','free'])
-  assert.deepEqual(withFree.summary,{total:6,free:1,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
+  assert.deepEqual(withFree.summary,{total:6,reviewers:6,atCap:0,free:1,live:2,reclaimable:2,silenceProbed:0,silenceReclaimable:0,unknown:1})
 })
 
 function silentLeaseIo({heldSince='2026-09-04T10:00:00Z',activity=[]}={}){
@@ -2234,10 +2273,9 @@ test('capacity reports a silence probe and only calls it reclaimable after confi
 
 test('silent reclaim frees a slot even when the entire reviewer pool is occupied',()=>{
   const fixture=silentLeaseIo(),heads=new Map([[fixture.request.pr,fixture.request.headSha]]),baseGetPr=fixture.io.getPr
-  ACTIVE_REVIEWERS.filter((row)=>row.name!==fixture.assigned.reviewer).forEach((row,index)=>{
-    const issue=2400+index,pr=2500+index,headSha=`${index+2}`.repeat(40),sha=fixture.io.makeOwnerCommit(`db-coordination reviewer-lease generation=${index+2} reviewer=${row.name} issue=${issue} pr=${pr} head=${headSha} sequence=${index+2}`)
-    fixture.io.refs.set(reviewActiveRef(row.name),sha);heads.set(pr,headSha)
-  })
+  // Every reviewer sits at the per-reviewer concurrency cap (#2693), including
+  // the silent one -- that is what "the entire pool is occupied" now means.
+  ACTIVE_REVIEWERS.forEach((row,index)=>{parkReviewerAtCap(fixture.io,heads,row.name,index+20)})
   fixture.io.getPr=(pr)=>heads.has(Number(pr))?{number:Number(pr),state:'open',draft:false,head:{sha:heads.get(Number(pr))}}:baseGetPr(pr)
   fixture.io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:fixture.io.getPr(lease.pr),evidence:[]}]))
   assert.equal(findBusyReviewers(fixture.io).size,ACTIVE_REVIEWERS.length)
@@ -2288,7 +2326,8 @@ test('an abandoned head-of-line reviewer ticket expires and cannot wedge later a
 test('a failed head-of-line assignment evacuates its own ticket immediately',()=>{
   const io=reviewIo(),request={issue:207,pr:307,headSha:'c'.repeat(40)}
   io.enableReviewerQueue=true;io.getPr=()=>({number:307,state:'open',head:{sha:request.headSha}})
-  for(const reviewer of ACTIVE_REVIEWERS){const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=20 reviewer=${reviewer.name} issue=999 pr=998 head=${'d'.repeat(40)}`);io.refs.set(reviewActiveRef(reviewer.name),sha)}
+  const parked=new Map()
+  ACTIVE_REVIEWERS.forEach((reviewer,index)=>parkReviewerAtCap(io,parked,reviewer.name,index+40))
   io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
   assert.throws(()=>assignNextReviewer(request,io),/no reviewer is available/)
   assert.equal(io.refs.has(`${REVIEW_QUEUE_REF_PREFIX}/207-307-1`),false)
@@ -4623,9 +4662,9 @@ test("a live slot-2 reviewer stays BUSY while slot 1 holds a verdict for the sam
   const busy=findBusyReviewers(io)
   assert.ok(busy,'busy scan must be readable')
   // Slot 1's reviewer is genuinely free -- its own verdict landed.
-  assert.ok(!busy.has(first.reviewer),`${first.reviewer} recorded slot 1's verdict and must be free`)
+  assert.ok(!holdsLiveLease(busy,first.reviewer),`${first.reviewer} recorded slot 1's verdict and must be free`)
   assert.ok(!busy.stale.some((row)=>row.assignment.reviewer===second.reviewer),`${second.reviewer} is still working slot 2 and must NOT be reclaimable`)
-  assert.ok(busy.has(second.reviewer),`${second.reviewer} still holds a live slot-2 lease and must stay busy`)
+  assert.ok(holdsLiveLease(busy,second.reviewer),`${second.reviewer} still holds a live slot-2 lease and must stay busy`)
   // The capacity report must tell the same story.
   const report=reviewerCapacityReport(io)
   const slotTwoRow=report.reviewers.find((row)=>row.reviewer===second.reviewer)
@@ -4633,7 +4672,7 @@ test("a live slot-2 reviewer stays BUSY while slot 1 holds a verdict for the sam
   assert.notEqual(slotTwoRow.classification,'stale-reclaimable')
   // And once slot 2 itself records a verdict, its reviewer frees normally.
   giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
-  assert.ok(!findBusyReviewers(io).has(second.reviewer))
+  assert.ok(!holdsLiveLease(findBusyReviewers(io),second.reviewer))
 })
 
 test("a sibling slot's verdict must NOT free a genuinely unknown-slot live lease (issue #2208 follow-up round 3)",()=>{
@@ -4653,16 +4692,16 @@ test("a sibling slot's verdict must NOT free a genuinely unknown-slot live lease
   giveVerdict(io,{issue,pr,headSha,slot:2})
   const busy=findBusyReviewers(io)
   assert.ok(busy,'busy scan must be readable')
-  assert.ok(busy.has('grok-4.6'),"a sibling slot's verdict must not free an unknown-slot lease")
+  assert.ok(holdsLiveLease(busy,'grok-4.6'),"a sibling slot's verdict must not free an unknown-slot lease")
   assert.ok(!busy.stale.some((row)=>row.assignment.reviewer==='grok-4.6'),'and it must not be reclaimable')
   assert.equal(reviewerCapacityReport(io).reviewers.find((row)=>row.reviewer==='grok-4.6').verdictPresent,false)
   // Holding it conservatively must not strand it: the ordinary releases still
   // work. The head moves...
   const moved={...io,getPr:()=>({number:pr,state:'open',head:{sha:'9'.repeat(40)}})}
-  assert.ok(!findBusyReviewers(moved).has('grok-4.6'))
+  assert.ok(!holdsLiveLease(findBusyReviewers(moved),'grok-4.6'))
   // ...or the PR closes.
   const closed={...io,getPr:()=>({number:pr,state:'closed',head:{sha:headSha}})}
-  assert.ok(!findBusyReviewers(closed).has('grok-4.6'))
+  assert.ok(!holdsLiveLease(findBusyReviewers(closed),'grok-4.6'))
 })
 
 test('a replacement lease STATES its slot even for slot 1, so its own verdict still frees it (issue #2208 follow-up round 3)',()=>{
@@ -4678,9 +4717,9 @@ test('a replacement lease STATES its slot even for slot 1, so its own verdict st
   const leaseSha=io.refs.get(reviewActiveRef(replacement.reviewer))
   assert.match(io.getCommit(leaseSha).message,/ slot=1 /,'a slot-1 replacement message must state its slot')
   assert.equal(parseReviewLease(io.getCommit(leaseSha)).slot,1)
-  assert.ok(findBusyReviewers(io).has(replacement.reviewer))
+  assert.ok(holdsLiveLease(findBusyReviewers(io),replacement.reviewer))
   giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:1})
-  assert.ok(!findBusyReviewers(io).has(replacement.reviewer),"its own slot's verdict must still free it")
+  assert.ok(!holdsLiveLease(findBusyReviewers(io),replacement.reviewer),"its own slot's verdict must still free it")
 })
 
 test('parseReviewLease reads the slot from the message form, and never guesses one (issue #2208 follow-up)',()=>{
@@ -5237,7 +5276,7 @@ test('a slot-2 verdict never frees a live slot-1 replacement (issue #2208)',()=>
   const replacement=replaceFailedReviewer(replacementRequest,io)
   giveVerdict(io,{issue:request.issue,pr:request.pr,headSha:request.headSha,slot:2})
   const busy=findBusyReviewers(io)
-  assert.ok(busy.has(replacement.reviewer))
+  assert.ok(holdsLiveLease(busy,replacement.reviewer))
   assert.equal(io.refs.get(reviewActiveRef(replacement.reviewer)),replacement.replacementSha)
   assert.deepEqual(replaceFailedReviewer(replacementRequest,io),replacement)
 })
@@ -5343,9 +5382,7 @@ test('a slot-2 replacement never falls back onto slot 1\'s own reviewer (issue #
   io.refs.delete(reviewActiveRef(slotOne.reviewer))
   const spent=new Set([slotOne.reviewer,slotTwo.reviewer,firstReplacement.reviewer])
   ACTIVE_REVIEWERS.filter((row)=>!spent.has(row.name)).forEach((row,index)=>{
-    const issue=700+index,pr=800+index,headSha=`ba${index}`.padEnd(40,'0')
-    heads.set(pr,headSha)
-    io.refs.set(reviewActiveRef(row.name),io.makeOwnerCommit(`db-coordination reviewer-lease generation=${index+1} reviewer=${row.name} issue=${issue} pr=${pr} head=${headSha} sequence=${900+index}`))
+    parkReviewerAtCap(io,heads,row.name,index)
   })
   assert.throws(()=>replaceFailedReviewer({...request,slot:2,failedSequence:firstReplacement.sequence,...failure},io),/no other independent reviewer is available for slot 2/)
   // Slot 1 is untouched by the refusal.
@@ -6723,4 +6760,48 @@ test('#2311 a reviewer with no active lease at all is told that, not told it hol
   assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
   assert.match(error.message,/holds no active lease at all/)
   assert.doesNotMatch(error.message,/the assignment for issue/,'there is no other assignment to name')
+})
+
+test('#2693 DIRTY: a reviewer holding leases on OTHER PRs is drawable up to MAX_REVIEWER_CONCURRENCY, then refused by name',()=>{
+  // The stall this fixes (PR #2681): four healthy reviewers sat idle because
+  // each already held ONE lease on a different PR. Holding other work must not
+  // disqualify a reviewer until it reaches the cap -- and at the cap the
+  // refusal must say WHICH cap and WHICH reviewer, not "no reviewer is
+  // available". The first draw below is hardcoded to ONE pre-held lease, so
+  // this test goes red against the old one-lease-per-reviewer rule (and against
+  // a MAX_REVIEWER_CONCURRENCY broken back down to 1) rather than following the
+  // constant wherever it is set.
+  assert.ok(MAX_REVIEWER_CONCURRENCY>=2,'#2693 requires a per-reviewer cap above one')
+  const heads=new Map(),io=reviewIo()
+  io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:heads.get(Number(number))??'0'.repeat(40)}})
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:io.getPr(lease.pr),evidence:[]}]))
+  const target=ACTIVE_REVIEWERS[0].name
+  // Everyone else is genuinely at the cap, so the only possible draw is the
+  // target -- which already holds a live lease on an unrelated PR.
+  ACTIVE_REVIEWERS.slice(1).forEach((row,index)=>parkReviewerAtCap(io,heads,row.name,index+100))
+  heads.set(26931,'2693'.padEnd(40,'0'))
+  io.refs.set(reviewActiveRef(target),io.makeOwnerCommit(`db-coordination reviewer-lease generation=1 reviewer=${target} issue=2694 pr=26931 head=${'2693'.padEnd(40,'0')} sequence=26901`))
+  const busyBefore=findBusyReviewers(io)
+  assert.equal(reviewerLeaseCount(busyBefore,target),1,'the target must already hold an unrelated live lease')
+  assert.equal(busyBefore.has(target),false,'one live lease is not the cap, so the reviewer is not busy')
+
+  const request={issue:2681,pr:2681,headSha:'26'.repeat(20)}
+  heads.set(request.pr,request.headSha)
+  const drawn=assignNextReviewer(request,io)
+  assert.equal(drawn.reviewer,target,'a reviewer holding one unrelated lease must still be allocatable')
+  assert.equal(reviewerLeaseCount(findBusyReviewers(io),target),2,'the new lease must sit beside the old one, not replace it')
+  assert.equal(io.refs.get(reviewActiveRef(target,2))!==undefined,true,'the draw must occupy a second lease slot')
+
+  // Fill the target's remaining slots and only then must it be refused -- by
+  // name, and by the name of the cap it hit.
+  parkReviewerAtCap(io,heads,target,200)
+  assert.equal(findBusyReviewers(io).has(target),true,'at the cap the reviewer is busy')
+  const next={issue:2695,pr:2696,headSha:'27'.repeat(20)}
+  heads.set(next.pr,next.headSha)
+  let refusal=null
+  try{assignNextReviewer(next,io)}catch(error){refusal=error}
+  assert.ok(refusal,'every reviewer is at the cap, so the allocation must be refused')
+  assert.match(refusal.message,new RegExp(`per-reviewer concurrency cap MAX_REVIEWER_CONCURRENCY=${MAX_REVIEWER_CONCURRENCY}`))
+  assert.ok(refusal.message.includes(`${target} ${MAX_REVIEWER_CONCURRENCY}/${MAX_REVIEWER_CONCURRENCY}`),`the refusal must name the reviewer and its lease count: ${refusal.message}`)
+  assert.equal(describeReviewerAtCap(findBusyReviewers(io),target).startsWith(`${target} ${MAX_REVIEWER_CONCURRENCY}/${MAX_REVIEWER_CONCURRENCY} (`),true)
 })
