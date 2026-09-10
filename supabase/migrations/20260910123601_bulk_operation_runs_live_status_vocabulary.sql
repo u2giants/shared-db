@@ -148,9 +148,12 @@
 --    only measures the enqueue (cron job 7 -- see 20260909202801).
 --
 -- ADDITIVE AND FIX-FORWARD. 20260909202801 is not edited. This migration alters only
--- public.bulk_operation_runs -- its constraints, one index it owns, one new column and
--- one new generated column. It touches no function, no policy, no grant, no cron entry
--- and no other table, and it read public.admin_config only for the analysis above.
+-- public.bulk_operation_runs -- its constraints, one index it owns, one new column,
+-- one new generated column, and the catalog descriptions of five of its columns
+-- (status, source_status, succeeded, error and progress: the last two are pre-existing
+-- columns whose descriptions this migration rewrites, and it changes nothing else
+-- about them). It touches no function, no policy, no grant, no cron entry and no other
+-- table, and it read public.admin_config only for the analysis above.
 
 alter table public.bulk_operation_runs
   drop constraint if exists bulk_operation_runs_status_check;
@@ -243,7 +246,8 @@ comment on column public.bulk_operation_runs.source_status is
 comment on column public.bulk_operation_runs.succeeded is
   'Generated, not null, and the ONE place that decides what success means -- the '
   'failures index and the failure-is-explained constraint both read this column, so '
-  'nothing else compares status to a literal. True for status = succeeded, and for '
+  'no query, alert or dashboard needs to compare status to a literal. True for '
+  'status = succeeded, and for '
   'status = completed ONLY when progress->''failed'' is the JSON number 0. completed '
   'means the run REACHED ITS END, not that nothing went wrong: PopDAM writes it for '
   'runs with per-item failures, so a completed run that reports failures, or that '
