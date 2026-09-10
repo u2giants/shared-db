@@ -1,21 +1,64 @@
 {
-  "allowed_paths": ["AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "assumptions": ["Marker 2629 remains the sole live orchestrator marker until this closeout pull request merges.", "The handoff tracks open continuation issue 2439 so it survives marker closure.", "The rulebook clarifications document the exact non-ledger mechanism already merged by PR 2653 and the enforced six-provider reviewer rotation; they do not change executable behavior.", "The closeout documentation began under the owner's instruction before this contract pair was required by the pull-request preflight; no database, preview, production, cloud, or coordination ref mutation is part of this contract."],
-  "base_sha": "dc1b3835860408f0f90b2c28d22d6fd5150360f8",
-  "branch": "codex/orch-2629-closeout",
-  "db_reads": [],
-  "db_writes": [],
-  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
-  "file_writes": ["AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "generation": 9,
-  "goal": "Publish a fresh-developer-grade closeout for orchestrator marker 2629 and correct the live rulebooks' descriptions of exact immutable non-ledger derivations and the enforced reviewer roster without changing executable code or database state.",
-  "prohibited_actions": ["No database, preview, production, cloud, migration-ledger, or migration-ref mutation", "Do not edit any SQL migration, script, workflow, or configuration", "Do not weaken derivation, review, handoff, merge, or cleanup safeguards", "Do not run the worktree reaper with --apply", "Do not close marker 2629 before this pull request merges"],
-  "required_checks": ["node scripts/check-handoff-contract.mjs", "node --test scripts/check-handoff-contract.test.mjs", "git diff --check"],
-  "route": "repo-session",
   "schema_version": 1,
-  "stop_conditions": ["The handoff omits an owner decision, live environment state, failed attempt, or worker stream", "The rulebook change would alter executable behavior or accept unproved derivation ancestry", "The pull request base moves before guarded merge", "Any new secret is found in the closeout delta"],
-  "work_issue": 2439,
-  "work_type": "documentation",
-  "worker": "codex orchestrator 2629 closeout",
-  "worktree": "C:/repos/shared-db-worktrees/orch-01a085f2"
+  "generation": 3,
+  "work_issue": 2576,
+  "work_type": "structural",
+  "route": "exclusive-db-lane",
+  "goal": "Serve DCP property-match review state by stable business identity: rewrite api.db_data_admin_property_match_queue to return one coherent review state per identity, retarget the copy-keyed creative-decision block inside api.db_data_admin_scraped_properties, and carry an identity decision state on api.db_data_admin_decide_property_match, with a hash-bound production verification sidecar covering both dynamic-execution markers.",
+  "base_sha": "1eaa20459253e54ecd7891b6f009eeb20c734f8d",
+  "dispatcher": "claude shared-db orchestrator marker 2669",
+  "worker": "claude issue 2576 dcp stable identity",
+  "branch": "claude/issue-2576-dcp-identity",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2576-dcp-identity",
+  "allowed_paths": [
+    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
+    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
+    "scripts/production-verification-sidecars/20260910123636.json",
+    "scripts/production_business_risk_gate.py",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
+    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
+    "scripts/production-verification-sidecars/20260910123636.json",
+    "scripts/production_business_risk_gate.py",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "db_reads": [
+    "plm.dcp_opa_property_resolution",
+    "plm.dcp_opa_property_resolution_member",
+    "plm.dcp_opa_scraped_property"
+  ],
+  "db_writes": [
+    "api.db_data_admin_property_match_queue",
+    "api.db_data_admin_scraped_properties",
+    "api.db_data_admin_decide_property_match"
+  ],
+  "prohibited_actions": [
+    "No preview or production apply, no workflow dispatch, no lane-manager run, no worktree reaper run",
+    "No merge of this pull request by the worker, and never gh pr merge --admin",
+    "Do not weaken, skip, edit or disable any workflow, guard script or required check",
+    "Do not edit any migration other than 20260910123636, and never edit an already-applied migration",
+    "No licensed or private licensor data in any file, commit message or issue comment; this repository is public"
+  ],
+  "required_checks": [
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "python -m unittest scripts.test_production_business_risk_gate",
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+    "git diff --check"
+  ],
+  "assumptions": [
+    "Docker is unavailable on this machine, so the full supabase/tests suite cannot be replayed locally; the ephemeral-database CI job is the first from-empty replay of this migration.",
+    "The two dynamic-execution markers rewrite routine bodies in place, and no verifier-owned catalog contract can read a routine body back, so both are reviewed as no_durable_target with the behaviour asserted by the repository contract test.",
+    "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
+    "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard."
+  ],
+  "stop_conditions": [
+    "A required check proves a real defect in the migration or its contract test",
+    "The migration would have to be edited after the hash-bound sidecar is published without regenerating it",
+    "The pull request base moves so that the reported files_changed no longer matches Git",
+    "Any check failure could only be cleared by weakening a guard, a workflow or a required check"
+  ]
 }
