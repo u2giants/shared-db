@@ -1,3 +1,9 @@
+---
+issue: 2326
+status: DONE
+owner: claude/five-oldest-open-issues-ad33ca
+---
+
 # Five oldest non-orchestrator issues — closeout
 
 - **UTC:** 2026-09-10T04:50Z
