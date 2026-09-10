@@ -142,7 +142,7 @@ export async function loadOpaPropertyOptions(client: ApiClient) {
       .select('licensed_property_id, opa_property_name')
       .order('opa_property_name')
       .range(from, from + pageSize - 1)
-    if (error) throw error
+    if (error) return loadOpaPropertyOptionsFromReviewSurface(client, error)
     const page = (data ?? []) as { licensed_property_id: number; opa_property_name: string | null }[]
     options.push(...page.filter(row => row.opa_property_name).map(row => ({
       licensed_property_id: Number(row.licensed_property_id),
@@ -151,6 +151,52 @@ export async function loadOpaPropertyOptions(client: ApiClient) {
     if (page.length < pageSize) break
   }
   return options
+}
+
+type ScrapedOpaRow = {
+  source_system?: string | null
+  source_id?: string | null
+  source_property_id?: string | null
+  display_name?: string | null
+  display_label?: string | null
+  source_property_name?: string | null
+}
+
+/**
+ * Licensing users already read this server-owned review surface in the adjacent
+ * Scraped Properties tab. Use it only when the lower-level reconciliation view
+ * is refused, keeping the full OPA picker without widening database privileges.
+ */
+async function loadOpaPropertyOptionsFromReviewSurface(client: ApiClient, directError: unknown) {
+  const options = new Map<number, string>()
+  let cursor: string | null = null
+  do {
+    const { data, error } = await client.rpc('db_data_admin_scraped_properties', {
+      p_search: null,
+      p_cursor: cursor,
+      p_page_size: 1000,
+    })
+    if (error) {
+      const directCode = errorCode(directError)
+      const fallbackCode = errorCode(error)
+      throw new Error(`Property options could not be loaded (${directCode}; fallback ${fallbackCode}).`)
+    }
+    const payload = (data ?? {}) as { rows?: ScrapedOpaRow[]; next_cursor?: string | null }
+    for (const row of payload.rows ?? []) {
+      if (!/_opa$/i.test(row.source_system ?? '')) continue
+      const id = Number(row.source_id ?? row.source_property_id)
+      const name = row.display_name ?? row.display_label ?? row.source_property_name
+      if (Number.isSafeInteger(id) && id > 0 && name?.trim()) options.set(id, name.trim())
+    }
+    cursor = payload.next_cursor ?? null
+  } while (cursor)
+  return [...options].map(([licensed_property_id, property_name]) => ({ licensed_property_id, property_name }))
+    .sort((a, b) => a.property_name.localeCompare(b.property_name) || a.licensed_property_id - b.licensed_property_id)
+}
+
+function errorCode(error: unknown) {
+  if (!error || typeof error !== 'object' || !('code' in error)) return 'unknown'
+  return String(error.code).replace(/[^A-Za-z0-9_-]/g, '').slice(0, 24) || 'unknown'
 }
 
 /** Why this row needs a human: no candidate, exactly one, or a choice between several. */
