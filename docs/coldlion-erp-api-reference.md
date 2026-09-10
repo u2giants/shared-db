@@ -50,6 +50,27 @@ re-pulled the same day (see the division matrix below).
 - **Company scope:** `companyCode=EDGEHOME` is the tenant. `divisionCode` (e.g. `EP001`,
   `SP001`) narrows further.
 
+> ### ✅ Re-verified 2026-09-10 — September API repairs are live
+>
+> ColdLion's response to the 2026-09-06 nine-section report was checked against the
+> running API, not accepted on email alone. `/inventory` now returns `companyCode` and
+> accepts working company/division filters. Unknown query names and invalid enum values
+> return HTTP 400. Omitted or empty `active` returns all master rows; omitted or empty
+> `stageCode` returns all production stages. `/pickticket` returns populated results, and
+> `/merchGroupDetails` again returns division-qualified dictionary rows.
+>
+> `createdTo` is inclusive on `/pickticket`: a one-day window returns a record created on
+> that day. `/receiving` has no rows in the available history, so it offers no comparable
+> direct proof and is not an active ingestion population. The live OpenAPI document now
+> attaches typed 200-response schemas to every GET operation, including the paged history
+> definitions. `/order` remains write-only and is outside POP's read integration.
+>
+> **Company/division guardrail.** The current tenant directory makes `EDGEHOME`/`SP001`
+> the Spruce Licensed source identity; its taxonomy, items and inventory agree. A small,
+> older `SPRUCE`/`SP001` item population has no inventory. Do not use it to change the
+> settled identity or infer a new company-to-division mapping. `active=Y` is not proof that
+> such an old catalogue row remains sellable.
+
 > ### ⚠️ Merch groups: read the taxonomy doc first
 > `mgTypeCode` has **no fixed meaning** — `05` is Licensor in CW001/SP001 but "Big Theme" in
 > EH001 and "Product Line" in EP001. Coldlion has **no licensor→property relationship**.
