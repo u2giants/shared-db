@@ -294,8 +294,11 @@ any of these as likely rather than surprising.**
 - **The renumbering dates** — POP Creations around late April 2025, Edge Home and Spruce around
   September 2025 — were read off when the group definitions were last modified, not given to us.
   They decide which rows we trust as-is. **Proposed.**
-- **Which flag means "retired" is unknown.** An item carries four overlapping ones: status, active,
-  available and discontinued, and they disagree. We use *active*. That is a guess. **Unknown.**
+- **Which flag means "retired" is now answered narrowly.** ColdLion confirmed that only
+  `active` is in use, but also that it is not maintained reliably. `active = N` is a real
+  suppression signal; its absence is not proof an item is sellable. The other lifecycle-looking
+  fields are stale residue and are not business status. **Settled for source handling; saleability
+  remains Unknown unless POP has separate evidence.**
 - **Nothing in the ERP links a licensor to its properties.** We derived the link from which licensor
   appears on items carrying each property, and hand-filled roughly forty properties that have no
   items yet. Those forty are our knowledge, not the ERP's. There is also a royalty code on the item
@@ -322,11 +325,10 @@ the item-level field entirely. **Settled** (JamieLynn 2026-08-28, verified live)
   accounts back to 2006, and accounts too small for CRM. See the section above.
 - **ColdLion is not a revenue report.** Its order feed can be counted only by someone who knows it
   contains the same line more than once.
-- **ColdLion is not self-documenting.** Its API specification carries no allowed-value list on any
-  field but one, and no description on any response field at all. ColdLion improved the one field we
-  named (JamieLynn, 2026-08-26: *"Changed the doc."*) but the general gap remains open. **The
-  meaning of an ERP value therefore comes from asking or from measuring, never from reading the
-  specification.**
+- **ColdLion's API is not business authority.** As of 2026-09-10, the specification does supply
+  typed response schemas and rejects invalid declared enum values, which makes it a useful
+  integration contract. It still does not establish business meaning: interpret ERP values through
+  the settled rules and verified source behaviour, never from a field name or schema alone.
 - **An ERP field name does not establish its meaning.** Several fields here mean something other
   than their name suggests, and two of the most obvious-looking ones are empty.
 
