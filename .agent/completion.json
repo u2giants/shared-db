@@ -1,20 +1,65 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 2670,
   "outcome": "ready-for-merge",
-  "pr": 2668,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2439/9",
-  "contract_sha256": "17698b9a5cdf2be9696f02173a57896ea4640d0a39bcaa85f1d295214310a17e",
-  "head_sha": "ef5f5a7003668414214f27b455a0971cbec17f29",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", "AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md"],
-  "db_reads": [],
-  "db_writes": [],
-  "checks": [
-    {"command": "node scripts/check-handoff-contract.mjs", "exit_code": 0, "evidence": "Handoff contract satisfied for 1 changed file(s)."},
-    {"command": "node --test scripts/check-handoff-contract.test.mjs", "exit_code": 0, "evidence": "16 tests passed; 0 failed, skipped, or cancelled."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No output; exit code 0."}
+  "pr": 2674,
+  "migration_versions": [
+    "20260910123601"
   ],
-  "assumptions_resolved": ["The handoff contains all ten required sections, separate worker blocks, owner decisions, live ledger state, failures, constraints, and exact next gates.", "The rulebook clarifications document the exact fail-closed non-ledger mechanism and the enforced six-provider reviewer roster without changing executable behavior.", "No database, preview, production, cloud, migration-ledger, or migration-ref mutation is part of this contract."],
+  "contract_ref": "refs/db-contracts/2670/3",
+  "contract_sha256": "12155f7187f3208a827c4ae97f6dd1b6e713303be7a16f004b3881e8cd4fe3ff",
+  "head_sha": "547174468312faac5e698ea3a24110ff4fc3c426",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql"
+  ],
+  "db_reads": [],
+  "db_writes": [
+    "public.bulk_operation_runs",
+    "public.bulk_operation_runs.status",
+    "public.bulk_operation_runs.source_status",
+    "public.bulk_operation_runs.succeeded",
+    "public.bulk_operation_runs.error",
+    "public.bulk_operation_runs.progress",
+    "public.bulk_operation_runs_failures_idx"
+  ],
+  "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static checks passed. Guard B compared this branch against base only (source: git:origin/main, newest base version 20260909220101). Guard B2 (backdated against a LIVE LEDGER) DID NOT RUN -- no ledger source configured locally. Issue #1235 expected-count guard, verify-cost guard and issue #1684 EOL reference guard all passed. No disposable database was available, so DATABASE_URL execution of the migration did not happen."
+    },
+    {
+      "command": "node scripts/check-applied-migration-edit.mjs",
+      "exit_code": 0,
+      "evidence": "UNKNOWN: the guard COULD NOT RUN -- SUPABASE_ACCESS_TOKEN is not set. Exit code 0 means 'could not compare', NOT 'no drift'."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No output; exit code 0."
+    },
+    {
+      "command": "python -m pytest scripts/test_migration_derivation.py -q",
+      "exit_code": 0,
+      "evidence": "44 passed, 6 subtests passed in 3.85s."
+    },
+    {
+      "command": "python -c \"import migration_derivation as md; md.declared_bases('20260910123601', path=<migration>)\"",
+      "exit_code": 0,
+      "evidence": "Finding C1 proved and closed with a positive control. Corrected header -> frozenset({'20260909202801'}). The same file with the pre-fix header -> DerivationError: \"20260910123601: `-- derived-from: 20260909202801_bulk_operation_runs_history_reissue.sql` is not a 14-digit migration version\". The checker can fail, and now does not."
+    }
+  ],
+  "assumptions_resolved": [
+    "THE CONTRACT TESTS WERE NOT EXECUTED LOCALLY. supabase/tests/bulk_operation_runs_contracts.sql was never run in this worktree: no Docker and no local Postgres were available. CI is the first real execution of these tests. No local test result is claimed.",
+    "Guard B2 of check-sql.sh was skipped because no ledger source is configured locally.",
+    "check-applied-migration-edit.mjs returned UNKNOWN because SUPABASE_ACCESS_TOKEN was unset; nothing was compared.",
+    "OPEN ITEM (review finding C1, second half): whether the declared base 20260909202801 is present in the PREVIEW and PRODUCTION ledgers COULD NOT be established read-only from this worktree. What read-only evidence does show: 20260909202801 is present on origin/main; it is NOT in RETIRED_VERSION_REASONS; and that registry records its predecessor 20260908195056 as retired with 'preview already holds the version', reissued byte-identically as 20260909202801. Nothing in the repository records an apply of 20260909202801 to either ledger. Reading a ledger needs a credential or a dispatched workflow, both outside this task's authority. Promotion must therefore either confirm the base is applied, promote 20260909202801 and 20260910123601 in one bounded window, or record a --derivation-override naming the resulting state.",
+    "CORRECTED IN GENERATION 3. Generation 2 declared the object set at column granularity but listed only public.bulk_operation_runs and its status/source_status/succeeded columns plus public.bulk_operation_runs_failures_idx, and it affirmatively described progress as read-only. That was wrong: the migration also rewrites the catalog description of public.bulk_operation_runs.error and writes one for public.bulk_operation_runs.progress for the first time, both via comment on column, which writes pg_description. Generation 3 names both. Neither column's values, type, nullability nor any constraint over it is touched; the succeeded expression still only READS progress. No new table, column or index is introduced. Because the generation-2 contract is bound to the immutable ref refs/db-contracts/2670/2, the correction was published as a new generation, refs/db-contracts/2670/3, rather than edited in place.",
+    "Nothing in this work applied the migration to preview or production, dispatched a workflow, ran the lane manager, or merged the pull request.",
+    "STOP CONDITION HISTORY. Generation 2's stop condition 'the declared object set would have to widen beyond db_writes' was raised against generation 2 by the governed review of head 665d7d97 (comment 5620174772, finding M2). It was answered by publishing contract generation 3 at refs/db-contracts/2670/3, which names public.bulk_operation_runs.error and public.bulk_operation_runs.progress. Under the generation-3 contract this report is filed against, the object set no longer needs to widen, so stop_conditions_hit is empty for THIS generation. No SQL was re-architected and no check, guard or workflow was edited."
+  ],
   "stop_conditions_hit": []
 }
