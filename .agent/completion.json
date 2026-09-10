@@ -10,6 +10,8 @@
   "contract_sha256": "4bb566a9bd509b0425c6c0492b21daa11a058481244ba753304ee90a1c0ddca4",
   "head_sha": "6e926c500ce804547bc992367667bc1bbd8162fb",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
     "supabase/tests/bulk_operation_runs_contracts.sql"
   ],
