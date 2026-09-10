@@ -1,11 +1,5 @@
 {
-  "allowed_paths": [
-    "scripts/migration_derivation.py",
-    "scripts/test_migration_derivation.py",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
+  "allowed_paths": ["scripts/migration_derivation.py", "scripts/test_migration_derivation.py", "docs/verification/throughput-guard-truth-audit-20260828.json", ".agent/contract.json", ".agent/completion.json"],
   "assumptions": [
     "Migration 20260909005945 is already merged and its bytes must remain unchanged.",
     "Its exact pinned header source describes a pre-adoption CI baseline rather than a migration-ledger version.",
@@ -17,35 +11,14 @@
   "db_reads": [],
   "db_writes": [],
   "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
-  "file_writes": [
-    "scripts/migration_derivation.py",
-    "scripts/test_migration_derivation.py",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
+  "file_writes": ["scripts/migration_derivation.py", "scripts/test_migration_derivation.py", "docs/verification/throughput-guard-truth-audit-20260828.json", ".agent/contract.json", ".agent/completion.json"],
   "generation": 4,
   "goal": "Restore preview-ledger parsing for exactly migration 20260909005945 without changing its merged bytes or weakening malformed-declaration refusal for any other migration, and record its one new fail-closed truth-audit call site.",
-  "prohibited_actions": [
-    "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
-    "Do not edit any SQL migration",
-    "Do not broaden the derivation parser to accept prose",
-    "Do not weaken existing malformed-declaration tests",
-    "No external review or merge"
-  ],
-  "required_checks": [
-    "python -m unittest scripts.test_migration_derivation -q",
-    "python -m unittest scripts.test_production_migration_guard -q",
-    "git diff --check"
-  ],
+  "prohibited_actions": ["No database, preview, production, cloud, migration-ledger, or migration-ref mutation", "Do not edit any SQL migration", "Do not broaden the derivation parser to accept prose", "Do not weaken existing malformed-declaration tests", "No external review or merge"],
+  "required_checks": ["python -m unittest scripts.test_migration_derivation -q", "python -m unittest scripts.test_production_migration_guard -q", "git diff --check"],
   "route": "repo-session",
   "schema_version": 1,
-  "stop_conditions": [
-    "The repair requires editing a merged SQL migration",
-    "The exception cannot be pinned to exactly one version and exact historical source text",
-    "A proposed change accepts malformed prose for a future migration",
-    "The main merge lane becomes available only after a separate coordinator instruction"
-  ],
+  "stop_conditions": ["The repair requires editing a merged SQL migration", "The exception cannot be pinned to exactly one version and exact historical source text", "A proposed change accepts malformed prose for a future migration", "The main merge lane becomes available only after a separate coordinator instruction"],
   "work_issue": 2652,
   "work_type": "repo-maintenance",
   "worker": "codex repo-maintenance agent for issue 2652",
