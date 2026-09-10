@@ -22,7 +22,7 @@ GET /rest/v1/sku_human_description?select=*&limit=0   Accept-Profile: dam    -> 
 
 Controls: `Accept-Profile: public` returns 200; `Accept-Profile: graphql_public` returns 404 `PGRST205` (schema exposed, table absent). The three answers are distinguishable, so a 406 is a real exposure refusal and not a malformed header.
 
-**This retires a Step 1 open item.** The 2026-09-03 plan named three RLS-disabled tables carrying `authenticated` DML privilege. Step 1's own scan did **not** reproduce them (it found zero) and deferred the question to Step 2; the corrected `has_table_privilege` method used here is what surfaces them, which is itself an instance of the `information_schema` false negative recorded in Layer 2. All three — `dam.sku_human_description`, `dflow.item_user_assignment`, `dflow.item_workflow_action` — sit in unexposed schemas. Only `dam.sku_human_description` was probed over HTTP (406, below); the two `dflow` tables rest on the catalog fact that `dflow` is not in the exposed list, which is the same fact the 406 demonstrates. On that basis they are **not** a Data API exposure, but the HTTP demonstration covers one of the three, not all three.
+**This retires a Step 1 open item.** The 2026-09-03 plan counted three RLS-disabled tables and described them as carrying `authenticated` DML privilege, without naming them. Step 1's own scan did **not** reproduce them (it found zero) and deferred the question to Step 2; the corrected `has_table_privilege` method used here is what surfaces them, which is itself an instance of the `information_schema` false negative recorded in Layer 2. All three — `dam.sku_human_description`, `dflow.item_user_assignment`, `dflow.item_workflow_action` — sit in unexposed schemas. Only `dam.sku_human_description` was probed over HTTP (406, below); the two `dflow` tables rest on the catalog fact that `dflow` is not in the exposed list, which is the same fact the 406 demonstrates. On that basis they are **not** a Data API exposure, but the HTTP demonstration covers one of the three, not all three. The census predicate recorded here is `SELECT`, and on that predicate all three carry `authenticated` `SELECT` and no `anon` privilege; this report does not present evidence of `INSERT`/`UPDATE`/`DELETE` on them, so the plan's "DML" wording is not carried forward as a finding of this step.
 
 ## Layer 2 — catalog grants (method correction)
 
@@ -33,7 +33,7 @@ Positive control: the corrected query returns 437 relations across nine schemas 
 Census, re-derived so that every figure below comes from one predicate — any `SELECT` privilege held by `anon` or `authenticated`, read with `has_table_privilege` against `pg_class`:
 
 - **517** relations project-wide, across 14 schemas.
-- **217** of those sit in the seven exposed schemas: 145 tables, 70 views, 2 materialized views.
+- **217** of those sit in the seven exposed schemas: 145 tables, 70 views (5 `public` + 65 `api`), 2 materialized views.
 - **51** of those 217 carry `anon` `SELECT`.
 - **4** are RLS-enabled with zero policies (all `public`, named in finding 1).
 - **3** are the RLS-disabled tables above, all in unexposed schemas and therefore outside the 217.
@@ -45,7 +45,7 @@ An earlier draft of this section reported 437 relations of which 8 were views, f
 | Property | Result |
 |---|---|
 | RLS enabled, zero policies, API privilege | 4 tables (all `public`) |
-| Views reachable by `anon`/`authenticated` | 6 in `public`, 65 in `api`, 1 in `dflow` |
+| Views reachable by `anon`/`authenticated` | 5 in `public` and 65 in `api` (both exposed, so 70 — the figure in the Layer 2 census); 1 more in `dflow`, which is unexposed and therefore outside that census |
 | `api` views by semantics | 49 `security_invoker=true`; 9 `security_invoker=false`; 7 unset (definer default) — 65 in total, matching the row above |
 | Materialized views in an exposed schema | 2 (`public.style_guide_folders`, `public.style_guide_file_groups`) — RLS cannot apply to a materialized view |
 | Functions executable by `anon` | 107 (38 of them `SECURITY DEFINER`) |
