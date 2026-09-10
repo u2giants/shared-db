@@ -1,58 +1,49 @@
 {
   "allowed_paths": [
-    "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
-    "supabase/tests/coldlion_master_landing_contracts.sql",
-    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql",
+    "docs/verification/database-efficiency/20260910T002917Z/api-access-matrix.md",
+    "plan_database_efficiency_and_api_security.md",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "assumptions": [
-    "mg_category is a required source identity component for every ColdLion merchandise-group detail row.",
-    "The existing three-column foreign key to coldlion.merch_group_header remains unchanged.",
-    "No dependent foreign key may rely on the obsolete four-column primary key.",
-    "Existing rows must remain intact; null categories or duplicate five-part identities make the migration fail closed.",
-    "PR 2651 was refreshed through current main ad84f9281fefcd43321aabdc99c784a27e761520 after its exact historical-restoration prerequisite PR 2656 merged."
+    "Step 1 of the plan landed 2026-09-04 and left the PostgREST exposed-schema list unread, because current_setting returned NULL in the SQL session.",
+    "The exposed-schema list is obtainable from the API boundary instead: an unexposed Accept-Profile is refused with PGRST106 and the refusal names the full list.",
+    "information_schema.role_table_grants is identity-filtered and returns an empty set on production, which would read as 'no anon/authenticated grants exist'; has_table_privilege against pg_class is the correct source.",
+    "This session is read-only for production. No write of any kind may be issued, and no row contents, column values or credential values may appear in the artifact.",
+    "db_reads is declared empty because ungated read-only inspection is not a claimed database read under AGENTS.md; the exact read-only sources used are listed in the completion report and in the artifact itself."
   ],
-  "base_sha": "ad84f9281fefcd43321aabdc99c784a27e761520",
-  "branch": "codex/issue-2622-merch-group-detail-key",
+  "base_sha": "e4c98ab2b06f9db70ef6f26516efea6334f9d21e",
+  "branch": "claude/issue-2326-api-access-matrix",
   "db_reads": [],
-  "db_writes": ["table coldlion.merch_group_detail"],
-  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
+  "db_writes": [],
+  "dispatcher": "claude repo-maintenance session working the oldest ready repo-maintenance queue",
   "file_writes": [
-    "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
-    "supabase/tests/coldlion_master_landing_contracts.sql",
-    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql",
+    "docs/verification/database-efficiency/20260910T002917Z/api-access-matrix.md",
+    "plan_database_efficiency_and_api_security.md",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 3,
-  "goal": "Preserve all ColdLion merchandise-group detail rows by making category part of their durable identity without weakening the header relationship.",
+  "generation": 1,
+  "goal": "Execute Step 2 of plan_database_efficiency_and_api_security.md: prove the Data API access boundary at four layers across three identities, retire or reproduce each 2026-09-03 advisor family, and record the result as a durable verification artifact with the plan STATUS row updated.",
   "prohibited_actions": [
-    "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
-    "No source-data load or licensed source value",
-    "No change to the merchandise-group header relationship",
-    "No object or path outside claim 2650 and this contract"
+    "No write of any kind against production, preview, or any shared database",
+    "No row contents, column values, or credential values in the artifact",
+    "No migration, schema change, reviewer allocation, preview apply, or production promotion",
+    "No remediation of any finding; each remediation is a separate governed claim",
+    "No path outside this contract"
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check",
-    "supabase/tests/coldlion_master_landing_contracts.sql on a disposable database",
-    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql on a disposable database",
-    "Database Contract Tests CI from empty"
+    "git diff --check"
   ],
-  "route": "shared-db-orchestrator",
+  "route": "repo-maintenance",
   "schema_version": 1,
   "stop_conditions": [
-    "Claim 2650, reserved version 20260909194231, or coordinator route changes",
-    "A competing change touches coldlion.merch_group_detail or a contracted path",
-    "Implementation requires an object or path outside claim 2650 or this contract",
-    "Any existing row has a null category or collides under the five-part identity",
-    "Any dependent foreign key relies on the obsolete four-column primary key"
+    "A probe would require a write, an RPC call, or fetching row contents",
+    "A finding cannot be proved with both catalog and HTTP evidence",
+    "The artifact cannot be written without naming credential values"
   ],
-  "work_issue": 2622,
-  "work_type": "structural",
-  "worker": "codex issue2622-author holding claim 2650",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2622-merch-group-detail-key"
+  "work_issue": 2326,
+  "work_type": "repo-maintenance",
+  "worker": "claude issue2326-step2-repo-session",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step2"
 }
