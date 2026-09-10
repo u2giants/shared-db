@@ -219,10 +219,12 @@ test('issue 2207: the preserved-findings header is inert on its own',()=>{
   assert.equal(anyVerdictFor([{author_association:'OWNER',body:PRESERVED_HEADER}],sha),false,'the header is not read as a verdict by the shared consumer predicate')
 })
 
-test('ai-gemini governed reviews are given the head under review as their verdict contract',()=>{
+test('Gemini and Qwen governed reviews are given the head under review as their verdict contract',()=>{
   const head='c'.repeat(40)
   assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','sess','--prompt','x'],head),['new','--governed-verdict',head,'sess','--prompt','x'])
   assert.deepEqual(wrapperVerdictContractArgs('C:/tools/ai-gemini.cmd',['ask','sess'],head),['ask','--governed-verdict',head,'sess'])
+  assert.deepEqual(wrapperVerdictContractArgs('ai-qwen',['new','sess','--prompt','x'],head),['new','--governed-verdict',head,'sess','--prompt','x'])
+  assert.deepEqual(wrapperVerdictContractArgs('C:/tools/ai-qwen.cmd',['ask','sess'],head),['ask','--governed-verdict',head,'sess'])
 })
 
 test('other wrappers keep their arguments untouched',()=>{
@@ -233,6 +235,18 @@ test('a caller-supplied gemini verdict head must match the head under review',()
   const head='e'.repeat(40)
   assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict',head,'sess'],head),['new','--governed-verdict',head,'sess'])
   assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict','f'.repeat(40),'sess'],head),/does not match the head under review/)
+})
+
+test('every caller-supplied Qwen verdict head spelling is checked',()=>{
+  const head='e'.repeat(40),other='f'.repeat(40)
+  assert.deepEqual(wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict',head,'sess'],head),['new','--governed-verdict',head,'sess'])
+  assert.deepEqual(wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict='+head,'sess'],head),['new','--governed-verdict='+head,'sess'])
+  assert.throws(()=>wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict='+other,'sess'],head),/does not match the head under review/)
+  assert.throws(()=>wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict',head,'sess','--governed-verdict',other],head),/does not match the head under review/)
+})
+
+test('a Qwen review without new or ask is refused before spawn',()=>{
+  assert.throws(()=>wrapperVerdictContractArgs('ai-qwen',['--prompt','x'],'a'.repeat(40)),/new or ask subcommand/)
 })
 
 test('a gemini review that does not start with a subcommand is refused',()=>{
@@ -472,4 +486,31 @@ test('#2244: other wrappers are untouched by the codex bridge',()=>{
     record:()=>({ref:'refs/db-review-verdicts/z',sha:'e'.repeat(40)}),
   })
   assert.deepEqual(order,['ai-glm','gh'])
+})
+
+// ISSUE #2307 — DO NOT MAKE THE CODEX WRAPPER PRINT A TERMINAL VERDICT LINE.
+// An abandoned 2026-09-04 branch added an opt-in `VERDICT: <decision> <sha>` line
+// to ai-devops/bin/ai-codex-review, because this reviewer looked dead: it printed
+// only a report path and every round was refused for "no recordable terminal
+// verdict". That was true of an older runner. This one reads the codex verdict
+// out of the published report, and it finds the report by taking the LAST line of
+// stdout, so appending anything after that path makes every codex review refuse.
+// The fix for a dead-looking codex reviewer is never to move its verdict onto
+// stdout.
+test('issue 2307: a verdict line appended after the codex report path breaks the round',()=>{
+  const codexPath='C:/review/.ai/reviews/codex-diff-review-20260908T190000-1-2.md'
+  assert.equal(codexReportPath(codexPath),codexPath)
+  assert.throws(()=>codexReportPath(`${codexPath}\nVERDICT: APPROVE ${'a'.repeat(40)}`),/not a published report path/)
+})
+
+// The assertion above must fail for the RIGHT reason. `codexReportPath` has three
+// distinct refusals, and a test matching only "not a published report path" would
+// still pass if the appended line had instead emptied the candidate or moved it
+// out of the report directory. Pin all three so the regression test cannot drift
+// into asserting a different failure than the one issue #2307 is about.
+test('issue 2307: the appended-verdict refusal is distinct from the other two',()=>{
+  const codexPath='C:/review/.ai/reviews/codex-diff-review-20260908T190000-1-2.md'
+  assert.throws(()=>codexReportPath(''),/printed no report path/)
+  assert.throws(()=>codexReportPath('C:/review/notes/codex-diff-review-20260908T190000-1-2.md'),/not inside the wrapper report directory/)
+  assert.throws(()=>codexReportPath(`${codexPath}\nVERDICT: APPROVE ${'a'.repeat(40)}`),/final line is not a published report path/)
 })
