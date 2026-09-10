@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260910123636"
   ],
-  "contract_ref": "refs/db-contracts/2576/7",
-  "contract_sha256": "309a7e54bd0579d9ac41bebeaf1cfcc44e6a8f89fe9849888a48b8e9fb66ed16",
-  "head_sha": "f26c1a01510f03337aca4c4dec693e8d5e247bee",
+  "contract_ref": "refs/db-contracts/2576/8",
+  "contract_sha256": "7563c777bae324e06c80290dda50f1a25473ecd654e070ec677764b4224f9c83",
+  "head_sha": "dd8c353610dabb5ae63f72ca52fbf7f78d693e93",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -37,7 +37,7 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs",
       "exit_code": 0,
-      "evidence": "{\"status\":\"OK\",\"sidecars\":46,...,{\"version\":\"20260910123636\",\"markers\":[239,616,719],\"sidecar\":true}]}"
+      "evidence": "{\"status\":\"OK\",\"sidecars\":46,...,{\"version\":\"20260910123636\",\"markers\":[243,630,742],\"sidecar\":true}]}"
     },
     {
       "command": "python scripts/check_production_verification_sidecars.py",
@@ -85,7 +85,10 @@
     "MIGRATION VERSION UNCHANGED: 20260910123636 is not applied anywhere and was edited in place; the filename and the bare 14-digit -- derived-from: 20260907200221, 20260902053756 header parse cleanly under scripts/migration_derivation.py.",
     "NO NEW DATABASE OBJECT IS CLAIMED: only the three api routines already claimed by this pull request are edited.",
     "DETECTOR BASELINE: scripts/production_catalog_verification.py is the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json detector_source_sha256 was regenerated to 89157c2a007553ddd8215401c2a821121610784bd016d6a07aa8b6077f6e7c9d, matching precedent commit c740c820. Without it check-production-verification-sidecars.mjs returned UNVERIFIABLE.",
-    "SIDECAR REBOUND: migration_sha256 is now f22ec71c1ca5e65f9a3f0d5f40aa6bff3b1bca794d576e45b23a71682a2244b3 and the marker lines are 239, 616 and 719. The PREVIEW_PRODUCER_PATHS registration in scripts/production_business_risk_gate.py is unchanged and still correct.",
+    "SIDECAR REBOUND: migration_sha256 is now 469735d609e25ff8d9618f6c77db111e940ec282df30def877ac3d59ba710d73 and the marker lines are 243, 630 and 742. The PREVIEW_PRODUCER_PATHS registration in scripts/production_business_risk_gate.py is unchanged and still correct.",
+    "REVIEW LOW FINDING A RESOLVED: the migration now ends the queue-function block with a comment on function api.db_data_admin_property_match_queue(text, text, integer) restating the contract. The comment set by 20260902053756 was left in place by the create or replace and still said the queue covers exact DCP source Property identities and derives no authority verdict, while the new body derives identity_decision_state and identity_conflict. The restated comment keeps the original voice, keeps the no-authority-verdict claim scoped to licensor scope where it is still true, and names only what the body actually returns.",
+    "REVIEW LOW FINDING B RESOLVED: editing the migration changed its hash, so the sidecar was recomputed AFTER that edit and this report was then brought into exact agreement with the tree. migration_sha256 is 469735d609e25ff8d9618f6c77db111e940ec282df30def877ac3d59ba710d73 and the marker_reviews line ranges are 236-248, 614-639 and 728-749; the three reasons' in-text line references were moved to 243, 630 and 742 to match.",
+    "REVIEW HIGH FINDING VOID: it concerned migration 20260910123601, which is on main and is not part of this pull request. Nothing was changed for it.",
     "PROOF LIMIT, STATED PLAINLY: Docker is unavailable on this machine, so the full supabase/tests suite was not replayed locally. The ephemeral-database CI run is the first from-empty replay of this migration and its two new tests.",
     "No preview or production apply, workflow dispatch, lane-manager run, worktree reaper run or merge was performed by this worker.",
     "EVIDENCE REBOUND TO THE POST-MERGE HEAD: the PR base advanced to e9f39d510050555ec18ab23668c9e8a2974a0c3b, so the generation 6 report head b2c68f37ae6145fdd0a2929935dc08425dbb3b30 was no longer a descendant of the base and the git-evidence ancestry check refused it. Contract generation 7 was published at refs/db-contracts/2576/7 and this report now names head f26c1a01510f03337aca4c4dec693e8d5e247bee, the merge of current main into this branch. files_changed is exactly git diff --name-only e9f39d51..f26c1a01. No implementation file was edited to clear the check."
