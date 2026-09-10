@@ -8,6 +8,8 @@
   "contract_sha256": "989287cf63ea904e89100c89b0d0b4b1fae879759aa40aa3ca560c681831d02e",
   "head_sha": "100445d352cd051c686248bb41774b39361f9cc8",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/migration_derivation.py",
     "scripts/test_migration_derivation.py",
     "docs/verification/throughput-guard-truth-audit-20260828.json"
