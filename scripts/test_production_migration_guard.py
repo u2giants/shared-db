@@ -224,6 +224,9 @@ class GuardTests(unittest.TestCase):
     def test_issue_2543_historical_restoration_remains_production_eligible(self):
         self.assertEqual(parse_allowlist("20260909115140"), ["20260909115140"])
 
+    def test_issue_2622_historical_restoration_remains_production_eligible(self):
+        self.assertEqual(parse_allowlist("20260909194231"), ["20260909194231"])
+
     def test_issue_2580_historical_restoration_remains_production_eligible(self):
         self.assertEqual(parse_allowlist("20260909084253"), ["20260909084253"])
 
