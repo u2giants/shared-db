@@ -4269,5 +4269,58 @@ CATALOG_CONTRACTS["single_creative_submission_resolution_ledger_v1"] = (
 )
 
 
+# Issue #2576. One stable DCP source id is the business Creative identity.
+#
+# The migration edits api.db_data_admin_scraped_properties and
+# api.db_data_admin_decide_property_match in place with pg_get_functiondef and
+# replaces api.db_data_admin_property_match_queue outright, so the reviewed
+# migration text does not restate the first two bodies. This contract reads the
+# durable outcome of exactly those statements the same way #2449 does: the
+# routine bodies themselves, after apply.
+#
+# It is a strict SUPERSET of single_creative_submission_resolution_ledger_v1,
+# which it supersedes for the two shared routines: every #2449 assertion is
+# carried forward unchanged, so nothing that contract proved stops being proved.
+_PROPERTY_MATCH_QUEUE_DEF = (
+    "pg_get_functiondef(to_regprocedure("
+    "'api.db_data_admin_property_match_queue(text,text,integer)'))"
+)
+DCP_STABLE_IDENTITY_PROPERTY_MATCH_CONTRACT = (
+    SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT
+    + " and to_regprocedure('api.db_data_admin_property_match_queue(text,text,integer)') is not null"
+    # The reader groups by the stable dcpvault: identity and fails closed on a
+    # terminal disagreement instead of guessing a winner.
+    + " and position('identity_key' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('mapped_fingerprints' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('dcpvault:' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    # The review queue carries identity state, conflict evidence and per-copy
+    # provenance alongside each pending copy.
+    + " and position('identity_decision_state' in %s)>0" % _PROPERTY_MATCH_QUEUE_DEF
+    + " and position('identity_conflict' in %s)>0" % _PROPERTY_MATCH_QUEUE_DEF
+    + " and position('identity_copies' in %s)>0" % _PROPERTY_MATCH_QUEUE_DEF
+    + " and position('member_fingerprint' in %s)>0" % _PROPERTY_MATCH_QUEUE_DEF
+    # The write side returns the identity it belongs to AND refuses an approval
+    # that would un-serve the identity's working mapping from a single copy.
+    + " and position('identity_decision_state' in %s)>0" % _DECIDE_PROPERTY_MATCH_DEF
+    + " and position('identity_copies' in %s)>0" % _DECIDE_PROPERTY_MATCH_DEF
+    + " and position('would give the stable identity' in %s)>0" % _DECIDE_PROPERTY_MATCH_DEF
+    # Access posture on all three routines is unchanged: licensing-manager
+    # gated, security definer, pinned search_path, authenticated-only execute.
+    + " and has_function_privilege('authenticated',to_regprocedure('api.db_data_admin_property_match_queue(text,text,integer)'),'EXECUTE')"
+    + " and not has_function_privilege('anon',to_regprocedure('api.db_data_admin_property_match_queue(text,text,integer)'),'EXECUTE')"
+    + " and not has_function_privilege('service_role',to_regprocedure('api.db_data_admin_property_match_queue(text,text,integer)'),'EXECUTE')"
+    + " and has_function_privilege('authenticated',to_regprocedure('api.db_data_admin_decide_property_match(uuid,text,bigint[],text,uuid)'),'EXECUTE')"
+    + " and not has_function_privilege('anon',to_regprocedure('api.db_data_admin_decide_property_match(uuid,text,bigint[],text,uuid)'),'EXECUTE')"
+    + " and has_function_privilege('authenticated',to_regprocedure('api.db_data_admin_scraped_properties(text,text,integer)'),'EXECUTE')"
+    + " and not has_function_privilege('anon',to_regprocedure('api.db_data_admin_scraped_properties(text,text,integer)'),'EXECUTE')"
+    + " and position('require_licensing_manager_access' in %s)>0" % _PROPERTY_MATCH_QUEUE_DEF
+    + " and position('SECURITY DEFINER' in %s)>0" % _PROPERTY_MATCH_QUEUE_DEF
+    + " and position('SET search_path' in %s)>0" % _PROPERTY_MATCH_QUEUE_DEF
+)
+CATALOG_CONTRACTS["dcp_stable_identity_property_match_v1"] = (
+    DCP_STABLE_IDENTITY_PROPERTY_MATCH_CONTRACT
+)
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
