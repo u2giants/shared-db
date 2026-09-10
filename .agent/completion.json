@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2668,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2439/8",
-  "contract_sha256": "c9af63effa2f7be5fb9d120b3752b3ddadb35d28ae9fb3833563ee6f6f7d9eca",
-  "head_sha": "1d56ccb3d8e4d176e0368f20ca29888a9ef718a8",
+  "contract_ref": "refs/db-contracts/2439/9",
+  "contract_sha256": "17698b9a5cdf2be9696f02173a57896ea4640d0a39bcaa85f1d295214310a17e",
+  "head_sha": "ef5f5a7003668414214f27b455a0971cbec17f29",
   "files_changed": [".agent/completion.json", ".agent/contract.json", "AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md"],
   "db_reads": [],
   "db_writes": [],
@@ -15,6 +15,6 @@
     {"command": "node --test scripts/check-handoff-contract.test.mjs", "exit_code": 0, "evidence": "16 tests passed; 0 failed, skipped, or cancelled."},
     {"command": "git diff --check", "exit_code": 0, "evidence": "No output; exit code 0."}
   ],
-  "assumptions_resolved": ["The handoff contains all ten required sections, separate worker blocks, owner decisions, live ledger state, failures, constraints, and exact next gates.", "The AGENTS.md clarification documents the exact fail-closed non-ledger mechanism and does not change executable behavior.", "No database, preview, production, cloud, migration-ledger, or migration-ref mutation is part of this contract."],
+  "assumptions_resolved": ["The handoff contains all ten required sections, separate worker blocks, owner decisions, live ledger state, failures, constraints, and exact next gates.", "The rulebook clarifications document the exact fail-closed non-ledger mechanism and the enforced six-provider reviewer roster without changing executable behavior.", "No database, preview, production, cloud, migration-ledger, or migration-ref mutation is part of this contract."],
   "stop_conditions_hit": []
 }
