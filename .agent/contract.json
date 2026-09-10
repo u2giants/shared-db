@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 4,
+  "generation": 5,
   "work_issue": 2579,
   "work_type": "structural",
   "route": "exclusive-db-lane",
@@ -89,7 +89,8 @@
     "Three existing landing contract tests (peanuts, sega, wildbrain) carry a v_map prefix array whose own error text instructs a new landing to add one row. The plm.marvel_* and plm.wwe_* rows are appended below every pre-existing prefix, and no earlier prefix is a prefix of marvel_ or wwe_, so no existing classification can change meaning.",
     "The reserved migration version 20260910155753 was assigned by the dispatcher and is used exactly as given.",
     "An append-only grant guard must name the application roles it constrains. information_schema.role_table_grants also lists the table owner's own implicit UPDATE/DELETE/TRUNCATE, which no REVOKE in a migration can remove, so an unfiltered count can never reach zero. Generation 3 scopes the TrackerPlus mutating-grant assertion, and its contract test, to service_role, authenticated, anon and PUBLIC, the shape already used by the wildbrain and sega landing guards.",
-    "Generation 4 repairs two defects the from-empty replay exposed once the migration applied. The in-place inventory rewrite was authored against the pre-20260909115140 definition and silently reverted the three append-only OPA capture tables to a current-snapshot count; the opa_capture root lateral and the latest-complete count, basis, status and note arms are restored ahead of the mutable opa_ family. The two new TrackerPlus read policies admitted only administrator and licensing, narrowing the Paramount read surface that #1249 forbids narrowing, so they now carry the same four-role staff set as every other plm.pmt_* read policy."
+    "Generation 4 repairs two defects the from-empty replay exposed once the migration applied. The in-place inventory rewrite was authored against the pre-20260909115140 definition and silently reverted the three append-only OPA capture tables to a current-snapshot count; the opa_capture root lateral and the latest-complete count, basis, status and note arms are restored ahead of the mutable opa_ family. The two new TrackerPlus read policies admitted only administrator and licensing, narrowing the Paramount read surface that #1249 forbids narrowing, so they now carry the same four-role staff set as every other plm.pmt_* read policy.",
+    "Generation 5 is an evidence repin only, made by the shared-db orchestrator (marker 2689) and not by the worker. The branch was refreshed from origin/main at aef1504e7c3c7674a6a9709e42720b8f2a725f43 before review so the review diff would not invert main newer commits into deletions. That refresh made the previously reported implementation head 6aab066717b4bbc9de6132d502a9749977785d5e no longer a descendant of the checked PR base, which the git-evidence check refuses. No implementation file changed: the reported files_changed list is byte-identical to git diff --name-only aef1504e7c3c7674a6a9709e42720b8f2a725f43 836d0ffb22aed103cf80387ef1774a50637d22d1, and the reported implementation head simply moves to the update-from-main merge commit 836d0ffb22aed103cf80387ef1774a50637d22d1, above which only the two .agent evidence files change."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",
