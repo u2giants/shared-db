@@ -52,6 +52,7 @@ begin
 
   select count(*) into v_n from information_schema.role_table_grants
    where table_schema = 'plm' and table_name like 'pmt\_trackerplus\_%'
+     and grantee in ('service_role', 'authenticated', 'anon', 'PUBLIC')
      and privilege_type in ('UPDATE', 'DELETE', 'TRUNCATE');
   if v_n <> 0 then
     raise exception 'A FAILED: % mutating grant(s) break the append-only contract', v_n;

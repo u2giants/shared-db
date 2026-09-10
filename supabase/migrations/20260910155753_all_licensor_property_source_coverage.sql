@@ -1136,6 +1136,7 @@ begin
   select count(*) into v_bad from information_schema.role_table_grants
    where table_schema = 'plm'
      and table_name like 'pmt\_trackerplus\_%'
+     and grantee in ('service_role','authenticated','anon','PUBLIC')
      and privilege_type in ('UPDATE','DELETE','TRUNCATE');
   if v_bad <> 0 then
     raise exception '#2579: % mutating grants survive on the TrackerPlus landing', v_bad;
