@@ -743,13 +743,14 @@ rules below are the operative summary.
      only when there is no verdict and no progress, or a concrete transport, coverage, or
      truncated-output failure. Never replace `REVISE` or reduce coverage: exhaust active providers
     not failed on the exact head, then fail closed with the exact blocker. The configured rotation is
-    Grok 4.6, GLM 5.3, Kimi K3, Muse Spark 1.3 Contributor, and Gemini 3.8 Flash
-    High, minus the live orchestrator's own engine — exactly
+    Grok 4.6, GLM 5.3, Kimi K3, Qwen 3.8 Max, Muse Spark 1.3 Contributor, and
+    Gemini 3.8 Flash High, minus the live orchestrator's own engine — exactly
     `ACTIVE_REVIEWERS` in `scripts/manage-migration-author-lanes.mjs`. Gemini
     re-entered on 2026-09-06 (PR #2438) after a live re-qualification. Kimi K3
     was unpaused on 2026-09-07 (PR #2483) after a passing wrapper doctor and is
-    drawable again. Qwen 3.8 Max is quarantined and also not drawable. DeepSeek is
-    inactive: it was RETIRED on 2026-09-01 (issue #2078) and is not drawable.
+    drawable again. Qwen 3.8 Max was unquarantined on 2026-09-07 by owner
+    instruction (ai-devops PR #316, merge `795902d8`) and is drawable again.
+    DeepSeek is inactive: it was RETIRED on 2026-09-01 (issue #2078) and is not drawable.
     **Codex GPT-5.6 Sol is NOT in the rotation:** the owner retired it
     permanently on 2026-09-06 (issue #2485) once the other providers were
     working, so it sits in `RETIRED_REVIEWERS` and is not drawable. Its
@@ -913,7 +914,12 @@ which is recorded verbatim in the run log. The drift report shows such a version
 as `[BASE-ABSENT]`, not as ordinary pending work.
 
 Do **not** add the line to an already-merged migration — that changes its bytes.
-Merged files that need a declaration get one in `LEGACY_DECLARATIONS`.
+Merged files that have a real earlier migration base get a pinned entry in
+`LEGACY_DECLARATIONS`. A merged file whose source is provably pre-ledger rather
+than another migration uses an exact-version, exact-source-text entry in
+`IMMUTABLE_NON_LEDGER_DERIVATIONS`; this narrow path was added for
+`20260909005945` on 2026-09-10. Never use either registry to excuse unknown or
+unproved ancestry, and never broaden the normal parser to accept prose.
 
 ### 5.0-E Declare a pure-data migration before it merges — `-- catalog-verification: no-op`
 
