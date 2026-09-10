@@ -1,72 +1,60 @@
 {
   "schema_version": 1,
-  "generation": 8,
-  "work_issue": 2576,
-  "work_type": "structural",
-  "route": "exclusive-db-lane",
-  "goal": "Serve DCP property-match review state by stable business identity: rewrite api.db_data_admin_property_match_queue to return one coherent review state per identity, retarget the copy-keyed creative-decision block inside api.db_data_admin_scraped_properties, and carry an identity decision state on api.db_data_admin_decide_property_match, with a hash-bound production verification sidecar covering both dynamic-execution markers. Revision: add a verifier-owned catalog contract asserting the rewritten routine bodies, count the decide-function rewrite needle exactly once and fail closed otherwise, and add a SQL write-side guard so a copy-keyed approval cannot un-serve a sibling mapping of the same stable identity.",
-  "base_sha": "1eaa20459253e54ecd7891b6f009eeb20c734f8d",
-  "dispatcher": "claude shared-db orchestrator marker 2669",
-  "worker": "claude issue 2576 dcp stable identity",
-  "branch": "claude/issue-2576-dcp-identity",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2576-dcp-identity",
+  "generation": 1,
+  "work_issue": 2697,
+  "work_type": "repo-maintenance",
+  "route": "repo-session",
+  "goal": "Make --reclaim-silent-reviewer able to complete by DERIVING its GitHub request count by measurement, the way the assignment and replacement counts in docs/verification/reviewer-assignment-api-budget-2026-08-28.md were derived, rather than by widening REVIEW_OPERATION_REQUEST_LIMIT to fit an observed refusal. Instrument the reclaim path on a wire-attempt fixture, record the measurement in a new dated file under docs/verification/, set that path's own ceiling from the measurement with the derivation cited beside the constant, remove any redundant request the measurement exposes instead of paying for it, gate mutex acquisition on the measured section reserve, and make the refusal name the operation whose budget it is and the derived ceiling for that operation.",
+  "base_sha": "aef1504e7c3c7674a6a9709e42720b8f2a725f43",
+  "dispatcher": "claude shared-db orchestrator",
+  "worker": "claude issue 2697 silent-reclaim budget derivation",
+  "branch": "claude/fix-2697-reclaim-budget",
+  "worktree": "C:/tmp/wt-2697",
   "allowed_paths": [
-    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
-    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
-    "scripts/production-verification-sidecars/20260910123636.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/production_business_risk_gate.py",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
-    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
-    "scripts/production-verification-sidecars/20260910123636.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/production_business_risk_gate.py",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "db_reads": [
-    "plm.dcp_opa_property_resolution",
-    "plm.dcp_opa_property_resolution_member",
-    "plm.dcp_opa_scraped_property"
-  ],
-  "db_writes": [
-    "api.db_data_admin_property_match_queue",
-    "api.db_data_admin_scraped_properties",
-    "api.db_data_admin_decide_property_match"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "No preview or production apply, no workflow dispatch, no lane-manager run, no worktree reaper run",
+    "Do not widen REVIEW_OPERATION_REQUEST_LIMIT to make the refusal go away; a number raised to fit an observed failure is exactly what issue #2075 forbids",
+    "No migration is authored or applied; this is repository maintenance and touches no database object",
+    "No preview or production apply, no workflow dispatch, no lane-manager mutation, no claim, no reviewer assignment, and no reclaim against real shared coordination state",
     "No merge of this pull request by the worker, and never gh pr merge --admin",
     "Do not weaken, skip, edit or disable any workflow, guard script or required check",
-    "Do not edit any migration other than 20260910123636, and never edit an already-applied migration",
+    "Do not drop the reclaim's in-mutex re-proof of the lease, the PR head, the durable verdict or the activity fingerprint in order to fit a budget",
     "No licensed or private licensor data in any file, commit message or issue comment; this repository is public"
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs",
-    "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "git diff --check"
   ],
   "assumptions": [
-    "Docker is unavailable on this machine, so the full supabase/tests suite cannot be replayed locally; the ephemeral-database CI job is the first from-empty replay of this migration.",
-    "The three dynamic-execution markers rewrite routine bodies in place. A verifier-owned catalog contract CAN read those bodies back via pg_get_functiondef, so all three markers are reviewed as 'checks' against the new dcp_stable_identity_property_match_v1 contract in scripts/production_catalog_verification.py, which is built as a strict superset of single_creative_submission_resolution_ledger_v1 so the #2449 assertions on the shared routines are not superseded away.",
-    "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
-    "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard.",
-    "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this.",
-    "Generation 8 covers the independent review's two Low findings: the create-or-replace of api.db_data_admin_property_match_queue now restates its own comment on function, since the comment set by 20260902053756 still claimed the queue derives no identity state while the new body derives identity_decision_state and identity_conflict. Editing the migration invalidated the hash-bound sidecar, so its migration_sha256 and its three dynamic-execution line ranges were recomputed after that edit and this report was rebound to implementation head dd8c353610dabb5ae63f72ca52fbf7f78d693e93. The review's High finding concerned migration 20260910123601, which is already on main and is not part of this pull request.",
-    "Generation 7 rebinds the completion report to implementation head f26c1a01510f03337aca4c4dec693e8d5e247bee, the commit that merges current main (e9f39d510050555ec18ab23668c9e8a2974a0c3b) into this branch. Generation 6 named pre-merge head b2c68f37ae6145fdd0a2929935dc08425dbb3b30, which stopped being a descendant of the PR base once the base advanced, so the git-evidence ancestry check refused it. No file outside the two .agent evidence files changes between f26c1a01 and the PR head."
+    "The reclaim path's request count was genuinely never derived: the comment beside REVIEW_OPERATION_REQUEST_LIMIT enumerates slot-2 assignment (23), slot-2 replacement (20), first replacement pre-mutex (9) and post-mutex (11), and no silent-reclaim figure appears in it or in the 2026-08-28 derivation document.",
+    "The measurement can be taken without touching shared state: the existing wire-attempt fixtures count real runGitHubCommand attempts against an in-memory io, which is how the existing figures were derived.",
+    "A ceiling derived for one operation may differ from another operation's ceiling. What issue #2075 forbids is raising a number to fit a failure, not an operation carrying its own written, measured budget.",
+    "The reclaim legitimately costs more than an assignment because it re-proves the lease, the PR state, the activity fingerprint and the durable verdict a second time inside the mutex; that re-proof is the safety property and cannot be traded for budget.",
+    "consumeReviewWireRequest holds back cleanupReserve while the mutex is held (2 with atomicReviewMutexRelease, 8 without), so the derivation must fit the locked non-cleanup section inside limit minus that reserve.",
+    "This pull request touches no database object, so db_reads and db_writes are empty and no migration version, claim or sidecar is involved."
   ],
   "stop_conditions": [
-    "A required check proves a real defect in the migration or its contract test",
-    "The migration would have to be edited after the hash-bound sidecar is published without regenerating it",
-    "The pull request base moves so that the reported files_changed no longer matches Git",
-    "Any check failure could only be cleared by weakening a guard, a workflow or a required check"
+    "The measurement shows the existing 25-request ceiling is genuinely right for this path, in which case the redundancy is fixed instead and no ceiling changes",
+    "A required check proves a real defect in the derivation or the redundancy removal",
+    "Clearing any check would require weakening a guard, a workflow or a required check",
+    "Fitting the budget would require dropping any part of the reclaim's in-mutex re-proof",
+    "The pull request base moves so that the reported files_changed no longer matches Git"
   ]
 }
