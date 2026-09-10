@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2666,
-  "generation": 2,
+  "generation": 3,
   "route": "repo-maintenance",
   "work_type": "repo-maintenance",
   "goal": "Make every manager-assigned ai-qwen review use the exact-head SHA-bound governed verdict contract automatically.",
