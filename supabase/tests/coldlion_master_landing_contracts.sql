@@ -11,7 +11,7 @@
 -- (ZZTEST / ZZ*), never a real company, division, customer, vendor or code.
 -- The one real-world literal referenced is the `1P` / `CW001` key collision,
 -- which is already published in docs/coldlion-raw-landing-schema-design.md §3.1
--- as the reason the four-part key exists.
+-- as evidence that merchandise-group identity is multi-dimensional.
 
 begin;
 
@@ -27,7 +27,7 @@ declare
     'customer',           'PRIMARY KEY (company_code, customer_code)',
     'vendor',             'PRIMARY KEY (company_code, vendor_code)',
     'merch_group_header', 'PRIMARY KEY (company_code, division_code, mg_type_code)',
-    'merch_group_detail', 'PRIMARY KEY (company_code, division_code, mg_type_code, mg_code)',
+    'merch_group_detail', 'PRIMARY KEY (company_code, division_code, mg_type_code, mg_category, mg_code)',
     'season',             'PRIMARY KEY (company_code, division_code, season_code)',
     'salesperson',        'PRIMARY KEY (company_code, salesperson_code)'
   );
@@ -54,9 +54,9 @@ end;
 $$;
 
 -- =====================================================================================
--- B. The four-part merch-group key BEHAVES. Same mg_code, different mg_type_code,
---    same division = two distinct rows. A three-part key would collapse these and
---    silently lose one. This is the published CW001 `1P` collision.
+-- B. The five-part merch-group key BEHAVES. Category is part of source identity,
+--    so rows that share the former four-part key survive independently. The
+--    three-column relationship to merch_group_header remains enforced.
 -- =====================================================================================
 do $$
 declare
@@ -76,28 +76,49 @@ begin
     ('ZZTEST', 'ZZ001', 'Z6', v_run, v_now, v_hash_b, v_now, v_now);
 
   insert into coldlion.merch_group_detail
-    (company_code, division_code, mg_type_code, mg_code, run_id, fetched_at,
+    (company_code, division_code, mg_type_code, mg_category, mg_code, run_id, fetched_at,
      source_hash, first_seen_at, last_seen_at)
   values
-    ('ZZTEST', 'ZZ001', 'Z5', 'ZP', v_run, v_now, v_hash_a, v_now, v_now),
-    ('ZZTEST', 'ZZ001', 'Z6', 'ZP', v_run, v_now, v_hash_b, v_now, v_now);
+    ('ZZTEST', 'ZZ001', 'Z5', 'ZA', 'ZP', v_run, v_now, v_hash_a, v_now, v_now),
+    ('ZZTEST', 'ZZ001', 'Z5', 'ZB', 'ZP', v_run, v_now, v_hash_b, v_now, v_now),
+    ('ZZTEST', 'ZZ001', 'Z6', 'ZA', 'ZP', v_run, v_now, v_hash_b, v_now, v_now);
 
   if (select count(*) from coldlion.merch_group_detail
-       where company_code = 'ZZTEST' and division_code = 'ZZ001' and mg_code = 'ZP') <> 2 then
-    raise exception 'B FAILED: one mg_code under two mg_type_codes did not survive as two rows; the key has collapsed';
+       where company_code = 'ZZTEST' and division_code = 'ZZ001' and mg_code = 'ZP') <> 3 then
+    raise exception 'B FAILED: type/category identity dimensions collapsed distinct rows';
   end if;
 
-  -- And the full four-part key is still unique.
+  -- The full five-part key remains unique.
+  begin
+    insert into coldlion.merch_group_detail
+      (company_code, division_code, mg_type_code, mg_category, mg_code, run_id, fetched_at,
+       source_hash, first_seen_at, last_seen_at)
+    values ('ZZTEST', 'ZZ001', 'Z5', 'ZA', 'ZP', v_run, v_now, v_hash_a, v_now, v_now);
+    raise exception 'B FAILED: the same five-part key was accepted twice';
+  exception when unique_violation then null;
+  end;
+
+  -- Category is mandatory because it participates in durable source identity.
   begin
     insert into coldlion.merch_group_detail
       (company_code, division_code, mg_type_code, mg_code, run_id, fetched_at,
        source_hash, first_seen_at, last_seen_at)
-    values ('ZZTEST', 'ZZ001', 'Z5', 'ZP', v_run, v_now, v_hash_a, v_now, v_now);
-    raise exception 'B FAILED: the same four-part key was accepted twice';
-  exception when unique_violation then null;
+    values ('ZZTEST', 'ZZ001', 'Z5', 'ZN', v_run, v_now, v_hash_a, v_now, v_now);
+    raise exception 'B FAILED: a null merchandise-group category was accepted';
+  exception when not_null_violation then null;
   end;
 
-  raise notice 'B PASSED: mg_code collides across types and the four-part key keeps the rows apart.';
+  -- The repaired key must not weaken the existing header relationship.
+  begin
+    insert into coldlion.merch_group_detail
+      (company_code, division_code, mg_type_code, mg_category, mg_code, run_id, fetched_at,
+       source_hash, first_seen_at, last_seen_at)
+    values ('ZZTEST', 'ZZ001', 'Z7', 'ZA', 'ZP', v_run, v_now, v_hash_a, v_now, v_now);
+    raise exception 'B FAILED: a detail without its merchandise-group header was accepted';
+  exception when foreign_key_violation then null;
+  end;
+
+  raise notice 'B PASSED: type and category preserve detail identity and the header link remains enforced.';
 end;
 $$;
 

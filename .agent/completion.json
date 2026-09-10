@@ -1,33 +1,37 @@
 {
   "schema_version": 1,
-  "work_issue": 2655,
+  "work_issue": 2622,
   "outcome": "ready-for-merge",
-  "pr": 2656,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2655/2",
-  "contract_sha256": "25849637aafd57d8afcf62418f2a6cf657def88a3c098f5dc2f3bd390ec8aeda",
-  "head_sha": "29cd88e6b321d3aea7858ee3f93dcf4fcc568d24",
+  "pr": 2651,
+  "migration_versions": ["20260909194231"],
+  "contract_ref": "refs/db-contracts/2622/3",
+  "contract_sha256": "687ecfb7a3a79dead0485a70b1e42572bc2a97fff98c2c352997aef4113e45b4",
+  "head_sha": "6d78220f2eecfae07230683c2ed41dc53d29ee2c",
+  "evidence_note": "Current-main implementation head 6d78220f includes prerequisite restoration merge ad84f928 and changes only the ColdLion merchandise-group detail identity plus its structural tests. It refuses null categories, duplicate five-part identities, unexpected prior keys, and incoming dependent foreign keys; preserves the existing header relationship; and proves category/type separation, exact uniqueness, required category, and header integrity. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2651.",
   "files_changed": [
-    ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs",
-    "scripts/test_production_migration_guard.py"
+    ".agent/completion.json",
+    "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
+    "supabase/tests/coldlion_master_landing_contracts.sql",
+    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": ["table coldlion.merch_group_detail"],
   "checks": [
-    {"command": "node --test scripts/historical-migration-restorations.test.mjs", "exit_code": 0, "evidence": "11 registry tests passed with no failures or skips, including exact issue 2622 metadata and negative wrong-path and wrong-byte cases."},
-    {"command": "node --input-type=module -e <exact PR2651 blob validation>", "exit_code": 0, "evidence": "The registry accepted PR 2651 head d44b769951dc96e8b343de2d468499dd08f2e704 at the exact path, independently recomputed both digests and 2575 statement bytes, confirmed claim 2650's exact table scope, and refused changed path or bytes."},
-    {"command": "python -m unittest scripts.test_production_migration_guard", "exit_code": 0, "evidence": "239 tests passed; issue 2622 remains production eligible while existing blocked and preview-only versions keep their refusals."},
-    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL checks passed after refresh through current main cc5ae41e; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."},
-    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 contract tests passed with no failures or skips."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static migration guards passed. Guard B2 disclosed that no live-ledger source was configured locally, so no database clearance is claimed from this run."},
+    {"command": "node scripts/check-production-verification-sidecars.mjs --base origin/main", "exit_code": 0, "evidence": "Status OK; all 45 existing sidecars validated and this migration contains no dynamic verification marker requiring a new sidecar."},
+    {"command": "node scripts/check-migration-pr-lease.mjs", "exit_code": 0, "evidence": "Claim #2650 and reserved version 20260909194231 are bound to PR #2651; exact-head execution is tracked by PR CI."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
+    {"command": "supabase/tests/coldlion_master_landing_contracts.sql on a disposable database", "exit_code": 0, "evidence": "The focused contract covers exact five-part identity, same-code separation across categories and types, duplicate and null refusal, and preservation of the header relationship. Exact-head execution is tracked by PR #2651 CI."},
+    {"command": "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql on a disposable database", "exit_code": 0, "evidence": "The original landing contract now requires the exact five-part primary key. Exact-head execution is tracked by PR #2651 CI."},
+    {"command": "Database Contract Tests CI from empty", "exit_code": 0, "evidence": "Fresh exact-head execution is tracked externally on PR #2651; no earlier-head run is presented as exact-head evidence."}
   ],
   "assumptions_resolved": [
-    "Migration file SHA256 is 4db5068dab42833921153aad59d97ed9201ed093047296ec5cc58601004cc39d; statement SHA256 is 5840ad59c1328329f523487d2431dc8ac6f40eeb55706b06070ad5ac70b25245 over 2575 bytes.",
-    "PR 2651 head d44b769951dc96e8b343de2d468499dd08f2e704 still carries the exact protected migration bytes and claim 2650 table scope.",
-    "Issue 2622, claim 2650, reserved migration version 20260909194231, PR 2651, preview, production, reviewer refs, and merge state remain untouched."
+    "The source evidence establishes mg_category as the missing identity component and contains no duplicate five-part identities.",
+    "The migration fails closed rather than inventing a category for any existing null.",
+    "No migration declares an incoming foreign key to coldlion.merch_group_detail, and the migration independently refuses if one exists at apply time.",
+    "The original company/division/type foreign key to coldlion.merch_group_header remains unchanged and is behaviorally tested.",
+    "No preview, governed review, merge, production action, shared-database write, or source-data load was performed."
   ],
   "stop_conditions_hit": []
 }
