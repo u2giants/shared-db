@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2677,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/7",
-  "contract_sha256": "e3ccbaaec2f4527fe7184c88c6d401aa4a7767f37cd8c1ed23ec0557c9e5109c",
-  "head_sha": "e13658591d3a55b6c1133b9d7854fb81a9644f7e",
+  "contract_ref": "refs/db-contracts/2326/8",
+  "contract_sha256": "67e1c94e9ed1b58cb28e1411dfd7c948e09d44eaf4a01a82d89ffcf24b3dcae1",
+  "head_sha": "678e78a18bf83c88db9637c67a706533d2985a4c",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -27,7 +27,7 @@
       "evidence": "Contract is valid."
     },
     {
-      "command": "git diff --check b4b0962b5489e2e8235b97cf1b8b9661d34f237e..e13658591d3a55b6c1133b9d7854fb81a9644f7e",
+      "command": "git diff --check b4b0962b5489e2e8235b97cf1b8b9661d34f237e..678e78a18bf83c88db9637c67a706533d2985a4c",
       "exit_code": 0,
       "evidence": "No output; exit code 0. The range compares the committed delta of the four changed files against current main, so the absence of output is evidence about the committed change, not an empty worktree-to-index comparison."
     }
