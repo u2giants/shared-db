@@ -26,7 +26,7 @@ This plan was requested after the Supabase dashboard AI proposed performance, re
 | 7 | Complete the dated index observation and maintenance/replication investigations | ⬜ open | #1966 delta on or after 2026-09-17 plus maintenance and WAL attribution reports |
 | 8 | Prove end-to-end improvement and close or retain every finding explicitly | ⬜ open | Before/after workload report, CI, deployed SHA, live smoke tests, and advisor reconciliation |
 
-**Fresh implementation starts at Step 3** (Steps 1-2 landed; see the STATUS table). Use a fresh session at the boundaries after Steps 2, 4, 6, and 7; before starting a new phase, re-read this STATUS table and all remaining phases for drift.
+**Fresh implementation starts at Step 4** (Steps 0-3 landed; see the STATUS table). Use a fresh session at the boundaries after Steps 2, 4, 6, and 7; before starting a new phase, re-read this STATUS table and all remaining phases for drift.
 
 ---
 
