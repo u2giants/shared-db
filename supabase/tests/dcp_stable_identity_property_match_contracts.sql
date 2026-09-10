@@ -26,6 +26,7 @@ declare
   v_auth uuid;
   v_opa_a bigint := -257600000001;
   v_opa_b bigint := -257600000002;
+  v_opa_c bigint := -257600000003;
   v_page jsonb;
   v_row jsonb;
   v_copy_state text;
@@ -35,6 +36,10 @@ declare
   v_result jsonb;
   v_history_before integer;
   v_history_after integer;
+  v_refused boolean := false;
+  v_pending_tie uuid := gen_random_uuid();
+  v_tie_at timestamptz := now();
+  v_tie_expected uuid;
 begin
   v_search := 'zz2576-' || v_suffix;
   v_ns := 'dcpvault:' || v_search;
@@ -107,20 +112,24 @@ begin
   --    deliberately NON-namespaced id that must never be grouped.
   -- -------------------------------------------------------------------
   insert into plm.opa_property (licensed_property_id, property_name)
-  values (v_opa_a, v_search || ' OPA A'), (v_opa_b, v_search || ' OPA B');
+  values (v_opa_a, v_search || ' OPA A'), (v_opa_b, v_search || ' OPA B'),
+         (v_opa_c, v_search || ' OPA C');
 
   insert into plm.dcp_property (source_system, source_id, display_name) values
     ('disney_dcpvault', v_ns || '/shared',   v_search || ' Shared Disney'),
     ('disney_dcpvault', v_ns || '/queued',   v_search || ' Queued Disney'),
     ('disney_dcpvault', v_ns || '/conflict', v_search || ' Conflict Disney'),
+    ('disney_dcpvault', v_ns || '/tie',      v_search || ' Tie Disney'),
     ('disney_dcpvault', v_search || '-bare', v_search || ' Bare Disney');
   insert into plm.lucasfilm_dcp_property (source_system, source_id, display_name) values
     ('lucasfilm_dcpvault', v_ns || '/shared',   v_search || ' Shared Lucasfilm'),
-    ('lucasfilm_dcpvault', v_ns || '/conflict', v_search || ' Conflict Lucasfilm');
+    ('lucasfilm_dcpvault', v_ns || '/conflict', v_search || ' Conflict Lucasfilm'),
+    ('lucasfilm_dcpvault', v_ns || '/tie',      v_search || ' Tie Lucasfilm');
   insert into plm.marvel_dcp_property (source_system, source_id, display_name) values
     ('marvel_dcpvault', v_ns || '/shared',   v_search || ' Shared Marvel'),
     ('marvel_dcpvault', v_ns || '/queued',   v_search || ' Queued Marvel'),
     ('marvel_dcpvault', v_ns || '/conflict', v_search || ' Conflict Marvel'),
+    ('marvel_dcpvault', v_ns || '/tie',      v_search || ' Tie Marvel'),
     ('marvel_dcpvault', v_search || '-bare', v_search || ' Bare Marvel');
 
   -- SHARED: the Disney copy is terminally approved and explicitly UNMAPPED
@@ -226,6 +235,41 @@ begin
     v_pending_conflict, 'marvel_dcpvault', 'plm.marvel_dcp_property',
     v_ns || '/conflict', 1, 'pending', 'synthetic-2576-conflict-marvel',
     repeat('7', 64), 'synthetic conflict review'
+  );
+
+  -- TIE: two retained copies terminally approved at the SAME decision_version
+  -- and the SAME approved_at, mapped to the SAME member set, with a third copy
+  -- left pending so the identity is observable through the review queue. The
+  -- tie must be broken by resolution_id -- the primary key -- so the served
+  -- mapping is stable rather than arbitrary.
+  insert into plm.dcp_opa_property_resolution (
+    source_system, source_table, source_property_id, decision_version,
+    creative_decision_state, approval_status, evidence_reference,
+    evidence_sha256, decision_reason, approved_at, approved_by
+  ) values (
+    'disney_dcpvault', 'plm.dcp_property', v_ns || '/tie', 1,
+    'mapped', 'approved', 'synthetic-2576-tie-disney', repeat('a', 64),
+    'synthetic tie one', v_tie_at, 'contract'
+  ), (
+    'marvel_dcpvault', 'plm.marvel_dcp_property', v_ns || '/tie', 1,
+    'mapped', 'approved', 'synthetic-2576-tie-marvel', repeat('b', 64),
+    'synthetic tie two', v_tie_at, 'contract'
+  );
+  insert into plm.dcp_opa_property_resolution_member (
+    resolution_id, licensed_property_id, member_ordinal,
+    submission_source_system, submission_source_table, submission_source_id
+  )
+  select r.resolution_id, v_opa_a, 1, 'disney_opa', 'plm.opa_property', v_opa_a::text
+  from plm.dcp_opa_property_resolution r
+  where r.source_property_id = v_ns || '/tie';
+  insert into plm.dcp_opa_property_resolution (
+    resolution_id, source_system, source_table, source_property_id,
+    decision_version, approval_status, evidence_reference, evidence_sha256,
+    decision_reason
+  ) values (
+    v_pending_tie, 'lucasfilm_dcpvault', 'plm.lucasfilm_dcp_property',
+    v_ns || '/tie', 1, 'pending', 'synthetic-2576-tie-lucasfilm',
+    repeat('c', 64), 'synthetic tie review'
   );
 
   -- BARE: a NON-namespaced source id present under two different systems.
@@ -428,6 +472,95 @@ begin
     where resolution_id = v_pending_follow and approval_status = 'pending'
   ) then
     raise exception '#2576 the superseded proposal was mutated instead of retained';
+  end if;
+
+  -- -------------------------------------------------------------------
+  -- 8. The WRITE side refuses to un-serve a sibling mapping. The identity
+  --    read fails closed on a terminal disagreement; a single-copy review
+  --    screen must not be able to CREATE that disagreement by accident.
+  -- -------------------------------------------------------------------
+  -- KNOWN-BAD input: before this guard the call below succeeded, and every
+  -- retained copy of the identity then rendered 'conflict' with no mapping
+  -- served -- including a copy the reviewer never opened.
+  v_refused := false;
+  begin
+    perform api.db_data_admin_decide_property_match(
+      v_pending_conflict, 'approve', array[v_opa_c],
+      'synthetic divergent member set', gen_random_uuid()
+    );
+  exception when restrict_violation then
+    v_refused := true;
+  end;
+  if not v_refused then
+    raise exception '#2576 an approval was allowed to un-serve a sibling mapping of the same identity';
+  end if;
+  if exists (
+    select 1 from plm.dcp_opa_property_resolution
+    where source_property_id = v_ns || '/conflict' and decision_version > 1
+  ) then
+    raise exception '#2576 the refused approval still recorded a decision version';
+  end if;
+
+  -- The guard must never strand an identity: approving the member set an
+  -- existing terminal mapping already carries is how a disagreement is
+  -- reconciled, and it stays allowed.
+  select api.db_data_admin_decide_property_match(
+    v_pending_conflict, 'approve', array[v_opa_a],
+    'synthetic reconciling approval', gen_random_uuid()
+  ) into v_result;
+  if v_result ->> 'identity_key' <> v_ns || '/conflict'
+     or (v_result ->> 'decision_version')::integer <> 2 then
+    raise exception '#2576 the write guard stranded a reconcilable identity: %', v_result;
+  end if;
+
+  -- The guard is scoped to an approval that carries members, so a rejection
+  -- and an approved lack of mapping are never blocked by it.
+  if position('array_length(v_ids, 1) is not null' in
+       pg_get_functiondef(v_decide::regprocedure)) = 0 then
+    raise exception '#2576 the write guard is not scoped to approvals carrying members';
+  end if;
+
+  -- -------------------------------------------------------------------
+  -- 9. Same-version, same-timestamp terminal copies resolve deterministically
+  --    and are not mistaken for a disagreement.
+  -- -------------------------------------------------------------------
+  select api.db_data_admin_scraped_properties(v_search, null, 500) into v_page;
+  select x into v_row from jsonb_array_elements(v_page -> 'rows') x
+  where x ->> 'source_property_id' = v_ns || '/tie'
+    and x ->> 'source_table' = 'plm.dcp_property';
+  if v_row is null then
+    raise exception '#2576 the tie fixture never reached the reader';
+  end if;
+  if v_row ->> 'mapping_state' <> 'mapped' then
+    raise exception '#2576 identical mapped member sets were treated as a disagreement: %', v_row;
+  end if;
+
+  select max(r.resolution_id) into v_tie_expected
+  from plm.dcp_opa_property_resolution r
+  where r.source_property_id = v_ns || '/tie'
+    and r.approval_status = 'approved';
+
+  select api.db_data_admin_property_match_queue(v_search, null, 500) into v_page;
+  select x into v_row from jsonb_array_elements(v_page -> 'rows') x
+  where x ->> 'resolution_id' = v_pending_tie::text;
+  if v_row is null then
+    raise exception '#2576 the tied identity stopped being reviewable';
+  end if;
+  if v_row ->> 'identity_decision_state' <> 'mapped'
+     or (v_row ->> 'identity_conflict')::boolean then
+    raise exception '#2576 a same-timestamp tie between identical mappings failed closed: %', v_row;
+  end if;
+  if (v_row ->> 'identity_resolution_id')::uuid is distinct from v_tie_expected then
+    raise exception '#2576 the tie was not broken by resolution_id desc as documented (% wanted %)',
+      v_row ->> 'identity_resolution_id', v_tie_expected;
+  end if;
+
+  select api.db_data_admin_property_match_queue(v_search, null, 500) into v_page;
+  if (
+    select x ->> 'identity_resolution_id' from jsonb_array_elements(v_page -> 'rows') x
+    where x ->> 'resolution_id' = v_pending_tie::text
+  ) is distinct from v_tie_expected::text then
+    raise exception '#2576 a tied identity served a different mapping on a second call';
   end if;
 end $$;
 

@@ -74,6 +74,45 @@
 --     authority.
 --   * With no mapped copy at all, the newest terminal copy own state stands.
 --
+--   * The WRITE side is guarded to match. The insert stays copy-keyed, so an
+--     approval carrying members is refused when it would introduce a member
+--     set that disagrees with a terminal mapping already recorded on another
+--     retained copy of the same identity and that no terminal mapping already
+--     holds. That is the only way a single-copy screen could have driven a
+--     working identity into 'conflict' and un-served a mapping the reviewer
+--     never opened. Approving the set an existing terminal mapping already
+--     carries stays allowed, so a disagreement is always reconcilable and no
+--     identity is ever stranded.
+--
+-- ACCEPTED RESIDUAL RISKS (recorded, not hidden)
+-- ---------------------------------------------
+--   * NOT RE-RUNNABLE, BY DESIGN. Every in-place rewrite here refuses unless
+--     the current body is exactly the text it was derived from, and the two
+--     decide-function rewrites now COUNT exact-once hits before replacing, so
+--     a second pass raises rather than duplicating a payload or a guard.
+--     supabase_migrations.schema_migrations already runs each version once;
+--     the counting makes an isolated re-run of a single block fail closed too.
+--   * GROUPING IS PREFIX-ONLY, NOT A CLOSED SYSTEM ALLOW-LIST. 'dcpvault:' is
+--     the id's own emitted namespace and today all 462 such rows belong to the
+--     three DCP copies (census above). Since #2449 dropped the three-table
+--     identity check, a future non-DCP loader that emitted a 'dcpvault:'
+--     prefix would join the DCP identity. This is accepted rather than fixed
+--     here because a source_system allow-list would have to be widened by
+--     every new DCP-family load and would silently un-group an identity when
+--     it was not, which is the failure this issue exists to remove. The prefix
+--     is owned by DCP Vault and no other loader in this repository emits it;
+--     a loader that did would be the defect.
+--   * TIE ORDERING IS TOTAL, NOT ARBITRARY. Both the per-copy pick and the
+--     across-copy pick end in resolution_id desc, and resolution_id is the
+--     primary key, so equal decision_version and equal approved_at still order
+--     deterministically. Divergent mapped member sets never reach the tie: they
+--     fail closed to 'conflict' first.
+--   * identity_copies IS DELIBERATELY WIDER ON THE READ SIDE. The queue carries
+--     copy_decision_state and member_fingerprint so a reviewer screen can show
+--     WHY an identity conflicts; the decide response carries the seven fields a
+--     write acknowledgement needs. Both agree on identity_key and
+--     identity_decision_state, which is what any caller decides on.
+--
 -- Append-only decision history, canonical OPA ids, the security-definer
 -- licensing-manager gate, least-privilege grants, keyset pagination and the
 -- #2449 non-authoritative Marvel-tag exclusion are all unchanged. This
@@ -470,6 +509,7 @@ do $migration$
 declare
   v_sig constant text := 'api.db_data_admin_decide_property_match(uuid,text,bigint[],text,uuid)';
   v_definition text;
+  v_hits integer;
   v_old constant text := $old$    'idempotent_repeat', v_repeat,$old$;
   v_new constant text := $new$    -- Stable business identity this decision belongs to. Non-DCP sources
     -- keep their exact copy key: bare integer source ids collide between
@@ -560,13 +600,125 @@ declare
     'idempotent_repeat', v_repeat,$new$;
 begin
   v_definition := pg_get_functiondef(v_sig::regprocedure);
-  if position(v_old in v_definition) = 0 then
+  -- The needle survives its own replacement: v_new ENDS with the same
+  -- 'idempotent_repeat', v_repeat, fragment. replace() substitutes EVERY
+  -- occurrence, so a second pass over an already-rewritten body would insert a
+  -- second identity payload into this SECURITY DEFINER return object. Count
+  -- exact-once hits first and fail closed on anything else, matching the
+  -- exactly-once rewrite discipline of 20260907200221 lines 456-460.
+  v_hits := (length(v_definition) - length(replace(v_definition, v_old, '')))
+            / nullif(length(v_old), 0);
+  if v_hits is distinct from 1 then
     raise exception
-      'issue #2576: api.db_data_admin_decide_property_match no longer contains the return block this migration was derived from; re-derive from the current merged body';
+      'issue #2576: expected exactly 1 idempotent_repeat return fragment to rewrite in api.db_data_admin_decide_property_match, found %; re-derive from the current merged body',
+      coalesce(v_hits, 0);
   end if;
   execute replace(v_definition, v_old, v_new);
   if position('identity_decision_state' in pg_get_functiondef(v_sig::regprocedure)) = 0 then
     raise exception 'issue #2576: stable-identity decision payload did not install';
+  end if;
+end
+$migration$;
+
+-- ---------------------------------------------------------------------------
+-- 4. api.db_data_admin_decide_property_match
+--    Close the write path the identity read opened. The INSERT is still
+--    copy-keyed, so before this migration a reviewer could approve a pending
+--    sibling to a member set that disagrees with a copy already terminally
+--    mapped: mapped_fingerprints becomes 2, resolution_id becomes null, and
+--    EVERY retained copy of that dcpvault: identity renders 'conflict' with no
+--    mapping served -- including a copy the reviewer never opened. The read
+--    fails closed by design; it must not be possible to reach that state by
+--    accident from a single-copy screen.
+--
+--    The rule refuses rather than guesses, and it never strands an identity:
+--    an approval carrying members is refused only when it would INTRODUCE a
+--    member set that no terminal mapping of the same stable identity already
+--    holds while some other terminal mapping disagrees with it. Approving the
+--    set an existing terminal mapping already carries is always allowed (that
+--    is how a disagreement is reconciled), an approval with no members is
+--    always allowed (a lack of mapping is not a competing authority), and a
+--    rejection is always allowed. Non-dcpvault sources keep their exact copy
+--    key and are unaffected. Members are compared by the same submission
+--    fingerprint the readers use.
+-- ---------------------------------------------------------------------------
+do $migration$
+declare
+  v_sig constant text := 'api.db_data_admin_decide_property_match(uuid,text,bigint[],text,uuid)';
+  v_definition text;
+  v_hits integer;
+  v_old constant text := $old$    begin
+      -- Append-only: a superseding version, never an update of the pending row.
+$old$;
+  v_new constant text := $new$    -- Issue #2576. A copy-keyed approval may not un-serve the stable
+    -- identity's working mapping. Refuse an approval whose member set
+    -- disagrees with an existing terminal mapping of the same identity on
+    -- another retained copy AND is not itself already held by one.
+    if v_status = 'approved'
+       and array_length(v_ids, 1) is not null
+       and v_pending.source_property_id like 'dcpvault:%' then
+      if (
+        select count(*) filter (
+                 where c.copy_state = 'mapped'
+                   and c.fingerprint is distinct from p.fingerprint) > 0
+           and count(*) filter (
+                 where c.copy_state = 'mapped'
+                   and c.fingerprint = p.fingerprint) = 0
+        from (
+          select coalesce(string_agg(
+            'disney_opa|plm.opa_property|' || u::text, chr(10)
+            order by 'disney_opa|plm.opa_property|' || u::text), '') as fingerprint
+          from unnest(v_ids) u
+        ) p
+        left join lateral (
+          select distinct on (t.source_system, t.source_table)
+            (case
+              when t.creative_decision_state is not null
+                then t.creative_decision_state
+              when t.approval_status = 'approved' and mf.fingerprint <> ''
+                then 'mapped'
+              else 'unmapped'
+            end)::text as copy_state,
+            mf.fingerprint
+          from plm.dcp_opa_property_resolution t
+          cross join lateral (
+            select coalesce(string_agg(
+              m.submission_source_system||'|'||m.submission_source_table||'|'||
+                m.submission_source_id, chr(10)
+              order by m.submission_source_system, m.submission_source_table,
+                m.submission_source_id), '') as fingerprint
+            from plm.dcp_opa_property_resolution_member m
+            where m.resolution_id = t.resolution_id
+          ) mf
+          where t.approval_status in ('approved','rejected')
+            and t.source_property_id = v_pending.source_property_id
+            and not (t.source_system = v_pending.source_system
+                 and t.source_table = v_pending.source_table)
+          order by t.source_system, t.source_table, t.decision_version desc,
+            t.approved_at desc nulls last, t.resolution_id desc
+        ) c on true
+      ) then
+        raise exception 'db_data_admin: resolution % would give the stable identity % a member set that disagrees with a terminal mapping already recorded on another retained copy; reconcile the identity instead of recording a conflicting copy',
+          p_resolution_id, v_pending.source_property_id
+          using errcode = 'restrict_violation';
+      end if;
+    end if;
+
+    begin
+      -- Append-only: a superseding version, never an update of the pending row.
+$new$;
+begin
+  v_definition := pg_get_functiondef(v_sig::regprocedure);
+  v_hits := (length(v_definition) - length(replace(v_definition, v_old, '')))
+            / nullif(length(v_old), 0);
+  if v_hits is distinct from 1 then
+    raise exception
+      'issue #2576: expected exactly 1 append-only insert preamble to guard in api.db_data_admin_decide_property_match, found %; re-derive from the current merged body',
+      coalesce(v_hits, 0);
+  end if;
+  execute replace(v_definition, v_old, v_new);
+  if position('would give the stable identity' in pg_get_functiondef(v_sig::regprocedure)) = 0 then
+    raise exception 'issue #2576: stable-identity write guard did not install';
   end if;
 end
 $migration$;

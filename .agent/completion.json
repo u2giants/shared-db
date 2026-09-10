@@ -6,12 +6,16 @@
   "migration_versions": [
     "20260910123636"
   ],
-  "contract_ref": "refs/db-contracts/2576/3",
-  "contract_sha256": "f4da03c764081bd5a783563ab80770a55869ab9ab936dd61a4ca76505733034e",
-  "head_sha": "314a240bed432cf39abebbda23e6c3fda5b79804",
+  "contract_ref": "refs/db-contracts/2576/4",
+  "contract_sha256": "e4a3728164efeff696cfdeda386f306ce7f8e5e17244981d028e2b799e220713",
+  "head_sha": "76a509dd9d09852e5aa8d25cfd02638d2632995b",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/production-verification-sidecars/20260910123636.json",
     "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
     "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
     "supabase/tests/dcp_stable_identity_property_match_contracts.sql"
   ],
@@ -26,14 +30,39 @@
   ],
   "checks": [
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "{\"status\":\"OK\",\"sidecars\":46,...,{\"version\":\"20260910123636\",\"markers\":[200,567],\"sidecar\":true}]}"
+      "evidence": "Static checks passed. Set DATABASE_URL to run migrations against a disposable database."
     },
     {
-      "command": "python -m unittest scripts.test_production_business_risk_gate",
+      "command": "node scripts/check-production-verification-sidecars.mjs",
       "exit_code": 0,
-      "evidence": "Ran 137 tests in 32.622s -- OK (0 failures, 0 errors)."
+      "evidence": "{\"status\":\"OK\",\"sidecars\":46,...,{\"version\":\"20260910123636\",\"markers\":[239,616,719],\"sidecar\":true}]}"
+    },
+    {
+      "command": "python scripts/check_production_verification_sidecars.py",
+      "exit_code": 0,
+      "evidence": "{\"status\":\"OK\",\"sidecars\":46,\"scans\":[]}"
+    },
+    {
+      "command": "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
+      "exit_code": 0,
+      "evidence": "381 passed, 210 subtests passed in 36.12s"
+    },
+    {
+      "command": "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py -q",
+      "exit_code": 0,
+      "evidence": "244 passed, 68 subtests passed in 1.92s"
+    },
+    {
+      "command": "python -m pytest scripts/test_production_business_risk_gate.py scripts/test_production_migration_guard.py scripts/test_check_pass2_routine_supersession.py scripts/test_production_catalog_verification_noop_narrowing.py scripts/test_mutation_sweep_guards.py -q",
+      "exit_code": 0,
+      "evidence": "427 passed, 519 subtests passed in 52.10s"
+    },
+    {
+      "command": "node scripts/check-applied-migration-edit.mjs",
+      "exit_code": 0,
+      "evidence": "UNKNOWN: the applied-migration-edit guard COULD NOT RUN - SUPABASE_ACCESS_TOKEN is not set. The migration 20260910123636 is not applied anywhere and was edited in place, keeping its version."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -47,14 +76,18 @@
     }
   ],
   "assumptions_resolved": [
-    "PROOF LIMIT, STATED PLAINLY: the full supabase/tests suite was NOT run locally, because Docker is unavailable on this machine. The ephemeral-database CI run on this pull request is the FIRST from-empty replay of this migration, and nothing in this report should be read as a local pass of that suite.",
-    "WHAT WAS PROVED LOCALLY: a throwaway initdb cluster in which the rewritten api.db_data_admin_property_match_queue body compiled and resolved all of its names.",
-    "WHAT WAS PROVED LOCALLY: a fixture run of the new identity block returning shared -> mapped, queued -> mapped despite a later pending row, conflict -> conflict with no mapping served, and bare-id disney -> unmapped / marvel -> mapped.",
-    "The two dynamic-execution markers (lines 200 and 567) are targeted in-place rewrites of two api.db_data_admin_* routine bodies. Their post-apply outcome is routine-body text, which none of the three available sidecar check kinds can read back, so both are reviewed as no_durable_target and the behaviour is asserted by supabase/tests/dcp_stable_identity_property_match_contracts.sql on the ephemeral database.",
-    "The sidecar is bound to the exact migration text (sha256 2b24586d5786b62924f4496ce3a2d8b4646172ea034396f5ed0c06e46cfea3ca); the migration was not edited after the sidecar was written.",
-    "No preview or production apply, workflow dispatch, lane-manager run or merge was performed by this worker.",
-    "The first CI run on this branch was red in a second step: the offline gate test test_every_verification_sidecar_is_an_individually_pinned_producer requires every sidecar file to be listed individually in PREVIEW_PRODUCER_PATHS. The new sidecar was registered there; no guard, workflow or required check was weakened, skipped or disabled at any point.",
-    "main advanced while the evidence was being bound, so the pull-request base moved and the earlier evidence commit no longer descended from it. The branch was updated from origin/main and the contract was republished as generation 3 against the new base; no guard was weakened to clear that refusal."
+    "REVIEW HIGH FINDING RESOLVED, NOT RE-ASSERTED: scripts/production_catalog_verification.py was read, and a verifier-owned catalog contract CAN read routine bodies back. dcp_stable_identity_property_match_v1 was added following the exact pattern of single_creative_submission_resolution_ledger_v1, asserting identity_key, mapped_fingerprints and the dcpvault: prefix in api.db_data_admin_scraped_properties; identity_decision_state, identity_conflict, identity_copies and member_fingerprint in api.db_data_admin_property_match_queue; and identity_decision_state, identity_copies and the write-guard message in api.db_data_admin_decide_property_match. All three sidecar marker_reviews are now disposition 'checks' bound to check id dcp_stable_identity_property_match.",
+    "SUPERSESSION SAFETY: catalog_contract_objects() keys routines by full signature and a later contract supersedes an earlier one for shared objects, so the new contract is built as SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT + additional assertions, a strict superset that carries every issue #2449 assertion forward.",
+    "REVIEW MEDIUM FINDING 1 RESOLVED: the decide-function rewrite block now counts occurrences of its needle and raises unless the count is exactly 1, matching the 20260907200221 precedent.",
+    "REVIEW MEDIUM FINDING 2 RESOLVED IN SQL: a new in-place rewrite installs a write-side guard in api.db_data_admin_decide_property_match that refuses (errcode restrict_violation) an approval whose member set disagrees with a terminal mapping already recorded on another retained copy of the same dcpvault identity and is not itself held by any such copy. Approving the member set an existing terminal mapping carries stays allowed, so an identity can always be reconciled and is never stranded. Stated in the migration header and covered by test 8 in supabase/tests/dcp_stable_identity_property_match_contracts.sql.",
+    "GUARD PROVED ABLE TO FAIL: on a throwaway PostgreSQL 18.6 cluster the extracted guard refused a divergent new member set and a subset-only set, and allowed the agreeing sets, an unmapped approval, a rejection, a non-dcpvault identity, an identity with no siblings, and the same set in reversed order.",
+    "REVIEW LOW ITEMS RECORDED: the migration header now carries an ACCEPTED RESIDUAL RISKS section covering not-re-runnable-by-design, prefix-only grouping not being a closed DCP-system allow-list, tie ordering being total rather than arbitrary, and the identity_copies read/write asymmetry. Determinism of the newest-terminal tie is additionally covered by test 9.",
+    "MIGRATION VERSION UNCHANGED: 20260910123636 is not applied anywhere and was edited in place; the filename and the bare 14-digit -- derived-from: 20260907200221, 20260902053756 header parse cleanly under scripts/migration_derivation.py.",
+    "NO NEW DATABASE OBJECT IS CLAIMED: only the three api routines already claimed by this pull request are edited.",
+    "DETECTOR BASELINE: scripts/production_catalog_verification.py is the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json detector_source_sha256 was regenerated to 89157c2a007553ddd8215401c2a821121610784bd016d6a07aa8b6077f6e7c9d, matching precedent commit c740c820. Without it check-production-verification-sidecars.mjs returned UNVERIFIABLE.",
+    "SIDECAR REBOUND: migration_sha256 is now f22ec71c1ca5e65f9a3f0d5f40aa6bff3b1bca794d576e45b23a71682a2244b3 and the marker lines are 239, 616 and 719. The PREVIEW_PRODUCER_PATHS registration in scripts/production_business_risk_gate.py is unchanged and still correct.",
+    "PROOF LIMIT, STATED PLAINLY: Docker is unavailable on this machine, so the full supabase/tests suite was not replayed locally. The ephemeral-database CI run is the first from-empty replay of this migration and its two new tests.",
+    "No preview or production apply, workflow dispatch, lane-manager run, worktree reaper run or merge was performed by this worker."
   ],
   "stop_conditions_hit": []
 }

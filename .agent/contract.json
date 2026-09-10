@@ -1,10 +1,10 @@
 {
   "schema_version": 1,
-  "generation": 3,
+  "generation": 4,
   "work_issue": 2576,
   "work_type": "structural",
   "route": "exclusive-db-lane",
-  "goal": "Serve DCP property-match review state by stable business identity: rewrite api.db_data_admin_property_match_queue to return one coherent review state per identity, retarget the copy-keyed creative-decision block inside api.db_data_admin_scraped_properties, and carry an identity decision state on api.db_data_admin_decide_property_match, with a hash-bound production verification sidecar covering both dynamic-execution markers.",
+  "goal": "Serve DCP property-match review state by stable business identity: rewrite api.db_data_admin_property_match_queue to return one coherent review state per identity, retarget the copy-keyed creative-decision block inside api.db_data_admin_scraped_properties, and carry an identity decision state on api.db_data_admin_decide_property_match, with a hash-bound production verification sidecar covering both dynamic-execution markers. Revision: add a verifier-owned catalog contract asserting the rewritten routine bodies, count the decide-function rewrite needle exactly once and fail closed otherwise, and add a SQL write-side guard so a copy-keyed approval cannot un-serve a sibling mapping of the same stable identity.",
   "base_sha": "1eaa20459253e54ecd7891b6f009eeb20c734f8d",
   "dispatcher": "claude shared-db orchestrator marker 2669",
   "worker": "claude issue 2576 dcp stable identity",
@@ -14,6 +14,8 @@
     "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
     "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
     "scripts/production-verification-sidecars/20260910123636.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
     ".agent/completion.json"
@@ -22,6 +24,8 @@
     "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
     "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
     "scripts/production-verification-sidecars/20260910123636.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
     ".agent/completion.json"
@@ -44,16 +48,18 @@
     "No licensed or private licensor data in any file, commit message or issue comment; this repository is public"
   ],
   "required_checks": [
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "python -m unittest scripts.test_production_business_risk_gate",
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs",
+    "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "git diff --check"
   ],
   "assumptions": [
     "Docker is unavailable on this machine, so the full supabase/tests suite cannot be replayed locally; the ephemeral-database CI job is the first from-empty replay of this migration.",
-    "The two dynamic-execution markers rewrite routine bodies in place, and no verifier-owned catalog contract can read a routine body back, so both are reviewed as no_durable_target with the behaviour asserted by the repository contract test.",
+    "The three dynamic-execution markers rewrite routine bodies in place. A verifier-owned catalog contract CAN read those bodies back via pg_get_functiondef, so all three markers are reviewed as 'checks' against the new dcp_stable_identity_property_match_v1 contract in scripts/production_catalog_verification.py, which is built as a strict superset of single_creative_submission_resolution_ledger_v1 so the #2449 assertions on the shared routines are not superseded away.",
     "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
-    "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard."
+    "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard.",
+    "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",

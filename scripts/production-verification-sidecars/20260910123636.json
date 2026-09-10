@@ -1,21 +1,43 @@
 {
   "schema_version": 1,
   "migration_version": "20260910123636",
-  "migration_sha256": "2b24586d5786b62924f4496ce3a2d8b4646172ea034396f5ed0c06e46cfea3ca",
-  "checks": [],
+  "migration_sha256": "f22ec71c1ca5e65f9a3f0d5f40aa6bff3b1bca794d576e45b23a71682a2244b3",
   "marker_schema_version": 1,
   "marker_reviews": [
     {
-      "line_start": 193,
-      "line_end": 205,
-      "disposition": "no_durable_target",
-      "reason": "Line 200 is a targeted in-place rewrite of api.db_data_admin_scraped_properties: the block reads the CURRENT body with pg_get_functiondef, refuses with an exception unless that body still contains the exact literal text this migration was derived from, and then executes the same definition with only that one block replaced. No identifier, literal or user value is interpolated - both the old and the new text are fixed dollar-quoted literals written in this file - and the block raises again if the new text is not present in the routine afterwards, so the migration cannot commit having half-applied it. Its post-apply outcome is the TEXT OF A ROUTINE BODY, and none of the three sidecar check kinds available here can read a routine body back: exact_row_count reads rows, catalog_absence asserts an object is missing, and catalog_contract may only select a fixed verifier-owned contract, of which none covers this routine. There is therefore no durable target this hash-bound sidecar can assert. The behaviour the rewrite installs is asserted instead by supabase/tests/dcp_stable_identity_property_match_contracts.sql, which runs against an ephemeral database on every pull request."
+      "line_start": 232,
+      "line_end": 244,
+      "disposition": "checks",
+      "check_ids": [
+        "dcp_stable_identity_property_match"
+      ],
+      "reason": "Line 239 is a targeted in-place rewrite of api.db_data_admin_scraped_properties: the block reads the CURRENT body with pg_get_functiondef, refuses with an exception unless that body still contains the exact literal text this migration was derived from, executes the same definition with only that one block replaced, and raises again unless the new text is present afterwards. Nothing is interpolated: both the old and the new text are fixed dollar-quoted literals written in this file. Its durable post-apply outcome IS the new text of the routine in pg_proc, and a hash-bound sidecar CAN assert that: catalog contract dcp_stable_identity_property_match_v1 reads pg_get_functiondef of this exact signature back from the catalog after apply and requires the stable-identity grouping (identity_key, mapped_fingerprints, the dcpvault: namespace) to be present, exactly as single_creative_submission_resolution_ledger_v1 does for the same signature in 20260907200221. The contract is a strict superset of that earlier one, so every #2449 assertion is carried forward and nothing it proved stops being proved. Synthetic behaviour is covered additionally by supabase/tests/dcp_stable_identity_property_match_contracts.sql on every pull request."
     },
     {
-      "line_start": 560,
-      "line_end": 572,
-      "disposition": "no_durable_target",
-      "reason": "Line 567 is the same targeted in-place rewrite pattern applied to api.db_data_admin_decide_property_match: the block reads the CURRENT body with pg_get_functiondef, refuses with an exception unless that body still contains the exact literal return block this migration was derived from, executes the same definition with only that block replaced, and raises again unless the new identity_decision_state payload is present in the routine afterwards. Both the old and the new text are fixed dollar-quoted literals written in this file, so nothing is interpolated and no untrusted text can reach the statement. Its post-apply outcome is the TEXT OF A ROUTINE BODY, which none of the three sidecar check kinds available here can read back: exact_row_count reads rows, catalog_absence asserts an object is missing, and catalog_contract may only select a fixed verifier-owned contract, of which none covers this routine. There is therefore no durable target this hash-bound sidecar can assert. The behaviour the rewrite installs is asserted instead by supabase/tests/dcp_stable_identity_property_match_contracts.sql, which runs against an ephemeral database on every pull request."
+      "line_start": 600,
+      "line_end": 625,
+      "disposition": "checks",
+      "check_ids": [
+        "dcp_stable_identity_property_match"
+      ],
+      "reason": "Line 616 is the same targeted in-place rewrite pattern applied to api.db_data_admin_decide_property_match's return object: it reads the CURRENT body with pg_get_functiondef, COUNTS exact-once occurrences of the return fragment it was derived from and refuses on anything but one, executes the same definition with only that fragment replaced, and raises again unless the identity payload is present afterwards. The counting matters because the replacement text ends with the same fragment, so an uncounted replace() could install a second payload. Both texts are fixed dollar-quoted literals; nothing is interpolated. Its durable post-apply outcome IS the new text of the routine in pg_proc, and catalog contract dcp_stable_identity_property_match_v1 reads pg_get_functiondef of this exact signature back from the catalog after apply and requires identity_decision_state and identity_copies to be present, the same mechanism 20260907200221 used on this signature."
+    },
+    {
+      "line_start": 705,
+      "line_end": 726,
+      "disposition": "checks",
+      "check_ids": [
+        "dcp_stable_identity_property_match"
+      ],
+      "reason": "Line 719 is the same targeted in-place rewrite pattern applied to api.db_data_admin_decide_property_match's write path: it reads the CURRENT body with pg_get_functiondef, COUNTS exact-once occurrences of the append-only insert preamble and refuses on anything but one, executes the same definition with only that preamble replaced by the guard plus the preamble, and raises again unless the guard is present afterwards. Both texts are fixed dollar-quoted literals; nothing is interpolated, and the guard itself interpolates no identifier. Its durable post-apply outcome IS the new text of the routine in pg_proc, and catalog contract dcp_stable_identity_property_match_v1 reads pg_get_functiondef of this exact signature back from the catalog after apply and requires the guard's own refusal text to be present, so a production apply that silently lost the guard is caught by the independent verifier rather than only by the in-migration self-check."
+    }
+  ],
+  "checks": [
+    {
+      "id": "dcp_stable_identity_property_match",
+      "kind": "catalog_contract",
+      "contract": "dcp_stable_identity_property_match_v1",
+      "expected_count": 1
     }
   ]
 }
