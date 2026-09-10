@@ -7,7 +7,7 @@
   "db_writes": [],
   "dispatcher": "Albert Hazan current-chat authorization",
   "file_writes": ["plan_database_efficiency_and_api_security.md", "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "generation": 2,
+  "generation": 3,
   "goal": "Publish a durable Step 3 evidence closeout and accurately mark Step 3 complete, while preserving the separate future gates for Steps 4–8 and leaving issue #2662 open and unscheduled.",
   "prohibited_actions": ["No database, preview, production, cloud, migration-ledger, or migration-ref mutation", "Do not edit SQL migrations, scripts, workflows, or configuration", "Do not close, schedule, or remediate #2662", "Do not weaken review, merge, or programme evidence requirements"],
   "required_checks": ["git diff --check", "node --test scripts/check-sql.test.mjs", "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"],

@@ -4,17 +4,38 @@
   "outcome": "ready-for-merge",
   "pr": 2677,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/2",
-  "contract_sha256": "5457c77ad8ceb7251557a9c18acffe2762d739bef575a0e957ec51b17257fff6",
-  "head_sha": "3a0469e0a0251ad3545cb5255c45f0c37c2461b8",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", "plan_database_efficiency_and_api_security.md", "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md"],
+  "contract_ref": "refs/db-contracts/2326/3",
+  "contract_sha256": "6eeaf2d616201f7b68442583dbe3968ee113d47bc073ba954f74ec0a8b5bfb0d",
+  "head_sha": "1fb50c80805fb1d2ff983f5c6502de963d6c5b33",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md",
+    "plan_database_efficiency_and_api_security.md"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/check-sql.test.mjs", "exit_code": 0, "evidence": "56 tests passed; 0 failed, skipped, or cancelled."},
-    {"command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Contract is valid."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No output; exit code 0."}
+    {
+      "command": "node --test scripts/check-sql.test.mjs",
+      "exit_code": 0,
+      "evidence": "56 tests passed; 0 failed, skipped, or cancelled."
+    },
+    {
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+      "exit_code": 0,
+      "evidence": "Contract is valid."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No output; exit code 0."
+    }
   ],
-  "assumptions_resolved": ["The current upstream base was 1eaa20459253e54ecd7891b6f009eeb20c734f8d when the scoped worktree was created.", "The active marker #2669 belongs to another session, and this closeout performed no database interaction.", "The durable evidence reconciles Step 3 without authorizing a new structural or #2662 change."],
+  "assumptions_resolved": [
+    "The current upstream base was 1eaa20459253e54ecd7891b6f009eeb20c734f8d when the scoped worktree was created.",
+    "The active marker #2669 belongs to another session, and this closeout performed no database interaction.",
+    "The durable evidence reconciles Step 3 without authorizing a new structural or #2662 change."
+  ],
   "stop_conditions_hit": []
 }
