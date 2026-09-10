@@ -6,11 +6,11 @@
     ".agent/completion.json"
   ],
   "assumptions": [
-    "The current upstream base is e9f39d510050555ec18ab23668c9e8a2974a0c3b.",
+    "The current upstream base is b4b0962b5489e2e8235b97cf1b8b9661d34f237e.",
     "The active marker #2669 belongs to another session, so this is repository-maintenance work and performs no database interaction.",
     "The Step 3 closeout reconciles only already durable evidence and already merged outcomes; it creates no structural change and does not reopen #2213, #2214, #2215, or #2662."
   ],
-  "base_sha": "e9f39d510050555ec18ab23668c9e8a2974a0c3b",
+  "base_sha": "b4b0962b5489e2e8235b97cf1b8b9661d34f237e",
   "branch": "codex/issue-2326-step3",
   "db_reads": [],
   "db_writes": [],
@@ -21,8 +21,8 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 4,
-  "goal": "Publish a durable Step 3 evidence closeout and accurately mark Step 3 complete, while preserving the separate future gates for Steps 4\u00e2\u20ac\u201c8 and leaving issue #2662 open and unscheduled.",
+  "generation": 5,
+  "goal": "Publish a durable Step 3 evidence closeout and accurately mark Step 3 complete, while preserving the separate future gates for Steps 4\u20138 and leaving issue #2662 open and unscheduled.",
   "prohibited_actions": [
     "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
     "Do not edit SQL migrations, scripts, workflows, or configuration",
@@ -44,6 +44,6 @@
   ],
   "work_issue": 2326,
   "work_type": "documentation",
-  "worker": "Claude Step 3 evidence-pin refresh",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step3-fix"
+  "worker": "Claude Step 3 review-fix and evidence rebind",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step3"
 }
