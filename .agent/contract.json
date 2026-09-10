@@ -10,9 +10,10 @@
     "mg_category is a required source identity component for every ColdLion merchandise-group detail row.",
     "The existing three-column foreign key to coldlion.merch_group_header remains unchanged.",
     "No dependent foreign key may rely on the obsolete four-column primary key.",
-    "Existing rows must remain intact; null categories or duplicate five-part identities make the migration fail closed."
+    "Existing rows must remain intact; null categories or duplicate five-part identities make the migration fail closed.",
+    "PR 2651 was refreshed through current main ad84f9281fefcd43321aabdc99c784a27e761520 after its exact historical-restoration prerequisite PR 2656 merged."
   ],
-  "base_sha": "e472592446826f1410449b23ab14adada69b514f",
+  "base_sha": "ad84f9281fefcd43321aabdc99c784a27e761520",
   "branch": "codex/issue-2622-merch-group-detail-key",
   "db_reads": [],
   "db_writes": ["table coldlion.merch_group_detail"],
@@ -24,7 +25,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 2,
+  "generation": 3,
   "goal": "Preserve all ColdLion merchandise-group detail rows by making category part of their durable identity without weakening the header relationship.",
   "prohibited_actions": [
     "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
