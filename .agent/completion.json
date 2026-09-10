@@ -4,17 +4,16 @@
   "outcome": "ready-for-merge",
   "pr": 2668,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2439/5",
-  "contract_sha256": "13be93dca3019727b3dba824556a90891f19b785b8fd44ac46c63f7ce55af61a",
-  "head_sha": "4d828963af4ece69e05675021150b27c3597f7d2",
-  "files_changed": [".agent/contract.json", "AGENTS.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md"],
+  "contract_ref": "refs/db-contracts/2439/6",
+  "contract_sha256": "4205891becc371ca17915b4b4b8865e406cd258f77ed1e50f7a0cb168dd047d5",
+  "head_sha": "20a961bdf4eda745ef928d3f4c66b6b4a96bfc46",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", "AGENTS.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node scripts/check-handoff-contract.mjs", "exit_code": 0, "evidence": "The new handoff has a valid open-issue contract and all required frontmatter."},
+    {"command": "node scripts/check-handoff-contract.mjs", "exit_code": 0, "evidence": "Handoff contract satisfied for 1 changed file(s)."},
     {"command": "node --test scripts/check-handoff-contract.test.mjs", "exit_code": 0, "evidence": "16 tests passed; 0 failed, skipped, or cancelled."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors in the closeout delta."},
-    {"command": "secret-shape scan over origin/main...HEAD", "exit_code": 0, "evidence": "No credential, token, database URI, or inline Supabase token value pattern was found."}
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No output; exit code 0."}
   ],
   "assumptions_resolved": ["The handoff contains all ten required sections, separate worker blocks, owner decisions, live ledger state, failures, constraints, and exact next gates.", "The AGENTS.md clarification documents the exact fail-closed non-ledger mechanism and does not change executable behavior.", "No database, preview, production, cloud, migration-ledger, or migration-ref mutation is part of this contract."],
   "stop_conditions_hit": []
