@@ -8,6 +8,7 @@
   "contract_sha256": "9ca13c3eb0e13803bb22711981b6afaaaaa5436af7e19a04728aceb81438ad47",
   "head_sha": "601d106943e4a67c45053c307bc08fb1547f5aa2",
   "files_changed": [
+    ".agent/contract.json",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "plan_reviewer_lease_capacity_truth.md"
