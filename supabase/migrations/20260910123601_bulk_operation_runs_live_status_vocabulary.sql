@@ -2,7 +2,7 @@
 -- vocabulary production actually emits.
 -- Issue #2670 (blocks #2439 and the forwarded appender u2giants/popdam3#123).
 -- Claim issue #2671, reserved version 20260910123601.
--- derived-from: 20260909202801_bulk_operation_runs_history_reissue.sql
+-- derived-from: 20260909202801
 --
 -- THE DEFECT
 -- ----------
@@ -84,10 +84,51 @@
 -- published, removing them would make this migration a narrowing as well as a
 -- widening, and a run that genuinely reports one of them is not a defect.
 --
--- Note on semantics we are NOT inventing: PopDAM writes 'completed' for a run with
--- partial failures ("Tagged 588. 1 skipped. 28 failed."). 'completed' therefore means
--- "the run reached its end", not "nothing went wrong". The per-run counters in
--- progress and result_message carry that detail; the history does not second-guess it.
+-- 'completed' MEANS "REACHED ITS END", SO IT IS NOT BY ITSELF A SUCCESS
+-- --------------------------------------------------------------------
+-- PopDAM writes 'completed' for a run with partial failures ("Tagged 588. 1 skipped.
+-- 28 failed."). Classifying that word as a success on its own would drop every
+-- partial-failure run out of the failures index -- the only alerting surface this
+-- table has -- which is the mirror image of the blindness #2439 exists to end. And
+-- the detail that would qualify it cannot be recovered later: result_message is NOT
+-- a column of this table, it is a field of the admin_config BULK_OPERATIONS object,
+-- and 20260909202801 records that every writer replaces that whole object, so each
+-- run erases the previous one.
+--
+-- So the history retains what qualifies the outcome, in a column it owns:
+--
+--   progress->'failed'  -- a JSON NUMBER, the count of items this run failed on.
+--
+-- A run spelled 'completed' is a success ONLY when it declares that counter and the
+-- counter is zero. Consequences, all enforced by the database and not by convention:
+--
+--   * 'completed' with failed > 0  -> succeeded = false -> IN the failures index.
+--     The partial-failure nightly rebuild alerts, which is the whole point.
+--   * 'completed' with no counter, or a non-numeric one -> succeeded = false -> IN
+--     the failures index. An appender that does not report its outcome detail is
+--     LOUD, not silently green. It is never refused, because a refused append is a
+--     lost run (see THE APPENDER CONTRACT below).
+--   * 'succeeded' stays an unconditional success: that word is a claim about the
+--     outcome, not merely about reaching the end.
+--
+-- THE APPENDER CONTRACT (u2giants/popdam3#123)
+-- --------------------------------------------
+-- 1. ALWAYS APPEND. Every terminal run gets a row. Nothing about this table's shape
+--    may make a worker skip the append, because admin_config is overwritten by the
+--    next run and a skipped append means the run existed nowhere.
+-- 2. CARRY THE COUNTERS. Put the per-item counts the live store reports into
+--    progress -- at minimum {"failed": <n>}, and "skipped"/"processed" alongside it
+--    when known. Omitting "failed" is not refused; it just means the run cannot
+--    claim success and will be listed for a human.
+-- 3. AN OUTCOME WORD THAT NAMES ITS OWN CAUSE NEEDS NO error. 'interrupted',
+--    'stopped' and 'cancelled' each say what happened -- an interrupted run was
+--    interrupted -- and 6 of the 24 live keys are 'interrupted', a quarter of the
+--    observed vocabulary, whose live state may carry no message at all. Demanding an
+--    error there would abort the worker's append transaction with a 23514 and leave
+--    NO history row: exactly the #2439 blindness, re-created by the guard meant to
+--    end it. So those three words explain themselves; supply error or reason_code
+--    when you have one. 'failed' is the one word that names no cause, so 'failed'
+--    must still carry an error or a reason_code.
 --
 -- HOW A REJECTED STATUS IS NOW VISIBLE INSTEAD OF SILENT
 -- -----------------------------------------------------
@@ -140,28 +181,46 @@ alter table public.bulk_operation_runs
   add constraint bulk_operation_runs_source_status_not_blank
   check (source_status is null or length(btrim(source_status)) > 0);
 
--- Success is a classification, not a spelling. Everything downstream keys on this.
+-- Success is a classification, not a spelling, and for 'completed' it is a
+-- classification of the RUN, not of the word. See the 'completed' section above:
+-- 'succeeded' is an unconditional success; 'completed' is a success only when the
+-- run declares progress->'failed' as the JSON number 0. Anything else -- a nonzero
+-- count, a missing key, a non-numeric key -- is not a success and therefore stays in
+-- the failures index. The expression is total: status is not null, and the coalesce
+-- makes the completed branch false rather than null when progress says nothing, so
+-- the column is `not null` and `where not succeeded` has no null hole.
 alter table public.bulk_operation_runs
   add column if not exists succeeded boolean
-  generated always as (status in ('succeeded', 'completed')) stored;
+  generated always as (
+    status = 'succeeded'
+    or coalesce(status = 'completed' and progress -> 'failed' = '0'::jsonb, false)
+  ) stored not null;
 
--- Same correction for "a failure must say why": 'completed' is a success and carries
--- no error, so the original literal would have refused every real successful append.
+-- "A failure must say why", corrected twice over. It now reads the succeeded column
+-- itself, so the success rule exists in exactly ONE place in this file and cannot
+-- drift from the index predicate. (A stored generated column is computed before row
+-- constraints are evaluated and a CHECK may reference it; the real PostgreSQL
+-- restriction runs the other way -- a generation expression may not read another
+-- generated column.) And the demand is made only of the word that names no cause:
+-- see rule 3 of THE APPENDER CONTRACT -- refusing an append destroys the run record
+-- entirely, so the self-describing outcome words are accepted as their own
+-- explanation, and a 'completed' run that is not a success is already explained by
+-- its own counters.
 alter table public.bulk_operation_runs
   drop constraint if exists bulk_operation_runs_failure_is_explained;
 alter table public.bulk_operation_runs
   add constraint bulk_operation_runs_failure_is_explained
   check (
-    -- Deliberately the expression, not the succeeded column: a CHECK that reads a
-    -- generated column depends on generation having happened first, and this
-    -- constraint is not worth that assumption. The two must stay identical.
-    status in ('succeeded', 'completed')
+    succeeded
+    or status in ('completed', 'interrupted', 'stopped', 'cancelled')
     or coalesce(length(btrim(error)), 0) > 0
     or reason_code is not null
   );
 
 -- Rebuilt on the classification. The old index spelled success as 'succeeded' and
--- would have counted every real successful run as a failure.
+-- would have counted every real successful run as a failure. Because `succeeded` is
+-- now outcome-aware, this same predicate also keeps a 'completed' run WITH failures
+-- in the index -- no separate rule, no second place to be wrong.
 drop index if exists public.bulk_operation_runs_failures_idx;
 create index if not exists bulk_operation_runs_failures_idx
   on public.bulk_operation_runs (operation, started_at desc)
@@ -177,10 +236,28 @@ comment on column public.bulk_operation_runs.status is
   '"did it work" -- use the succeeded column.';
 comment on column public.bulk_operation_runs.source_status is
   'The admin_config BULK_OPERATIONS status exactly as the worker read it, when the '
-  'appender normalised it into status. Null means status was copied through unchanged. '
+  'appender normalised it into status. Null carries no claim: on a row appended by a '
+  'normalising appender it means status was copied through unchanged, and on any row '
+  'written before this column existed it means simply that nothing was recorded. '
   'Kept so the history can never quietly relabel a run.';
 comment on column public.bulk_operation_runs.succeeded is
-  'Generated: true for the success vocabulary (succeeded, completed). The one place '
-  'that decides what success means. completed means the run REACHED ITS END, not that '
-  'nothing went wrong -- PopDAM writes it for runs with per-item failures, whose counts '
-  'live in progress and the result message.';
+  'Generated, not null, and the ONE place that decides what success means -- the '
+  'failures index and the failure-is-explained constraint both read this column, so '
+  'nothing else compares status to a literal. True for status = succeeded, and for '
+  'status = completed ONLY when progress->''failed'' is the JSON number 0. completed '
+  'means the run REACHED ITS END, not that nothing went wrong: PopDAM writes it for '
+  'runs with per-item failures, so a completed run that reports failures, or that '
+  'reports no failed counter at all, is false here and is listed in '
+  'bulk_operation_runs_failures_idx for a human to read.';
+comment on column public.bulk_operation_runs.error is
+  'Free-text reason a run did not succeed, when the worker has one. Required only for '
+  'status = failed, the one outcome word that names no cause of its own; interrupted, '
+  'stopped and cancelled are self-describing, and a completed run that reports '
+  'failures is explained by progress->''failed''. Supplying it anyway is always '
+  'welcome. See bulk_operation_runs_failure_is_explained.';
+comment on column public.bulk_operation_runs.progress is
+  'Per-item counters the run reported, as a JSON object. progress->''failed'' MUST be a '
+  'JSON number for a completed run to count as a success -- see the succeeded column. '
+  'Record ''skipped'' and ''processed'' alongside it when known; this is the only place '
+  'those counts survive, because the live admin_config object is overwritten by the '
+  'next run.';
