@@ -345,11 +345,10 @@ export const REVIEWERS = Object.freeze([
 // 2026-09-04T16:55Z. Whoever is orchestrating then should verify the cap has
 // actually lifted (do not assume the clock alone; confirm with a real doctor/attempt)
 // before removing 'kimi-k3' from this list and restoring its original rotation slot.
-// UNPAUSED 2026-09-07 (owner instruction, this session): 'kimi-k3' is back in the
-// rotation. Its 2026-08-20 pause was a credit exhaustion plus wrapper launch
-// failure, both of which are gone: `AI_KIMI_CALLER=claude ai-kimi doctor` on this
-// machine reports kimi 0.36.1, model pin kimi-code/k3, read-only PASS, preflight
-// PASS and auth OK. Verified by running the doctor, not by reading the wrapper.
+// QUARANTINED 2026-09-10 (owner instruction): 'kimi-k3' exhausted its account
+// credit. Historical assignments and verdicts must remain readable, but no new
+// paid review may select it. Re-entry requires an evidence-backed live
+// qualification; elapsed time alone is not proof that account credit returned.
 //
 // RETIRED 2026-09-06 (owner instruction, issue #2485):
 // 'codex-gpt-5.6-sol'. Its account usage limit was exhausted for the whole of a
@@ -382,7 +381,7 @@ export const RETIRED_REVIEWERS = Object.freeze(['glm-5.2', 'muse-spark-1.2-contr
 // OK` on the installed command, and two live review sessions on that commit each
 // returned a single well-formed verdict on model qwen3.8-max above a substantive
 // report. Restoring the quarantine is a one-name addition back to this list.
-export const QUARANTINED_REVIEWERS = Object.freeze([])
+export const QUARANTINED_REVIEWERS = Object.freeze(['kimi-k3'])
 
 // The single fact the gate was missing (#2078). A verdict is evidence only if the
 // reviewer could open the file. Unknown names fail closed.
