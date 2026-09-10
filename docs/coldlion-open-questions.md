@@ -2,7 +2,7 @@
 
 **Why this exists:** ColdLion questions were scattered across seven documents, a handoff, a
 take-over note and two GitHub issues. Sessions were re-asking answered questions and missing live
-ones. This is the single register. **Last reviewed: 2026-09-03 (sixth pass, two sessions). ColdLion answered on defaults, page-size caps and item detail; we withdrew three of our own findings as documented behaviour we had misread, and found two new defects: `/merchGroupDetails` returns nothing, and `/divisions` contradicts `/items` on SPRUCE. A nine-section reply was **SENT by Albert on 2026-09-06** — entries 2.25–2.33 are now awaiting ColdLion's answer. The draft itself is NOT in this repository: it carries item numbers and licensed item descriptions, and shared-db is public. Separately, the settled `/vendors` and `/seasons` field rulings and the unfiltered `/seasons` vendor defect were written into §5. Fifth pass, 2026-09-01: ColdLion explained the prepack SKU explosion, issue 7 closed as NOT a fault, issue 9 answered with a documented limitation.)**
+ones. This is the single register. **Last reviewed: 2026-09-10.** ColdLion's response to the nine-section 2026-09-06 reply was verified directly against the live API: all actionable repairs are live, including inventory company attribution, parameter validation, complete-result defaults, pick-ticket retrieval, merchandise-group details, and response schemas. The apparent `SPRUCE`/`SP001` contradiction was reclassified after checking the actual tenant directory, taxonomy, inventory and record dates: the current Spruce Licensed source identity is `EDGEHOME`/`SP001`; the 2024 `SPRUCE`/`SP001` item rows have no stock and are not a basis to alter that identity or re-contact ColdLion. The draft itself is NOT in this repository: it carries item numbers and licensed item descriptions, and shared-db is public. Separately, the settled `/vendors` and `/seasons` field rulings and the unfiltered `/seasons` vendor defect were written into §5.**
 
 **Who answers these:** ColdLion is a third-party ERP Albert does **not** administer. Questions go to
 **JamieLynn** (API/data) or **Uma** (division/company codes), **from Albert** — never sent by an AI
@@ -14,6 +14,21 @@ session. Some questions are for **Albert** as owner, not for ColdLion; those are
 > §4.** The session had read four ColdLion documents; none of them pointed here. Those documents
 > now carry a banner, and [`coldlion.md`](coldlion.md) is the front door. Re-asking an answered
 > question wastes ColdLion's goodwill, which is a finite resource we depend on.
+
+### 2026-09-10 verification — current status of the September reply
+
+This supersedes the “awaiting” labels retained in the historical rows 2.25–2.32 below.
+
+| Item | Verified result | Status |
+|---|---|---|
+| 2.25 | Inventory now returns company identity and its company/division filters work. | Closed |
+| 2.26 | `EDGEHOME`/`SP001` is the current Spruce Licensed identity. The older `SPRUCE`/`SP001` item rows have no inventory; `active=Y` is not saleability proof. | Closed — no vendor action |
+| 2.27 | Unknown parameters and invalid `active`, `stageCode`, and `mgTypeCode` values now fail clearly. | Closed |
+| 2.28 | Omitted or empty `active` and `stageCode` now return complete results. | Closed |
+| 2.29 | Pick tickets return populated results. | Closed |
+| 2.30 | Division-qualified merchandise-group details return rows. | Closed |
+| 2.31 | `createdTo` is inclusive on pick tickets. Receiving has no available rows to prove separately. | Closed |
+| 2.32 | Every GET response now has a typed schema, including both paged history feeds. | Closed |
 
 **Rules for this file:**
 - When something is answered, **move it to §4 with the answer and the date** — do not delete it, or
