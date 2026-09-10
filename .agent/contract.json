@@ -17,5 +17,9 @@
   "prohibited_actions": ["No database access or mutation", "Do not weaken exact-head, independence, durable-verdict, atomic-transition, or legacy-lease safeguards", "Do not alter reviewer eligibility, roster, or provider wrappers", "Do not merge until the governed pull-request route has two durable exact-head approvals"],
   "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "git diff --check"],
   "assumptions": ["The owner clarification supersedes the historical one-active-lease capacity assumption but not the evidence and independence safeguards.", "Legacy refs remain readable and releasable so no active review is invalidated by this change.", "Concurrent leases are keyed by the durable assignment tuple and only exact 40-character production heads enter the new namespace."],
-  "stop_conditions": ["A required test shows a concurrent lease can overwrite, release, or authorize a sibling assignment", "The change would require relaxing an existing exact-head or independent-review rule", "The work expands into database structure or application behavior"]
+  "stop_conditions": [
+    "A required test shows a concurrent lease can overwrite, release, or authorize a sibling assignment",
+    "The change would require relaxing an existing exact-head or independent-review rule",
+    "The work expands into database structure or application behavior"
+  ]
 }
