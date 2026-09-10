@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 5,
+  "generation": 6,
   "work_issue": 2576,
   "work_type": "structural",
   "route": "exclusive-db-lane",
@@ -60,7 +60,7 @@
     "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
     "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard.",
     "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this.",
-    "Generation 5 exists only to bind the completion report to the implementation head 339e4dba196e6fcef9c1d994e23e5dc05aeaa09c: the git-evidence check requires the two .agent files, and only those, to change in a commit following report.head_sha."
+    "Generation 6 binds the completion report to implementation head b2c68f37ae6145fdd0a2929935dc08425dbb3b30, which replaces max(r.resolution_id) in contract test 9 with the migration's own three-key ORDER BY plus limit 1; max() has no uuid overload, and casting to text would compare uuids in a different collation order than the migration does. The git-evidence check requires the two .agent files, and only those, to change in the commit following report.head_sha."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",

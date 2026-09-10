@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260910123636"
   ],
-  "contract_ref": "refs/db-contracts/2576/5",
-  "contract_sha256": "50b11bee8d8531a7ee9de409c0a5b687cbc72daa13deecef8e4fca425860070d",
-  "head_sha": "339e4dba196e6fcef9c1d994e23e5dc05aeaa09c",
+  "contract_ref": "refs/db-contracts/2576/6",
+  "contract_sha256": "096e324e246d917642610adfe1c1a73d2750a8413487d32330692d46764ab2b2",
+  "head_sha": "b2c68f37ae6145fdd0a2929935dc08425dbb3b30",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -89,5 +89,6 @@
     "PROOF LIMIT, STATED PLAINLY: Docker is unavailable on this machine, so the full supabase/tests suite was not replayed locally. The ephemeral-database CI run is the first from-empty replay of this migration and its two new tests.",
     "No preview or production apply, workflow dispatch, lane-manager run, worktree reaper run or merge was performed by this worker."
   ],
+  "ci_defect_fixed": "CI run 34487056728 executed 179 test files; the single non-quarantined failure was dcp_stable_identity_property_match_contracts.sql line 565, ERROR: function max(uuid) does not exist. Contract test 9 now derives the expected tie winner with order by r.decision_version desc, r.approved_at desc nulls last, r.resolution_id desc limit 1 -- byte-for-byte the ordering the migration itself applies -- with no text cast, so the comparison stays uuid-to-uuid. No migration, guard, workflow or quarantine list was touched.",
   "stop_conditions_hit": []
 }
