@@ -18,7 +18,7 @@ Already settled; do not re-ask: Albert authorized production for #2439 on 2026-0
 
 ## 1. What this application is
 
-`u2giants/shared-db` is the governed source of truth for the shared Supabase database structure used by POP's applications. It owns migrations, structural contracts, preview rehearsals, production evidence, and the coordination machinery that prevents concurrent agents from colliding. GitHub is the delivery system; preview project `mvpkijzfmfcxhnzqogzs` is the shared rehearsal database and production project `qsllyeztdwjgirsysgai` is the live database.
+`u2giants/shared-db` is the governed source of truth for the shared Supabase database structure used by POP's applications. It owns migrations, structural contracts, preview rehearsals, production evidence, and the coordination machinery that prevents concurrent agents from colliding. GitHub is the delivery system. The shared rehearsal database must always be resolved afresh from repository variable `PREVIEW_PROJECT_REF`; never copy an old literal from a handoff. Production project `qsllyeztdwjgirsysgai` was the live target proved during this session and must also be re-proved before any future write.
 
 ## 2. What we set out to do this session, and why
 
@@ -34,12 +34,12 @@ Marker #2629 continued the clean handoff from marker #2597. The ordered agenda w
 - #2481 is closed. #2482 remains open and still depends on PopDAM repointing its six readers. #2580 is closed; PR #2627 merged as `e472592446826f1410449b23ab14adada69b514f`, and `20260909084253_sample_shipment_notice_outbox.sql` is on preview, not production. #2579 remains open and unstarted by this session.
 - #2543 structural PR #2631 merged as `cc5ae41e4d03e1af08513adecaa4db36613bf56d`. Preview run 34433956340 succeeded; artifact 10135520140 digest is `sha256:e75270e4b5ec68cdc3d3500b60418154fc40d75bb5bbb89f807b5b373c44cc89`. Prerequisite restoration PRs #2642 and #2663 merged; issues #2657 and #2641 are fulfilled. Issue #2543 remains open for the owner-gated production and private data steps.
 - #2622 structural PR #2651 merged as `7b82064e3264f2921cade463cbb046fb292d0da5`. Preview run 34437375367 succeeded; artifact 10136698313 digest is `sha256:2652f887634de20ff5a434eed967ca61b6589aee37d493cb9179d0cfba234dc8`. Restoration PR #2656 merged as `ad84f9281fefcd43321aabdc99c784a27e761520`; issue #2655 is closed. Issue #2622 remains open for owner-gated production.
-- PR #2649/#2644 merged as `2dfd6de555ac47d88375c2b8f6987a50e4056041`; preview run 34420986240 succeeded, artifact 10130916817 digest `sha256:9fffb323...`; #2644 is closed. The full digest remains in the workflow artifact and should be re-read there before any promotion decision.
+- PR #2649/#2644 merged as `2dfd6de555ac47d88375c2b8f6987a50e4056041`; preview run 34420986240 succeeded, artifact 10130916817 digest `sha256:9fffb323dd483c998a2e163aaff36c2e84b7ea649e65078a89dbd01eac0c86e0`; #2644 is closed.
 - Qwen's SHA-bound adapter repair PR #2667 merged as `236caf500edb01f78baf1d829855704b5d1093f9` and received live acceptance on PR #2653. Issue #2666 is closed.
 - Preview ledger check at 06:13 UTC found 637 of 652 merged versions applied. Ten entries are retired/held. The five genuinely pending versions were `20260907030418`, `20260907031246`, `20260907051735`, `20260909005945`, and `20260909121403`. Do not broad-apply this list.
 - Production ledger check at 06:16 UTC found 615 of 652 merged versions applied. Among the current session's work, `20260909084253`, `20260909115140`, `20260909121403`, `20260909132734`, and `20260909194231` are genuinely pending; `20260909220101` is base-absent until `20260909132734` is co-present or an exact resulting state is governed. Do not broad-apply.
 - Open PR inventory at 06:02 UTC contained #2645, #2640, #2639, #2638, #2607, #2583, #2557, #2527, and #2526 besides then-open #2653. All nine predate this closeout and were conflicting with newer main; this session did not adopt or mutate them.
-- The first closeout queue audit found four finished claims still consuming lanes. Claims #2443 (#2439), #2648 (#2644), #2650 (#2622), and #2630 (#2543) were released through the guarded `--release-claim` path only after their PR branches were proved closed. The final audit at 06:21 UTC reported four empty lanes and one dispatchable issue; Albert's no-new-work instruction means this session did not draw it. Two claims are now `expired-unconfirmed`, not four: claim #2574 on lane 3 has no PR and protects queued #2503; claim #2578 on lane 4 has an open PR and protects queued #2506/#2507. Expiry does not release their object locks.
+- The first closeout queue audit found four finished claims still consuming lanes. Claims #2443 (#2439), #2648 (#2644), #2650 (#2622), and #2630 (#2543) were released through the guarded `--release-claim` path only after their PR branches were proved closed. The final audit at 06:21 UTC accounted for all eight lanes: active claims #2524 and #2525; expired-unconfirmed claims #2574 and #2578; and four empty lanes. It reported one dispatchable issue, but Albert's no-new-work instruction means this session did not draw it. Claim #2574 on lane 3 has no PR and protects queued #2503; claim #2578 on lane 4 has an open PR and protects queued #2506/#2507. Expiry does not release their object locks. Re-run the audit; do not treat this timestamped snapshot as current.
 
 ## 4. Everything we tried that did not work
 
@@ -62,7 +62,7 @@ Marker #2629 continued the clean handoff from marker #2597. The ordered agenda w
 
 ## 6. Exact next steps
 
-1. Open a new orchestrator with a new route ID, resolve its marker, and reread live GitHub/main/ledger state. It worked when exactly one marker resolves to the new route ID.
+1. Open a new orchestrator only with fresh owner authority and a new route ID. A marker opened on or after 2026-09-10 must carry `authorization: owner-current-chat <ISO-8601 instant>` from its own conversation, or `authorization: owner-authorized-handover #2629` only when Albert explicitly orders direct succession and the marker also says `handover_issue: 2629`. Resolve the marker and reread live GitHub/main/ledger state. It worked when exactly one marker resolves to the new route ID and the admission check accepts its authorization.
 2. Re-run `node scripts/manage-migration-author-lanes.mjs --prepare-preview-dispatch 2440` from the new orchestrator worktree after exporting its route ID; then independently confirm whether a workflow run was actually created. If not, use only the emitted exact manifest to dispatch the bounded preview workflow. It worked when `20260909005945` is in the preview ledger and its rehearsal artifact is green.
 3. Continue #2403's named DesignFlow non-production activation for `20260909121403`; do not confuse the shared preview database with that isolated target. It worked when the issue's target database is proved and its nine-table schema is verified there.
 4. Obtain the three owner decisions in section 0 before any production or deployment mutation. Each worked only when the authorization is explicit in the current chat and the exact target/action is named.
@@ -80,6 +80,7 @@ Marker #2629 continued the clean handoff from marker #2597. The ordered agenda w
 - `--prepare-preview-dispatch` may only write readiness state; verify a run exists rather than trusting its name.
 - Do not use `gh pr merge --admin`. Do not broad-apply ledger drift. Do not mutate production without current exact authority.
 - #2624 forbids reap `--apply`. The many pre-existing worktrees remain intentionally untouched; this session's coordinator, #2543, #2622, and #2652 worktrees are clean and their PRs merged, so they are safe candidates only after the reaper itself is fixed.
+- PR #2668's contract is pinned to base `dc1b3835860408f0f90b2c28d22d6fd5150360f8`. If `main` moves before its guarded merge, refresh the branch and re-publish the contract generation, completion report, both reviewer reservations, and both verdicts; none carries across the move.
 - The Qwen review produced four low-priority hardening/doc observations. The live-doc gap was fixed here. The remaining test-hardening suggestions do not weaken the current exact pin and were not opened as new work because Albert explicitly stopped new intake.
 
 ## 8. Access and environment
@@ -96,7 +97,7 @@ Marker #2629 continued the clean handoff from marker #2597. The ordered agenda w
 - #2440's rehearsal remains owed even though the issue is closed. The derivation gate is now repaired, but the next session must prove the dispatch/run and new preview evidence rather than carry forward an old claim.
 - The readiness command/dispatch mismatch could strand future work as a ready ref with no workflow run. No new issue was opened because intake was stopped; the next orchestrator should compare live behavior with the current implementation before deciding whether an existing issue already covers it.
 - The queue audit exits nonzero because open non-structural issues still require their declared reject/fork/repository-session routes and because claims #2574/#2578 need explicit reconciliation. It is not evidence that their locks may be manually deleted.
-- PR #2649's abbreviated digest above must never be used as an authorization input; re-read artifact 10130916817 for the complete digest.
+- Artifact digests are evidence only for their exact recorded run, head, and manifest; never carry one across a changed head or producer set.
 - Production drift contains many unrelated retired, held, pending, and base-absent versions. This handoff is not authorization for any of them.
 - Counts, SHAs, issue states, and PR states were live at the timestamps above and may move as soon as another session starts.
 
