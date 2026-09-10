@@ -1,21 +1,57 @@
 {
-  "allowed_paths": ["AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "assumptions": ["Marker 2629 remains the sole live orchestrator marker until this closeout pull request merges.", "The handoff tracks open continuation issue 2439 so it survives marker closure.", "The rulebook clarifications document the exact non-ledger mechanism already merged by PR 2653 and the enforced six-provider reviewer rotation; they do not change executable behavior.", "The closeout documentation began under the owner's instruction before this contract pair was required by the pull-request preflight; no database, preview, production, cloud, or coordination ref mutation is part of this contract."],
-  "base_sha": "dc1b3835860408f0f90b2c28d22d6fd5150360f8",
-  "branch": "codex/orch-2629-closeout",
-  "db_reads": [],
-  "db_writes": [],
-  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
-  "file_writes": ["AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "generation": 9,
-  "goal": "Publish a fresh-developer-grade closeout for orchestrator marker 2629 and correct the live rulebooks' descriptions of exact immutable non-ledger derivations and the enforced reviewer roster without changing executable code or database state.",
-  "prohibited_actions": ["No database, preview, production, cloud, migration-ledger, or migration-ref mutation", "Do not edit any SQL migration, script, workflow, or configuration", "Do not weaken derivation, review, handoff, merge, or cleanup safeguards", "Do not run the worktree reaper with --apply", "Do not close marker 2629 before this pull request merges"],
-  "required_checks": ["node scripts/check-handoff-contract.mjs", "node --test scripts/check-handoff-contract.test.mjs", "git diff --check"],
-  "route": "repo-session",
   "schema_version": 1,
-  "stop_conditions": ["The handoff omits an owner decision, live environment state, failed attempt, or worker stream", "The rulebook change would alter executable behavior or accept unproved derivation ancestry", "The pull request base moves before guarded merge", "Any new secret is found in the closeout delta"],
-  "work_issue": 2439,
-  "work_type": "documentation",
-  "worker": "codex orchestrator 2629 closeout",
-  "worktree": "C:/repos/shared-db-worktrees/orch-01a085f2"
+  "work_issue": 2670,
+  "work_type": "structural",
+  "route": "shared-db-change",
+  "goal": "Widen the bulk_operation_runs terminal-status vocabulary to the words production actually emits, retain the raw word in source_status, add a generated succeeded classification column, and rebuild the failures index and the 'a failure must say why' constraint on that classification rather than on the literal 'succeeded'.",
+  "base_sha": "ef6634951d791b93b9c463eabc083f2bff17ea7a",
+  "dispatcher": "shared-db orchestrator marker issue 2669",
+  "worker": "claude sub-agent for issue 2670",
+  "branch": "claude/issue-2670-bulk-run-status",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2670-bulk-run-status",
+  "generation": 1,
+  "allowed_paths": [
+    "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "db_reads": [],
+  "db_writes": [
+    "public.bulk_operation_runs",
+    "public.bulk_operation_runs.status",
+    "public.bulk_operation_runs.source_status",
+    "public.bulk_operation_runs.succeeded",
+    "public.bulk_operation_runs_failures_idx"
+  ],
+  "prohibited_actions": [
+    "Do not apply this migration to preview or production",
+    "Do not weaken, skip, or edit any workflow, guard, or CI check to make a check pass",
+    "Do not edit files outside this worktree",
+    "Do not dispatch a workflow, run the lane manager, or merge the pull request",
+    "Do not claim database objects beyond those declared in db_writes"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-applied-migration-edit.mjs",
+    "git diff --check"
+  ],
+  "assumptions": [
+    "Migration version 20260910123601 is the version reserved by claim #2671 for this work.",
+    "No Docker or local Postgres is available in this worktree, so supabase/tests contract tests cannot be executed locally; CI is their first real execution.",
+    "No database credential is configured locally, so no live ledger or applied-migration comparison is possible from here.",
+    "Claim #2671 has been expanded by the orchestrator to declare public.bulk_operation_runs_failures_idx."
+  ],
+  "stop_conditions": [
+    "A required check proves a genuine defect in the migration SQL or the contract tests",
+    "The declared object set would have to widen beyond db_writes",
+    "Making a check pass would require editing a workflow or guard",
+    "The pull request base moves such that the reported evidence no longer describes the branch"
+  ]
 }

@@ -1,20 +1,47 @@
 {
   "schema_version": 1,
-  "work_issue": 2439,
+  "work_issue": 2670,
   "outcome": "ready-for-merge",
-  "pr": 2668,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2439/9",
-  "contract_sha256": "17698b9a5cdf2be9696f02173a57896ea4640d0a39bcaa85f1d295214310a17e",
-  "head_sha": "ef5f5a7003668414214f27b455a0971cbec17f29",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", "AGENTS.md", "docs/agents/section-4-anti-collision-rules.md", "HANDOFF.d/2026-09-10T0614Z-EDGE-DEV-codex-orchestrator-2629-closeout.md"],
-  "db_reads": [],
-  "db_writes": [],
-  "checks": [
-    {"command": "node scripts/check-handoff-contract.mjs", "exit_code": 0, "evidence": "Handoff contract satisfied for 1 changed file(s)."},
-    {"command": "node --test scripts/check-handoff-contract.test.mjs", "exit_code": 0, "evidence": "16 tests passed; 0 failed, skipped, or cancelled."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No output; exit code 0."}
+  "pr": 2674,
+  "migration_versions": ["20260910123601"],
+  "contract_ref": "refs/db-contracts/2670/1",
+  "contract_sha256": "569b4130a4df47c9a4880aaa57f06dbbc4f86ef3fb1cbd13b1d25a45f13a4282",
+  "head_sha": "3611bdac2b110c5d49f71e86a616de42106fcb35",
+  "files_changed": [
+    "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
+    "supabase/tests/bulk_operation_runs_contracts.sql"
   ],
-  "assumptions_resolved": ["The handoff contains all ten required sections, separate worker blocks, owner decisions, live ledger state, failures, constraints, and exact next gates.", "The rulebook clarifications document the exact fail-closed non-ledger mechanism and the enforced six-provider reviewer roster without changing executable behavior.", "No database, preview, production, cloud, migration-ledger, or migration-ref mutation is part of this contract."],
+  "db_reads": [],
+  "db_writes": [
+    "public.bulk_operation_runs",
+    "public.bulk_operation_runs.status",
+    "public.bulk_operation_runs.source_status",
+    "public.bulk_operation_runs.succeeded",
+    "public.bulk_operation_runs_failures_idx"
+  ],
+  "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static checks passed. Guard B compared this branch against base only (source: git:origin/main, newest base version 20260909220101). Guard B2 (backdated against a LIVE LEDGER) DID NOT RUN -- no ledger source configured locally -- so nothing was compared against what the databases have actually applied. Issue #1235 expected-count guard, verify-cost guard and issue #1684 EOL reference guard all passed. No disposable database was available, so DATABASE_URL execution of the migration did not happen."
+    },
+    {
+      "command": "node scripts/check-applied-migration-edit.mjs",
+      "exit_code": 0,
+      "evidence": "UNKNOWN: the guard COULD NOT RUN -- SUPABASE_ACCESS_TOKEN is not set, so the migration ledger could not be read. Exit code 0 here means 'could not compare', NOT 'no drift'. Nothing was compared; do not read this as proof that no applied migration was edited."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No output; exit code 0. No whitespace or conflict-marker defects in the change."
+    }
+  ],
+  "assumptions_resolved": [
+    "THE CONTRACT TESTS WERE NOT EXECUTED LOCALLY. supabase/tests/bulk_operation_runs_contracts.sql was never run in this worktree: no Docker and no local Postgres were available, so no database existed to run it against. CI is the first real execution of these tests. No local test result is claimed.",
+    "Guard B2 of check-sql.sh was skipped because no ledger source is configured locally; the migration's ordering was compared only against origin/main, not against what preview or production has actually applied.",
+    "check-applied-migration-edit.mjs returned UNKNOWN because SUPABASE_ACCESS_TOKEN was unset; nothing was compared.",
+    "The claimed database objects are exactly public.bulk_operation_runs, its status/source_status/succeeded columns, and public.bulk_operation_runs_failures_idx; the migration touches no other object.",
+    "Nothing in this work applied the migration to preview or production, dispatched a workflow, or edited a workflow or guard."
+  ],
   "stop_conditions_hit": []
 }
