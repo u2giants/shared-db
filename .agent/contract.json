@@ -10,7 +10,9 @@
   "worker": "Codex reviewer-concurrency-policy",
   "branch": "codex/reviewer-concurrency-policy",
   "worktree": "C:/repos/shared-db-worktrees/reviewer-concurrency-policy",
-  "allowed_paths": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "plan_reviewer_lease_capacity_truth.md", ".agent/contract.json", ".agent/completion.json"],
+  "allowed_paths": [
+    "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "plan_reviewer_lease_capacity_truth.md", ".agent/contract.json", ".agent/completion.json"
+  ],
   "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "plan_reviewer_lease_capacity_truth.md", ".agent/contract.json", ".agent/completion.json"],
   "db_reads": [],
   "db_writes": [],
