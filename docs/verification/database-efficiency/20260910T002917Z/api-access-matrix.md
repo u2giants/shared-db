@@ -22,13 +22,13 @@ GET /rest/v1/sku_human_description?select=*&limit=0   Accept-Profile: dam    -> 
 
 Controls: `Accept-Profile: public` returns 200; `Accept-Profile: graphql_public` returns 404 `PGRST205` (schema exposed, table absent). The three answers are distinguishable, so a 406 is a real exposure refusal and not a malformed header.
 
-**This retires a Step 1 open item.** Step 1 found three RLS-disabled tables carrying `authenticated` DML privilege. All three — `dam.sku_human_description`, `dflow.item_user_assignment`, `dflow.item_workflow_action` — sit in unexposed schemas and are refused at the boundary before any privilege is consulted. They are **not** a Data API exposure.
+**This retires a Step 1 open item.** Step 1 found three RLS-disabled tables carrying `authenticated` DML privilege. All three — `dam.sku_human_description`, `dflow.item_user_assignment`, `dflow.item_workflow_action` — sit in unexposed schemas. Only `dam.sku_human_description` was probed over HTTP (406, below); the two `dflow` tables rest on the catalog fact that `dflow` is not in the exposed list, which is the same fact the 406 demonstrates. On that basis they are **not** a Data API exposure, but the HTTP demonstration covers one of the three, not all three.
 
 ## Layer 2 — catalog grants (method correction)
 
 `information_schema.role_table_grants` is the wrong source and fails silently: it shows only grants in which the querying identity is grantor, grantee, or a member. Queried that way, production appears to grant `anon`/`authenticated` nothing at all. The grants were therefore read with `has_table_privilege(role, oid, priv)` against `pg_class`.
 
-Positive control: the corrected query returns 437 relations across nine schemas carrying `anon` or `authenticated` table privilege. The empty `information_schema` result is a proven false negative, not a finding.
+Positive control: the corrected query returns 437 relations across nine schemas carrying `anon` or `authenticated` table privilege, against zero rows from `information_schema` for the same roles. The two sources disagree on the same question, and only one of them returns objects that HTTP probing then confirms are reachable, so the empty `information_schema` result is a false negative rather than a finding. **Limitation:** the querying role, its memberships, and a per-object granted/empty pair are not recorded here, so a later reader must re-run both queries rather than check the correction from this document alone.
 
 Of those 437: 51 carry some `anon` privilege; 3 are RLS-disabled tables (all in unexposed schemas, above); 4 are RLS-enabled with zero policies; 8 are views or materialized views.
 
@@ -77,7 +77,7 @@ Identities: anonymous (publishable key only); a CRM application test identity; a
 
 ### 1. `rls_enabled_no_policy` — confirmed harmless today; the over-broad grant is retained as a finding
 
-`public.ai_sentinel_cleanup_log`, `public.dam_search_documents`, `public.dam_search_synonyms`, and `public.scanner_ai_ignores` each hold RLS with no policy and full `SELECT/INSERT/UPDATE/DELETE` for **both** `anon` and `authenticated`. Every read returns count 0 for every identity, because RLS with no policy denies all. **No unauthorized path exists.**
+`public.ai_sentinel_cleanup_log`, `public.dam_search_documents`, `public.dam_search_synonyms`, and `public.scanner_ai_ignores` each hold RLS with no policy and full `SELECT/INSERT/UPDATE/DELETE` for **both** `anon` and `authenticated`. Every read returns count 0 for the **two identities tested** — anonymous and the CRM test identity — because RLS with no policy denies all. The DAM viewer was not probed against these four. **No unauthorized path was found on the identities tested**, and RLS-with-no-policy denies all by definition, so a third identity is not expected to differ; it was not demonstrated.
 
 The grant itself is still wrong. The only thing between an anonymous caller and full DML on four tables is a policy set that happens to be empty; adding one permissive policy for an unrelated reason would open all four at once.
 
@@ -98,7 +98,7 @@ Definer-semantics views and materialized views bypass RLS entirely. A **PopDAM v
 
 The same identity gets **0** from `api.crm_contact_list` and `api.crm_opportunity_list`, which filter by the caller. The boundary is therefore not merely permissive — it is **inconsistent**, and that inconsistency is what proves the probe discriminates rather than always succeeding.
 
-Sixteen `api` views carry definer semantics while granting `SELECT` to `authenticated`: `crm_account_list`, `crm_contact_list`, `crm_contact_segment_counts`, `crm_contact_segment_list`, `crm_customer_list`, `crm_customer_picker_list`, `crm_factory_picker_list`, `crm_ingested_domain_list`, `dam_customer_list`, `dam_factory_list`, `opa_disney_property`, `opa_lucasfilm_property`, `opa_marvel_property`, `pm_customer_list`, `pm_factory_list`, `source_capture_inventory`. Five `public` views and two materialized views are in the same class.
+Sixteen `api` views carry definer semantics while granting `SELECT` to `authenticated`: `crm_account_list`, `crm_contact_list`, `crm_contact_segment_counts`, `crm_contact_segment_list`, `crm_customer_list`, `crm_customer_picker_list`, `crm_factory_picker_list`, `crm_ingested_domain_list`, `dam_customer_list`, `dam_factory_list`, `opa_disney_property`, `opa_lucasfilm_property`, `opa_marvel_property`, `pm_customer_list`, `pm_factory_list`, `source_capture_inventory`. In `public`, five objects are in the same class: three definer views — `sg_archive_usage`, `style_tracker_audit_log_with_user`, `style_tracker_rows_with_bridge` — and the two materialized views `style_guide_folders` and `style_guide_file_groups`. (`public.dam_character_catalog` and `public.style_guide_file_tags_display` are reachable but carry invoker semantics, so RLS applies to them.)
 
 - Intended role: each application's own users. Intended operation: `SELECT` scoped to that application.
 - Current catalog state: definer semantics (or materialized, where RLS cannot apply) plus a blanket `authenticated` grant.
@@ -124,7 +124,7 @@ Untouched here. It is a platform setting rather than a migration and remains a s
 
 ## Verification gate
 
-- Every alleged exposure has both catalog and HTTP evidence — met.
-- Negative controls denied: unexposed schema 406; absent table 404; zero-policy tables count 0; anonymous access to every definer view and materialized view denied 401.
+- Every alleged exposure **that this report presents as a live finding** has both catalog and HTTP evidence — met. This does not extend to the function-execution grants in finding 3, which are catalog-only and are reported as NOT MEASURED rather than as exposures.
+- Negative controls denied: unexposed schema 406; absent table 404; zero-policy tables count 0 on the two identities tested; anonymous access denied 401 on every `public` definer view and materialized view listed above. The `api` views were not probed anonymously, so no claim is made about anonymous access to them.
 - Positive controls still work: `public.properties` returns its true total for both authenticated identities, and `Accept-Profile: public` succeeds.
 - The report contains no row data and no credential values — met.
