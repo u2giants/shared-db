@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2677,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/8",
-  "contract_sha256": "67e1c94e9ed1b58cb28e1411dfd7c948e09d44eaf4a01a82d89ffcf24b3dcae1",
-  "head_sha": "678e78a18bf83c88db9637c67a706533d2985a4c",
+  "contract_ref": "refs/db-contracts/2326/11",
+  "contract_sha256": "0c34812f86ff47a3832932932b02da05045c983082b152fe16605a040ca5708d",
+  "head_sha": "483772d9cfbcd1e6e9165ef02fa7159548326911",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -27,13 +27,13 @@
       "evidence": "Contract is valid."
     },
     {
-      "command": "git diff --check b4b0962b5489e2e8235b97cf1b8b9661d34f237e..678e78a18bf83c88db9637c67a706533d2985a4c",
+      "command": "git diff --check b4b0962b5489e2e8235b97cf1b8b9661d34f237e..483772d9cfbcd1e6e9165ef02fa7159548326911",
       "exit_code": 0,
-      "evidence": "No output; exit code 0. The range compares the committed delta of the four changed files against current main, so the absence of output is evidence about the committed change, not an empty worktree-to-index comparison."
+      "evidence": "No output; exit code 0. The range endpoint 483772d9 is the head under review and the base b4b0962b is the verified merge-base with main, so the absence of output is evidence about the committed change, not an empty worktree-to-index comparison. The only commit after 483772d9 on this branch is the commit carrying this record itself, which changes no file outside .agent/."
     }
   ],
   "assumptions_resolved": [
-    "The current upstream base was b4b0962b5489e2e8235b97cf1b8b9661d34f237e when the branch was refreshed.",
+    "The upstream base is b4b0962b5489e2e8235b97cf1b8b9661d34f237e, verified by git merge-base origin/main codex/issue-2326-step3 on 2026-09-10.",
     "The active marker #2669 belongs to another session, and this closeout performed no database interaction.",
     "The durable evidence reconciles Step 3 without authorizing a new structural or #2662 change."
   ],
