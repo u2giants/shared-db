@@ -1,37 +1,33 @@
 {
   "schema_version": 1,
-  "work_issue": 2622,
+  "work_issue": 2326,
   "outcome": "ready-for-merge",
-  "pr": 2651,
-  "migration_versions": ["20260909194231"],
-  "contract_ref": "refs/db-contracts/2622/3",
-  "contract_sha256": "687ecfb7a3a79dead0485a70b1e42572bc2a97fff98c2c352997aef4113e45b4",
-  "head_sha": "6d78220f2eecfae07230683c2ed41dc53d29ee2c",
-  "evidence_note": "Current-main implementation head 6d78220f includes prerequisite restoration merge ad84f928 and changes only the ColdLion merchandise-group detail identity plus its structural tests. It refuses null categories, duplicate five-part identities, unexpected prior keys, and incoming dependent foreign keys; preserves the existing header relationship; and proves category/type separation, exact uniqueness, required category, and header integrity. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2651.",
+  "pr": 2661,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2326/1",
+  "contract_sha256": "076d1e1bf47a3e5243e46a417e16da05d4f22106c20a0e8439884dedcc7599bb",
+  "head_sha": "bdb0e3397b01d4499849d2d50dec02768a69f61c",
+  "evidence_note": "Step 2 of plan_database_efficiency_and_api_security.md. Read-only throughout: every HTTP probe used select=*&limit=0 with Prefer: count=exact, so each response body was the literal [] and only the Content-Range total was read; no write of any kind was issued and no row contents, column values or credential values appear in the artifact. Catalog reads were pg_class, pg_proc, pg_policy, pg_views, pg_matviews and information_schema.role_table_grants; the last is identity-filtered and returned an empty set on production, which is recorded in the artifact as a proven false negative rather than a finding, and the grants were re-read with has_table_privilege against pg_class (437 relations, positive control). Albert authorized publishing this in the public repository on 2026-09-09 despite it naming a live, unremediated cross-application read path; the remediation is tracked as #2662. A durable REVISE at head 913f88de found five statements stronger than their evidence; commit 45ab3165 narrows each one -- the two dflow tables are marked catalog-only, the zero-policy result is qualified to the two identities tested, the anon-401 claim is limited to the six public objects probed, the verification gate excludes the catalog-only function grants, and the five public definer-class views are named. The information_schema false-negative control now records its own limits. The following evidence-only commit changes only .agent files. A second durable REVISE at head 7cfad95a found four further overclaims: a DAM result attributed to an unprobed view, a self-contradicting catalog census, a misattribution of the three RLS-disabled tables to Step 1's scan, and a 'true total' claim for public.properties with no independent count. All four are corrected, and the Layer 2 census was re-derived from a single recorded predicate. A third durable REVISE at head 58bf4d6b found the Layer 3 public-view count (six) contradicted the catalog and this report own name list (five), and that the plan DML wording was not supported by the SELECT predicate actually recorded; both are corrected. The branch was then rebased onto the current main tip cc5ae41e so the guarded merge could run against it; no content changed in the rebase and the head_sha above names the rebased implementation commit.",
   "files_changed": [
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
-    "supabase/tests/coldlion_master_landing_contracts.sql",
-    "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql"
+    "docs/verification/database-efficiency/20260910T002917Z/api-access-matrix.md",
+    "plan_database_efficiency_and_api_security.md"
   ],
   "db_reads": [],
-  "db_writes": ["table coldlion.merch_group_detail"],
+  "db_writes": [],
   "checks": [
-    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static migration guards passed. Guard B2 disclosed that no live-ledger source was configured locally, so no database clearance is claimed from this run."},
-    {"command": "node scripts/check-production-verification-sidecars.mjs --base origin/main", "exit_code": 0, "evidence": "Status OK; all 45 existing sidecars validated and this migration contains no dynamic verification marker requiring a new sidecar."},
-    {"command": "node scripts/check-migration-pr-lease.mjs", "exit_code": 0, "evidence": "Claim #2650 and reserved version 20260909194231 are bound to PR #2651; exact-head execution is tracked by PR CI."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
-    {"command": "supabase/tests/coldlion_master_landing_contracts.sql on a disposable database", "exit_code": 0, "evidence": "The focused contract covers exact five-part identity, same-code separation across categories and types, duplicate and null refusal, and preservation of the header relationship. Exact-head execution is tracked by PR #2651 CI."},
-    {"command": "supabase/tests/coldlion_raw_landing_phases_2_6_contracts.sql on a disposable database", "exit_code": 0, "evidence": "The original landing contract now requires the exact five-part primary key. Exact-head execution is tracked by PR #2651 CI."},
-    {"command": "Database Contract Tests CI from empty", "exit_code": 0, "evidence": "Fresh exact-head execution is tracked externally on PR #2651; no earlier-head run is presented as exact-head evidence."}
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    }
   ],
   "assumptions_resolved": [
-    "The source evidence establishes mg_category as the missing identity component and contains no duplicate five-part identities.",
-    "The migration fails closed rather than inventing a category for any existing null.",
-    "No migration declares an incoming foreign key to coldlion.merch_group_detail, and the migration independently refuses if one exists at apply time.",
-    "The original company/division/type foreign key to coldlion.merch_group_header remains unchanged and is behaviorally tested.",
-    "No preview, governed review, merge, production action, shared-database write, or source-data load was performed."
+    "The exposed-schema list was obtained from the API boundary as predicted: an unexposed Accept-Profile returns 406 PGRST106 naming public, graphql_public, api, crm, pim, core, app. Controls distinguish it from 404 PGRST205 and from 200.",
+    "The 2026-09-03 plan named three RLS-disabled tables carrying authenticated DML. Step 1's scan did not reproduce them; the corrected has_table_privilege method surfaces them. All three sit in unexposed schemas; dam.sku_human_description was demonstrated over HTTP (406) and the two dflow tables rest on the catalog fact that dflow is not exposed. That Step 1 open item is retired, not a Data API exposure.",
+    "function_search_path_mutable is closed for security-definer functions: zero of them have a mutable search path.",
+    "rls_enabled_no_policy is denied at count 0 on the two identities tested (anonymous and the CRM test identity); the over-broad anon/authenticated DML grant is retained as a Medium finding rather than dismissed.",
+    "security_definer_view and materialized_view_in_api were REPRODUCED as a live cross-application read, and the probe is shown to discriminate because the same identity gets 0 from api.crm_contact_list, which gates internally on app.has_app_access('crm'). api.crm_opportunity_list was not probed with that identity and is not part of the comparison.",
+    "Anonymous and authenticated SECURITY DEFINER function execution is catalogued but NOT exercised, with cause: an RPC call is write-shaped against production. Carried forward explicitly in #2662."
   ],
   "stop_conditions_hit": []
 }
