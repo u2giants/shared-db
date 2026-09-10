@@ -33,6 +33,9 @@ test('abandoned absent work frees only capacity and cannot resume without recove
     makeOwnerCommit:()=>`owner-${++serial}`,createRef:(name,sha)=>{if(refs.has(name))return false;refs.set(name,sha);return true},readRef:name=>refs.get(name)??null,deleteRef:name=>refs.delete(name),getCommitMessage:()=>'',
     openClaims:()=>[structuredClone(claim)],getIssue:number=>structuredClone(issues.get(Number(number))),updateIssue:(number,{body})=>{issues.get(Number(number)).body=body;claim.body=body},
     localWorktreeState:()=>({state:'absent'}),prSources:()=>[],commentIssue:()=>{},
+    // The recovery artifact must be DEREFERENCEABLE, not merely well-shaped;
+    // only this one reference exists in the fixture's object store.
+    verifyArtifact:(reference)=>reference==='artifact:'+'a'.repeat(40)?{kind:'git-object',type:'blob'}:null,
   }
   relinquishAuthorLease({claim:claimNumber,owner:'shared-db.orch/agent-2503',blockedOn:'issue:#2301',worktreeState:'absent'},NOW,io)
   const protectedState=assertLaneAvailable([claim],['table plm.other'],NOW)
@@ -40,6 +43,9 @@ test('abandoned absent work frees only capacity and cannot resume without recove
   assert.equal(protectedState.protected.length,1)
   assert.throws(()=>assertLaneAvailable([claim],['table plm.sample'],NOW),/object collision/)
   assert.throws(()=>resumeAuthorLease({claim:claimNumber,owner:'shared-db.orch/agent-2503',leaseHours:12},NOW,io),/proven-clean worktree or --recovery-artifact/)
+  // A recovery reference of exactly the right shape that names nothing real is
+  // refused; otherwise the recovery gate would only be checking spelling.
+  assert.throws(()=>resumeAuthorLease({claim:claimNumber,owner:'shared-db.orch/agent-2503',leaseHours:12,recoveryArtifact:'artifact:'+'9'.repeat(40)},NOW,io),/cannot be dereferenced/)
   resumeAuthorLease({claim:claimNumber,owner:'shared-db.orch/agent-2503',leaseHours:12,recoveryArtifact:'artifact:'+'a'.repeat(40)},NOW,io)
   const resumed=parseAuthorLease(claim.body,NOW)
   assert.equal(resumed.capacityActive,true)

@@ -1730,6 +1730,18 @@ export const githubIo = {
     return {state:clean?'clean':'dirty'}
   },
   localClean(worktree){return existsSync(worktree)&&execFileSync('git',['-C',worktree,'status','--porcelain'],{encoding:'utf8'}).split(/\r?\n/).filter(Boolean).every((line)=>line.slice(3).replaceAll('\\','/').startsWith('.ai/'))},
+  // A recovery artifact is only worth anything if it can actually be READ back.
+  // Shape validation alone (40-64 hex characters) accepts invented digits, which
+  // makes a recovery gate assertion-only. This dereferences the reference as a
+  // git object in this repository; anything that cannot be resolved is refused.
+  verifyArtifact(reference){
+    const hash=/^artifact:([0-9a-f]{40,64})$/i.exec(String(reference??''))
+    if(!hash)return null
+    try{
+      const type=execFileSync('git',['cat-file','-t',hash[1]],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()
+      return type?{kind:'git-object',type,id:hash[1].toLowerCase()}:null
+    }catch{return null}
+  },
   currentMaxVersion:currentMainMaxVersion,
   commandAvailable(command){return Boolean(resolveCommandPath(command))},
   // Ask the wrapper's own `doctor` whether it can actually work RIGHT NOW.
@@ -5025,6 +5037,21 @@ function validateImmutableArtifactReference(reference, label) {
   return `artifact:${artifact[1]}`
 }
 
+// HIGH: a recovery artifact that is merely well-formed is not a control. The
+// reference must be dereferenceable RIGHT NOW, or the resume gate is a spelling
+// check. https references are refused for recovery precisely because this tool
+// cannot dereference them; they remain acceptable for --blocked-on, which is an
+// informational blocker, not a recovery gate.
+function requireDereferenceableRecoveryArtifact(reference, io) {
+  const normalized=validateImmutableArtifactReference(reference,'--recovery-artifact')
+  if(!/^artifact:[0-9a-f]{40,64}$/i.test(normalized))throw new LaneError('--recovery-artifact must be an immutable object hash this repository can dereference')
+  if(typeof io.verifyArtifact!=='function')throw new LaneError('recovery artifact verification is unavailable; refusing to trust an unverifiable recovery artifact')
+  let resolved
+  try{resolved=io.verifyArtifact(normalized)}catch(error){throw new LaneError(`recovery artifact verification is ambiguous: ${error.message}`)}
+  if(!resolved)throw new LaneError(`recovery artifact ${normalized} cannot be dereferenced`)
+  return normalized
+}
+
 function requestedWorktreeState(value) {
   if(value===undefined||value===null||value==='')return null
   if(!WORKTREE_STATES.includes(value))throw new LaneError(`--worktree-state must be one of ${WORKTREE_STATES.join(', ')}`)
@@ -5075,7 +5102,7 @@ export function relinquishAuthorLease(options, now = new Date(), io = githubIo) 
     if(lease.legacy)throw new LaneError('legacy claim capacity cannot be relinquished')
     if(lease.owner!==options.owner)throw new LaneError('claim belongs to a different owner')
     const blocker=validateCapacityBlocker(options.blockedOn,io)
-    const recoveryArtifact=options.recoveryArtifact?validateImmutableArtifactReference(options.recoveryArtifact,'--recovery-artifact'):null
+    const recoveryArtifact=options.recoveryArtifact?requireDereferenceableRecoveryArtifact(options.recoveryArtifact,io):null
     if(lease.capacityState==='relinquished'){
       const replayState=requestedWorktreeState(options.worktreeState)??(lease.worktreeState==='clean'?'clean':null)
       if(!lease.relinquishmentMetadataLegacy&&lease.blockedOn===blocker&&lease.worktreeState===replayState&&lease.recoveryArtifact===recoveryArtifact)return {claim:Number(options.claim),capacityState:'relinquished',blockedOn:blocker,worktreeState:replayState,recoveryArtifact,idempotent:true}
@@ -5119,12 +5146,20 @@ export function resumeAuthorLease(options, now = new Date(), io = githubIo) {
     if(lease.legacy||lease.owner!==options.owner)throw new LaneError('claim lease is legacy or belongs to a different owner')
     if(lease.capacityState!=='relinquished')throw new LaneError('claim capacity is not relinquished')
     if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before resume')
-    const requestedRecovery=options.recoveryArtifact?validateImmutableArtifactReference(options.recoveryArtifact,'--recovery-artifact'):null
+    const requestedRecovery=options.recoveryArtifact?requireDereferenceableRecoveryArtifact(options.recoveryArtifact,io):null
     if(requestedRecovery&&lease.recoveryArtifact&&requestedRecovery!==lease.recoveryArtifact)throw new LaneError('recovery artifact does not match the relinquished claim')
     if(lease.worktreeState!=='clean'){
-      let clean=false
-      try{clean=observedWorktreeState(lease.worktree,io)==='clean'}catch(error){if(!requestedRecovery&&!lease.recoveryArtifact)throw error}
-      if(!clean&&!requestedRecovery&&!lease.recoveryArtifact)throw new LaneError(`resume from ${lease.worktreeState} requires a proven-clean worktree or --recovery-artifact`)
+      // Every branch below fails closed. The stored reference is re-verified on
+      // every resume, never trusted because it was accepted once.
+      const recovery=requestedRecovery??(lease.recoveryArtifact?requireDereferenceableRecoveryArtifact(lease.recoveryArtifact,io):null)
+      // A `remote` relinquishment says the work lives on another machine. Any
+      // local tree at the same literal path is a different tree, so a clean
+      // local observation can never satisfy it.
+      if(lease.worktreeState==='remote'&&!recovery)throw new LaneError('resume from remote requires --recovery-artifact')
+      // An unreadable observation is an unknown state, and an unknown state is
+      // never excused by a stored recovery string. This must throw.
+      const observed=observedWorktreeState(lease.worktree,io)
+      if(lease.worktreeState!=='remote'&&observed!=='clean'&&!recovery)throw new LaneError(`resume from ${lease.worktreeState} requires a proven-clean worktree or --recovery-artifact`)
     }
     const sources=io.prSources?.()??[],selfPrs=sources.filter((source)=>source.branch===lease.branch)
     if(selfPrs.length>1)throw new LaneError('claim branch has multiple open pull-request sources')
@@ -5177,6 +5212,7 @@ export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
     if(!claimIssues.includes(Number(options.issue)))throw new LaneError('renewal issue number is not identified by the claim title')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy)throw new LaneError('legacy claim leases cannot be renewed')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('claim owner, branch, or worktree mismatch')
     const expectedBody=replaceLeaseExpiry(before.body,desiredExpiry)
     if(lease.active){
@@ -5256,6 +5292,7 @@ export function recoverExpiredClaimFromPr(options, now = new Date(), io = github
     if(claimIssues.length!==1||claimIssues[0]!==Number(options.issue))throw new LaneError('target claim does not belong to the exact issue')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||lease.active)throw new LaneError('target claim lease must be non-legacy and expired')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('claim owner, branch, or worktree mismatch')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const workIssue=io.getIssue(options.issue)
@@ -5312,6 +5349,7 @@ export function expandActiveClaimFromPr(options, now = new Date(), io = githubIo
     if(workIssue?.state!=='open'||scope?.status!=='ready'||scope.workType!=='structural'||scope.route!=='shared-db-orchestrator')throw new LaneError('exact work issue is not open ready structural orchestrator work')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||!lease.active)throw new LaneError('target claim lease is legacy or expired')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('target claim owner, branch, or worktree changed')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const pr=io.getPr(options.pr)
@@ -5359,6 +5397,7 @@ export function expandActiveClaimFromIssue(options,now=new Date(),io=githubIo){
     if(before?.state!=='open'||workstreamKey(before.title)!==`#${Number(options.issue)}`)throw new LaneError('target claim is not open or does not belong to the exact issue')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||!lease.active)throw new LaneError('target claim lease is legacy or expired')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('target claim owner, branch, or worktree changed')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const workIssue=io.getIssue(options.issue),scope=parseQueueScope(workIssue?.body??'')
