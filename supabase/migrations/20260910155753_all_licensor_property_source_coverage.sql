@@ -772,7 +772,6 @@ with latest as (
   from pg_class c
   join pg_namespace n on n.oid = c.relnamespace
   where n.nspname = 'plm' and c.relkind = 'r'
-    and (p_table_name is null or c.relname = p_table_name)
 ), classified as (
   select c.*,
     case
