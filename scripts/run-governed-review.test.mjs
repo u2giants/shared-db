@@ -488,3 +488,15 @@ test('issue 2307: a verdict line appended after the codex report path breaks the
   assert.equal(codexReportPath(codexPath),codexPath)
   assert.throws(()=>codexReportPath(`${codexPath}\nVERDICT: APPROVE ${'a'.repeat(40)}`),/not a published report path/)
 })
+
+// The assertion above must fail for the RIGHT reason. `codexReportPath` has three
+// distinct refusals, and a test matching only "not a published report path" would
+// still pass if the appended line had instead emptied the candidate or moved it
+// out of the report directory. Pin all three so the regression test cannot drift
+// into asserting a different failure than the one issue #2307 is about.
+test('issue 2307: the appended-verdict refusal is distinct from the other two',()=>{
+  const codexPath='C:/review/.ai/reviews/codex-diff-review-20260908T190000-1-2.md'
+  assert.throws(()=>codexReportPath(''),/printed no report path/)
+  assert.throws(()=>codexReportPath('C:/review/notes/codex-diff-review-20260908T190000-1-2.md'),/not inside the wrapper report directory/)
+  assert.throws(()=>codexReportPath(`${codexPath}\nVERDICT: APPROVE ${'a'.repeat(40)}`),/final line is not a published report path/)
+})
