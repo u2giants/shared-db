@@ -1,72 +1,97 @@
 {
   "schema_version": 1,
-  "generation": 8,
-  "work_issue": 2576,
+  "generation": 1,
+  "work_issue": 2579,
   "work_type": "structural",
   "route": "exclusive-db-lane",
-  "goal": "Serve DCP property-match review state by stable business identity: rewrite api.db_data_admin_property_match_queue to return one coherent review state per identity, retarget the copy-keyed creative-decision block inside api.db_data_admin_scraped_properties, and carry an identity decision state on api.db_data_admin_decide_property_match, with a hash-bound production verification sidecar covering both dynamic-execution markers. Revision: add a verifier-owned catalog contract asserting the rewritten routine bodies, count the decide-function rewrite needle exactly once and fail closed otherwise, and add a SQL write-side guard so a copy-keyed approval cannot un-serve a sibling mapping of the same stable identity.",
-  "base_sha": "1eaa20459253e54ecd7891b6f009eeb20c734f8d",
+  "goal": "Expose complete all-licensor Property-source coverage in DB Data Admin: land the Paramount TrackerPlus submission landing schema, classify the post-inventory plm.marvel_* and plm.wwe_* families in api.source_capture_inventory and give TrackerPlus its own latest-complete capture clock, and add exactly three source groups to api.db_data_admin_scraped_properties (Paramount Submissions (TrackerPlus), Coca-Cola Creative asset-library Property choices, WWE Submissions) while keeping Paramount Creative a separate group and manufacturing no vocabulary from inferred or secondary evidence. Publish config/db-data-admin-property-source-coverage.json as the machine-readable authority with a fail-closed validator, and bind the in-place routine rewrite with a hash-bound production verification sidecar and a verifier-owned catalog contract.",
+  "base_sha": "b4b0962b5489e2e8235b97cf1b8b9661d34f237e",
   "dispatcher": "claude shared-db orchestrator marker 2669",
-  "worker": "claude issue 2576 dcp stable identity",
-  "branch": "claude/issue-2576-dcp-identity",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2576-dcp-identity",
+  "worker": "claude issue 2579 source coverage",
+  "branch": "claude/issue-2579-source-coverage",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2579-source-coverage",
   "allowed_paths": [
-    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
-    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
-    "scripts/production-verification-sidecars/20260910123636.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/production_business_risk_gate.py",
+    ".agent/completion.json",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "config/db-data-admin-property-source-coverage.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/check-db-data-admin-property-source-coverage.mjs",
+    "scripts/check-db-data-admin-property-source-coverage.test.mjs",
+    "scripts/production-verification-sidecars/20260910155753.json",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
+    "supabase/migrations/20260910155753_all_licensor_property_source_coverage.sql",
+    "supabase/tests/peanuts_landing_contracts.sql",
+    "supabase/tests/pmt_trackerplus_submission_landing_contracts.sql",
+    "supabase/tests/sega_landing_contracts.sql",
+    "supabase/tests/wildbrain_landing_contracts.sql"
   ],
   "file_writes": [
-    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
-    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
-    "scripts/production-verification-sidecars/20260910123636.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/production_business_risk_gate.py",
+    ".agent/completion.json",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "config/db-data-admin-property-source-coverage.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/check-db-data-admin-property-source-coverage.mjs",
+    "scripts/check-db-data-admin-property-source-coverage.test.mjs",
+    "scripts/production-verification-sidecars/20260910155753.json",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
+    "supabase/migrations/20260910155753_all_licensor_property_source_coverage.sql",
+    "supabase/tests/peanuts_landing_contracts.sql",
+    "supabase/tests/pmt_trackerplus_submission_landing_contracts.sql",
+    "supabase/tests/sega_landing_contracts.sql",
+    "supabase/tests/wildbrain_landing_contracts.sql"
   ],
   "db_reads": [
-    "plm.dcp_opa_property_resolution",
-    "plm.dcp_opa_property_resolution_member",
-    "plm.dcp_opa_scraped_property"
+    "plm.pmt_property",
+    "plm.coke_asset_property_option",
+    "plm.coke_capture",
+    "plm.wwe_property",
+    "plm.wwe_submission_capture"
   ],
   "db_writes": [
-    "api.db_data_admin_property_match_queue",
-    "api.db_data_admin_scraped_properties",
-    "api.db_data_admin_decide_property_match"
+    "plm.pmt_trackerplus_submission_capture",
+    "plm.pmt_trackerplus_submission_property",
+    "plm.begin_pmt_trackerplus_submission_capture",
+    "plm.load_pmt_trackerplus_submission_capture_chunk",
+    "plm.finalize_pmt_trackerplus_submission_capture",
+    "api.source_capture_inventory_exact",
+    "api.source_capture_inventory",
+    "api.db_data_admin_scraped_properties"
   ],
   "prohibited_actions": [
     "No preview or production apply, no workflow dispatch, no lane-manager run, no worktree reaper run",
     "No merge of this pull request by the worker, and never gh pr merge --admin",
     "Do not weaken, skip, edit or disable any workflow, guard script or required check",
-    "Do not edit any migration other than 20260910123636, and never edit an already-applied migration",
+    "Do not edit any migration other than 20260910155753, and never edit an already-applied migration",
+    "Do not create any database object outside the eight claimed objects; a wider scope requires a new contract generation",
     "No licensed or private licensor data in any file, commit message or issue comment; this repository is public"
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-db-data-admin-property-source-coverage.mjs",
+    "node --test scripts/check-db-data-admin-property-source-coverage.test.mjs",
     "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "git diff --check"
   ],
   "assumptions": [
     "Docker is unavailable on this machine, so the full supabase/tests suite cannot be replayed locally; the ephemeral-database CI job is the first from-empty replay of this migration.",
-    "The three dynamic-execution markers rewrite routine bodies in place. A verifier-owned catalog contract CAN read those bodies back via pg_get_functiondef, so all three markers are reviewed as 'checks' against the new dcp_stable_identity_property_match_v1 contract in scripts/production_catalog_verification.py, which is built as a strict superset of single_creative_submission_resolution_ledger_v1 so the #2449 assertions on the shared routines are not superseded away.",
-    "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
-    "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard.",
-    "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this.",
-    "Generation 8 covers the independent review's two Low findings: the create-or-replace of api.db_data_admin_property_match_queue now restates its own comment on function, since the comment set by 20260902053756 still claimed the queue derives no identity state while the new body derives identity_decision_state and identity_conflict. Editing the migration invalidated the hash-bound sidecar, so its migration_sha256 and its three dynamic-execution line ranges were recomputed after that edit and this report was rebound to implementation head dd8c353610dabb5ae63f72ca52fbf7f78d693e93. The review's High finding concerned migration 20260910123601, which is already on main and is not part of this pull request.",
-    "Generation 7 rebinds the completion report to implementation head f26c1a01510f03337aca4c4dec693e8d5e247bee, the commit that merges current main (e9f39d510050555ec18ab23668c9e8a2974a0c3b) into this branch. Generation 6 named pre-merge head b2c68f37ae6145fdd0a2929935dc08425dbb3b30, which stopped being a descendant of the PR base once the base advanced, so the git-evidence ancestry check refused it. No file outside the two .agent evidence files changes between f26c1a01 and the PR head."
+    "The 907-line body of api.db_data_admin_scraped_properties is restated by no migration, so the single dynamic-execution marker is a targeted in-place rewrite via pg_get_functiondef with fail-closed old-text and new-text assertions and a no-op re-run path. Its durable outcome is the routine body, which catalog contract all_licensor_property_source_coverage_v1 reads back after apply; the contract is a strict superset of dcp_stable_identity_property_match_v1 so the #2576 and #2449 assertions are carried forward.",
+    "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commits c740c820 and 339e4dba did exactly this.",
+    "Every verification sidecar and every file on the preview job's data surface must be individually pinned in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py. Adding the sidecar and the coverage manifest there is a registration the offline gate test demands, not a relaxation.",
+    "scripts/check-sql.sh forbids migration verification from reading api.source_capture_inventory or plm.* rows, so the migration's own verification proves the new classification from the installed definition text and the LIVE classification is proved after apply by the catalog contract.",
+    "Three existing landing contract tests (peanuts, sega, wildbrain) carry a v_map prefix array whose own error text instructs a new landing to add one row. The plm.marvel_* and plm.wwe_* rows are appended below every pre-existing prefix, and no earlier prefix is a prefix of marvel_ or wwe_, so no existing classification can change meaning.",
+    "The reserved migration version 20260910155753 was assigned by the dispatcher and is used exactly as given."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",
     "The migration would have to be edited after the hash-bound sidecar is published without regenerating it",
     "The pull request base moves so that the reported files_changed no longer matches Git",
-    "Any check failure could only be cleared by weakening a guard, a workflow or a required check"
+    "Any check failure could only be cleared by weakening a guard, a workflow or a required check",
+    "The work would require creating a database object outside the eight claimed objects"
   ]
 }
