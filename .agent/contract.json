@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 6,
+  "generation": 7,
   "work_issue": 2576,
   "work_type": "structural",
   "route": "exclusive-db-lane",
@@ -60,7 +60,7 @@
     "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
     "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard.",
     "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this.",
-    "Generation 6 binds the completion report to implementation head b2c68f37ae6145fdd0a2929935dc08425dbb3b30, which replaces max(r.resolution_id) in contract test 9 with the migration's own three-key ORDER BY plus limit 1; max() has no uuid overload, and casting to text would compare uuids in a different collation order than the migration does. The git-evidence check requires the two .agent files, and only those, to change in the commit following report.head_sha."
+    "Generation 7 rebinds the completion report to implementation head f26c1a01510f03337aca4c4dec693e8d5e247bee, the commit that merges current main (e9f39d510050555ec18ab23668c9e8a2974a0c3b) into this branch. Generation 6 named pre-merge head b2c68f37ae6145fdd0a2929935dc08425dbb3b30, which stopped being a descendant of the PR base once the base advanced, so the git-evidence ancestry check refused it. No file outside the two .agent evidence files changes between f26c1a01 and the PR head."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",
