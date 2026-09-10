@@ -500,6 +500,9 @@ begin
 end;
 $function$;
 
+comment on function api.db_data_admin_property_match_queue(text, text, integer) is
+  'Read-only, licensing-manager-gated review queue of DCP source Property identities whose LATEST resolution version is still pending. Returns the pending decision''s own evidence references and hashes, its proposed OPA candidate members, and the previously approved version for context. Stable keyset pages over source_table|source_system|source_property_id, one row per pending copy. Issue #2576 adds the stable business identity behind each row (identity_key: the dcpvault: source Property id where present, otherwise the exact copy key, because bare integer source ids collide between licensors) and, for that identity, ONE coherent review state derived only from its own retained terminal decisions: identity_decision_state, identity_resolution_id, identity_conflict (true when the identity''s approved copies map to more than one distinct member set), identity_copy_count and identity_copies. Derives no authority verdict over licensor scope: contract-assertion conflict presentation stays in api.db_data_admin_scraped_properties, which issue #1999 already corrected for Marvel contract assertions over Disney OPA scope.';
+
 -- ---------------------------------------------------------------------------
 -- 3. api.db_data_admin_decide_property_match
 --    Same stable-identity/provenance contract on the write side: the recorded
