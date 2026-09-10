@@ -913,7 +913,12 @@ which is recorded verbatim in the run log. The drift report shows such a version
 as `[BASE-ABSENT]`, not as ordinary pending work.
 
 Do **not** add the line to an already-merged migration — that changes its bytes.
-Merged files that need a declaration get one in `LEGACY_DECLARATIONS`.
+Merged files that have a real earlier migration base get a pinned entry in
+`LEGACY_DECLARATIONS`. A merged file whose source is provably pre-ledger rather
+than another migration uses an exact-version, exact-source-text entry in
+`IMMUTABLE_NON_LEDGER_DERIVATIONS`; this narrow path was added for
+`20260909005945` on 2026-09-10. Never use either registry to excuse unknown or
+unproved ancestry, and never broaden the normal parser to accept prose.
 
 ### 5.0-E Declare a pure-data migration before it merges — `-- catalog-verification: no-op`
 
