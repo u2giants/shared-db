@@ -5720,6 +5720,39 @@ test('an assignment that already carries a durable verdict is never returned (is
   assert.ok(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1999-2005-${head}`))
 })
 
+// A completed review on an older head is immutable evidence, not a live lease.
+// When that same reviewer holds a separate current exact-head assignment, an
+// exclusion must return only the current assignment instead of treating the
+// historical verdict as a reason to strand the current slot.
+test('#2694 returns a live exact-head assignment despite the same reviewer having approved an older head',()=>{
+  const io=withAtomicRefs(reviewIo()),issue=2694,pr=3699,oldHead='a'.repeat(40),currentHead='b'.repeat(40)
+  io.requiresExactReviewHeadSha=true
+  let liveHead=oldHead
+  io.getPr=()=>({number:pr,state:'open',head:{sha:liveHead,ref:'codex/x'}})
+  const old=assignNextReviewer({issue,pr,headSha:oldHead},io)
+  const oldAssignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${oldHead}`
+  const oldLeaseRef=reviewActiveRef(old.reviewer,old)
+  const oldEvidenceSha=io.refs.get(oldAssignmentRef)
+  io.refs.delete(oldLeaseRef)
+  io.refs.set(`refs/db-review-verdicts/${issue}-${pr}-${oldHead}`,oldEvidenceSha)
+  for(let n=0;n<ACTIVE_REVIEWERS.length-1;n++){
+    const head=(n+1).toString(16).padStart(40,'c'),otherPr=3700+n
+    io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:Number(number)===pr?liveHead:head,ref:'codex/x'}})
+    assignNextReviewer({issue:2700+n,pr:otherPr,headSha:head},io)
+  }
+  liveHead=currentHead
+  const current=assignNextReviewer({issue,pr,headSha:currentHead},io)
+  assert.equal(current.reviewer,old.reviewer,'round-robin must reuse the reviewer for the separate current assignment')
+  const currentAssignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${currentHead}`
+  const currentEvidenceSha=io.refs.get(currentAssignmentRef)
+  const excluded=excludeReviewerForPr({issue,pr,reviewer:current.reviewer,reason:'terminal-unavailable',evidenceSha:currentEvidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(excluded.returned[0].assignmentRef,currentAssignmentRef)
+  assert.ok(io.refs.get(oldAssignmentRef),'the approved historical assignment remains durable')
+  assert.equal(io.refs.get(`refs/db-review-verdicts/${issue}-${pr}-${oldHead}`),oldEvidenceSha,'the historical verdict remains untouched')
+  assert.equal(io.refs.get(currentAssignmentRef),undefined,'only the live current assignment is returned')
+})
+
 // A REPLACEMENT HOLDER STRANDS THE SLOT THE SAME WAY AN ORIGINAL DOES.
 // --assign-reviewer reads the replacement namespace FIRST, so a replacement ref
 // left naming an excluded reviewer is the identical #1999 deadlock. The

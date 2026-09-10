@@ -2828,6 +2828,15 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
       // disagreement is corruption, not a preference between two answers.
       if(!named.headSha.startsWith(parsed.headSha.toLowerCase()))throw new LaneError(`assignment ${row.ref} names a head its commit does not`)
       if(parsed.slot!==null&&parsed.slot!==named.slot)throw new LaneError(`assignment ${row.ref} names slot ${named.slot} but its commit says slot ${parsed.slot}`)
+      // A completed review on an older PR head remains durable evidence, but it
+      // is not an outstanding assignment and must not prevent returning this
+      // reviewer's separate live exact-head lease.  The old global lease model
+      // made these indistinguishable by reviewer name; assignment-keyed leases
+      // make the distinction explicit.  Retaining an old approved assignment is
+      // mandatory; only the row that still owns its matching active lease may
+      // be returned by this exclusion.
+      const leaseRef=reviewLeaseRefForAssignment({...parsed,slot:named.slot},Boolean(io.requiresExactReviewHeadSha))
+      if(io.readRef(leaseRef)!==row.sha)continue
       held.push({ref:row.ref,sha:row.sha,headSha:named.headSha,slot:named.slot,replacementSequence:named.replacementSequence,sequence:parsed.sequence})
     }
     // A reviewer that already recorded a durable verdict for an assignment
