@@ -1,11 +1,6 @@
 {
   "allowed_paths": ["scripts/migration_derivation.py", "scripts/test_migration_derivation.py", "docs/verification/throughput-guard-truth-audit-20260828.json", ".agent/contract.json", ".agent/completion.json"],
-  "assumptions": [
-    "Migration 20260909005945 is already merged and its bytes must remain unchanged.",
-    "Its exact pinned header source describes a pre-adoption CI baseline rather than a migration-ledger version.",
-    "The local implementation began under the parent coordinator's direction before this contract was published; no branch, pull request, database, preview, production, or ref mutation occurred before publication.",
-    "PR 2653 was refreshed through current main 59f7d2a7558a1359ef9e7a13c256ff23edf37c50 after PR 2661 moved main during the first review window."
-  ],
+  "assumptions": ["Migration 20260909005945 is already merged and its bytes must remain unchanged.", "Its exact pinned header source describes a pre-adoption CI baseline rather than a migration-ledger version.", "The local implementation began under the parent coordinator's direction before this contract was published; no branch, pull request, database, preview, production, or ref mutation occurred before publication.", "PR 2653 was refreshed through current main 59f7d2a7558a1359ef9e7a13c256ff23edf37c50 after PR 2661 moved main during the first review window."],
   "base_sha": "59f7d2a7558a1359ef9e7a13c256ff23edf37c50",
   "branch": "codex/issue-2652-ledger",
   "db_reads": [],

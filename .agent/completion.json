@@ -16,10 +16,6 @@
     {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "273 reviewed semantic call sites passed; this PR's one new immutable-metadata refusal remains explicitly excluded as non-database state."},
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors before the evidence-only metadata commit."}
   ],
-  "assumptions_resolved": [
-    "The exact six-line source in the merged migration is pinned; any alteration, removal, or added declaration fails closed.",
-    "The migration has no migration-ledger base because it derives from the pre-adoption CI baseline; the exception resolves only that historical case to an empty set.",
-    "No SQL migration, database, preview, production, or migration-ledger mutation was performed."
-  ],
+  "assumptions_resolved": ["The exact six-line source in the merged migration is pinned; any alteration, removal, or added declaration fails closed.", "The migration has no migration-ledger base because it derives from the pre-adoption CI baseline; the exception resolves only that historical case to an empty set.", "No SQL migration, database, preview, production, or migration-ledger mutation was performed."],
   "stop_conditions_hit": []
 }

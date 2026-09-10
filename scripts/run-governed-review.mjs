@@ -169,7 +169,7 @@ export function codexGovernedBody(report,headSha,reportName='the codex report'){
 
 export function wrapperVerdictContractArgs(wrapper,args,headSha){
   const name=wrapperBaseName(wrapper)
-  if(name!=='ai-gemini')return args
+  if(!['ai-gemini','ai-qwen'].includes(name))return args
   const list=[...args],head=String(headSha??'').toLowerCase()
   // EVERY spelling of the flag is checked, not the first one found: `--x value`,
   // `--x=value`, and a repeat later in the argument list. A single unchecked
@@ -186,7 +186,7 @@ export function wrapperVerdictContractArgs(wrapper,args,headSha){
     supplied=true
   }
   if(supplied)return list
-  if(!['new','ask'].includes(String(list[0]??'')))throw new Error('ai-gemini governed reviews must start with the new or ask subcommand')
+  if(!['new','ask'].includes(String(list[0]??'')))throw new Error(`${name} governed reviews must start with the new or ask subcommand`)
   list.splice(1,0,'--governed-verdict',String(headSha))
   return list
 }
