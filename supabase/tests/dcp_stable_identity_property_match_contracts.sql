@@ -535,10 +535,12 @@ begin
     raise exception '#2576 identical mapped member sets were treated as a disagreement: %', v_row;
   end if;
 
-  select max(r.resolution_id) into v_tie_expected
+  select r.resolution_id into v_tie_expected
   from plm.dcp_opa_property_resolution r
   where r.source_property_id = v_ns || '/tie'
-    and r.approval_status = 'approved';
+    and r.approval_status = 'approved'
+  order by r.decision_version desc, r.approved_at desc nulls last, r.resolution_id desc
+  limit 1;
 
   select api.db_data_admin_property_match_queue(v_search, null, 500) into v_page;
   select x into v_row from jsonb_array_elements(v_page -> 'rows') x
