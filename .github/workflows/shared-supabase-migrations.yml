@@ -139,6 +139,12 @@ jobs:
         run: node scripts/check-applied-migration-edit.mjs --base "origin/${GITHUB_BASE_REF:-main}"
       - name: Test SQL migration guards
         run: node --test scripts/check-sql.test.mjs scripts/check-applied-migration-edit.test.mjs
+      # Issue #2579. The coverage manifest is the machine-readable authority for
+      # all-licensor Property-source exposure; it is a gate only if CI runs it.
+      - name: Validate DB Data Admin Property-source coverage
+        run: node scripts/check-db-data-admin-property-source-coverage.mjs
+      - name: Test DB Data Admin Property-source coverage guard
+        run: node --test scripts/check-db-data-admin-property-source-coverage.test.mjs
       # The rehearsal runner opens a database connection, so its refusals are a
       # gate only if CI runs them (issue #1356, external review grok-4.6).
       - name: Test preview rehearsal transaction safety
