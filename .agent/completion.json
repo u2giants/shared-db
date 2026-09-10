@@ -7,7 +7,7 @@
   "contract_ref": "refs/db-contracts/2701/1",
   "contract_sha256": "591d17acccd97a9e6a04386f599fa3432b4e546b8d4620feb0ebf77a63a12418",
   "head_sha": "a7dc9b3d4b0d2531177f98740806c9a7e7cd67d7",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", "apps/db-data-admin/src/PropertyMatchReview.test.tsx", "apps/db-data-admin/src/lib/property-match.ts"],
+  "files_changed": ["apps/db-data-admin/src/PropertyMatchReview.test.tsx", "apps/db-data-admin/src/lib/property-match.ts"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
