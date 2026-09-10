@@ -323,10 +323,12 @@ alter table plm.pmt_trackerplus_submission_property enable row level security;
 
 create policy pmt_trackerplus_submission_capture_staff_read
   on plm.pmt_trackerplus_submission_capture for select to authenticated
-  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(
+    array['administrator','sales','licensing','designer']::app.app_role[]));
 create policy pmt_trackerplus_submission_property_staff_read
   on plm.pmt_trackerplus_submission_property for select to authenticated
-  using (app.has_any_role(array['administrator','licensing']::app.app_role[]));
+  using (app.has_any_role(
+    array['administrator','sales','licensing','designer']::app.app_role[]));
 
 revoke all on plm.pmt_trackerplus_submission_capture,
   plm.pmt_trackerplus_submission_property from public, anon;
@@ -411,7 +413,12 @@ with latest as (
     (select id from plm.pmt_trackerplus_submission_capture
       where status = 'complete'
       order by source_captured_at desc, load_completed_at desc, id desc limit 1)
-      as pmt_trackerplus_capture_id
+      as pmt_trackerplus_capture_id,
+    -- Restored from 20260909115140: the coherent OPA capture root. Dropping it here
+    -- would silently revert the three append-only OPA tables to a snapshot count.
+    (select id from plm.opa_capture where status = 'complete'
+      order by source_captured_at desc, load_completed_at desc, id desc limit 1)
+      as opa_capture_id
 ), catalog as (
   select
     c.oid,
@@ -467,7 +474,19 @@ with latest as (
       format('select count(*) as cnt from plm.%I', c.relname), false, true, ''
     )))[1]::text::bigint as retained_count,
     case
-      -- OPA tables are deliberately upserted current state, not retained captures.
+      -- The three append-only OPA capture tables must use one completed root. These
+      -- arms come from 20260909115140 and must stay AHEAD of the broader mutable OPA
+      -- current-snapshot family below.
+      when c.relname = 'opa_capture' then
+        case when l.opa_capture_id is null then null else 1::bigint end
+      when c.relname in ('opa_capture_scope', 'opa_property_character_capture') then
+        case when l.opa_capture_id is null then null else
+          (xpath('/row/cnt/text()', query_to_xml(format(
+            'select count(*) as cnt from plm.%I where capture_id = %L::uuid',
+            c.relname, l.opa_capture_id::text), false, true, '')))[1]::text::bigint
+        end
+
+      -- Other OPA tables are deliberately upserted current state, not retained captures.
       when c.relname like 'opa\_%' then
         (xpath('/row/cnt/text()', query_to_xml(
           format('select count(*) as cnt from plm.%I', c.relname), false, true, ''
@@ -580,6 +599,8 @@ select
   retained_count as retained_row_count,
   latest_count as latest_complete_row_count,
   case
+    when relname in ('opa_capture','opa_capture_scope','opa_property_character_capture')
+      then 'latest_complete'
     when relname like 'opa\_%' then 'current_snapshot'
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id)
@@ -599,6 +620,8 @@ select
     else 'retained_only'
   end as count_basis,
   case
+    when relname in ('opa_capture','opa_capture_scope','opa_property_character_capture')
+      then case when opa_capture_id is null then null else 'complete' end
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id)
       then case when pmt_trackerplus_capture_id is null then null else 'complete' end
@@ -626,8 +649,12 @@ select
     else null
   end as latest_complete_status,
   case
+    when relname in ('opa_capture','opa_capture_scope','opa_property_character_capture') then
+      case when opa_capture_id is null
+        then 'No complete coherent OPA capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete coherent OPA capture; loading and rejected roots are excluded and no licensed row value is exposed.' end
     when relname like 'opa\_%' then
-      'Current upserted OPA snapshot; there is no retained-capture clock for this table.'
+      'Current upserted OPA snapshot; coherent capture evidence is available only on the three capture tables.'
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id)
          and pmt_trackerplus_capture_id is null then
@@ -748,7 +775,12 @@ with latest as (
     (select id from plm.pmt_trackerplus_submission_capture
       where status = 'complete'
       order by source_captured_at desc, load_completed_at desc, id desc limit 1)
-      as pmt_trackerplus_capture_id
+      as pmt_trackerplus_capture_id,
+    -- Restored from 20260909115140: the coherent OPA capture root. Dropping it here
+    -- would silently revert the three append-only OPA tables to a snapshot count.
+    (select id from plm.opa_capture where status = 'complete'
+      order by source_captured_at desc, load_completed_at desc, id desc limit 1)
+      as opa_capture_id
 ), catalog as (
   select
     c.oid,
@@ -812,6 +844,8 @@ select
   retained_count as retained_row_count,
   latest_count as latest_complete_row_count,
   case
+    when relname in ('opa_capture','opa_capture_scope','opa_property_character_capture')
+      then 'latest_complete'
     when relname like 'opa\_%' then 'current_snapshot'
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id)
@@ -831,6 +865,8 @@ select
     else 'retained_only'
   end as count_basis,
   case
+    when relname in ('opa_capture','opa_capture_scope','opa_property_character_capture')
+      then case when opa_capture_id is null then null else 'complete' end
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id)
       then case when pmt_trackerplus_capture_id is null then null else 'complete' end
@@ -858,8 +894,12 @@ select
     else null
   end as latest_complete_status,
   case
+    when relname in ('opa_capture','opa_capture_scope','opa_property_character_capture') then
+      case when opa_capture_id is null
+        then 'No complete coherent OPA capture exists; latest-complete count is unknown, not zero.'
+        else 'Latest complete coherent OPA capture; loading and rejected roots are excluded and no licensed row value is exposed.' end
     when relname like 'opa\_%' then
-      'Current upserted OPA snapshot; there is no retained-capture clock for this table.'
+      'Current upserted OPA snapshot; coherent capture evidence is available only on the three capture tables.'
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id)
          and pmt_trackerplus_capture_id is null then

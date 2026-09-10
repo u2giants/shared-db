@@ -1,12 +1,12 @@
 {
   "schema_version": 1,
   "migration_version": "20260910155753",
-  "migration_sha256": "9a1dfaccef8867701ace74dfdf1c5634c71bb420f98781b729f3167eb2084a2a",
+  "migration_sha256": "0399e58597d7bf51036146485aa5b130755f3e83264901d9d5a295f9d68ca4b0",
   "marker_schema_version": 1,
   "marker_reviews": [
     {
-      "line_start": 1049,
-      "line_end": 1085,
+      "line_start": 1089,
+      "line_end": 1125,
       "disposition": "checks",
       "check_ids": [
         "all_licensor_property_source_coverage"
