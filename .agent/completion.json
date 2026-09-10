@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260910155753"
   ],
-  "contract_ref": "refs/db-contracts/2579/3",
-  "contract_sha256": "e37a9f843812c3771092d745be3d020a6f44c9fb3a84e291cafe647b4da35b4f",
-  "head_sha": "41ef2061eb17ae93d24c15eeaaa89a813d42b05b",
+  "contract_ref": "refs/db-contracts/2579/4",
+  "contract_sha256": "d5a3c3b0d26f5bf12577317c272b447adbae09a37131f5f766fb37b45b4f580f",
+  "head_sha": "6aab066717b4bbc9de6132d502a9749977785d5e",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -90,7 +90,8 @@
     "A second defect found and fixed: the contract test's negative check used the literal '_inferred_', which can never match the real table names ending in '_inferred'. It now names plm.wwe_asset_property_inferred, plm.wwe_character_property_inferred and plm.wwe_style_guide_property_inferred exactly.",
     "CI repair after the first push: the api.source_capture_inventory view body still carried the `and (p_table_name is null or c.relname = p_table_name)` predicate copied from api.source_capture_inventory_exact. A view takes no parameter, so the entire migration aborted with `column \"p_table_name\" does not exist` and never applied. That single error produced all four database contract failures - the TrackerPlus landing tables were never created, and the pre-existing view kept classifying every plm.marvel_* and plm.wwe_* table as 'other'. The predicate was removed from the view only; the function keeps it, and no contract expectation was changed to make a test pass.",
     "The claim on issue #2679 was amended through the supported path `--expand-active-claim-from-pr`, never by hand, adding the two TrackerPlus staff-read policies and api.source_capture_inventory as declared writes. Contract generation 2 (refs/db-contracts/2579/2) adds docs/verification/throughput-guard-truth-audit-20260828.json to allowed_paths: the truth-audit inventory needed the one new call site introduced by scripts/check-db-data-admin-property-source-coverage.mjs:188, which reports the reserved migration missing only after a direct fs.existsSync test, so it is dispositioned 'excluded'.",
-    "CI round 3: the ephemeral-database replay aborted the migration at its own append-only assertion, '#2579: 6 mutating grants survive on the TrackerPlus landing'. The count read information_schema.role_table_grants with no grantee filter, so it included the table owner's implicit UPDATE/DELETE/TRUNCATE on both new tables (2 x 3 = 6) which no REVOKE can remove. The guard and the matching contract-test assertion now filter to service_role, authenticated, anon and PUBLIC, the same shape used by the wildbrain and sega landing guards; the guarantee is unchanged and the sidecar migration_sha256 was rebound to 9a1dfaccef8867701ace74dfdf1c5634c71bb420f98781b729f3167eb2084a2a."
+    "CI round 3: the ephemeral-database replay aborted the migration at its own append-only assertion, '#2579: 6 mutating grants survive on the TrackerPlus landing'. The count read information_schema.role_table_grants with no grantee filter, so it included the table owner's implicit UPDATE/DELETE/TRUNCATE on both new tables (2 x 3 = 6) which no REVOKE can remove. The guard and the matching contract-test assertion now filter to service_role, authenticated, anon and PUBLIC, the same shape used by the wildbrain and sega landing guards; the guarantee is unchanged and the sidecar migration_sha256 was rebound to 9a1dfaccef8867701ace74dfdf1c5634c71bb420f98781b729f3167eb2084a2a.",
+    "CI round 4: the migration applied and the four earlier database-contract failures cleared, leaving two. opa_coherent_complete_capture_contracts A0 showed api.source_capture_inventory_exact('opa_capture_scope') reporting a zero current-snapshot count where the coherent-capture contract requires an unknown latest-complete count, because this migration's in-place rewrite of the inventory was authored against the definition that preceded 20260909115140 and dropped its OPA clock. wildbrain_nbcu_licensing_read_access C showed the two new TrackerPlus read policies no longer admitting designer, which #1249 forbids. Both were repaired in the migration rather than in the tests; no contract expectation was changed."
   ],
   "assumptions_resolved": [
     {
@@ -135,5 +136,5 @@
     }
   ],
   "stop_conditions_hit": [],
-  "generation": 3
+  "generation": 4
 }

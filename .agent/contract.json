@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 3,
+  "generation": 4,
   "work_issue": 2579,
   "work_type": "structural",
   "route": "exclusive-db-lane",
@@ -88,7 +88,8 @@
     "scripts/check-sql.sh forbids migration verification from reading api.source_capture_inventory or plm.* rows, so the migration's own verification proves the new classification from the installed definition text and the LIVE classification is proved after apply by the catalog contract.",
     "Three existing landing contract tests (peanuts, sega, wildbrain) carry a v_map prefix array whose own error text instructs a new landing to add one row. The plm.marvel_* and plm.wwe_* rows are appended below every pre-existing prefix, and no earlier prefix is a prefix of marvel_ or wwe_, so no existing classification can change meaning.",
     "The reserved migration version 20260910155753 was assigned by the dispatcher and is used exactly as given.",
-    "An append-only grant guard must name the application roles it constrains. information_schema.role_table_grants also lists the table owner's own implicit UPDATE/DELETE/TRUNCATE, which no REVOKE in a migration can remove, so an unfiltered count can never reach zero. Generation 3 scopes the TrackerPlus mutating-grant assertion, and its contract test, to service_role, authenticated, anon and PUBLIC, the shape already used by the wildbrain and sega landing guards."
+    "An append-only grant guard must name the application roles it constrains. information_schema.role_table_grants also lists the table owner's own implicit UPDATE/DELETE/TRUNCATE, which no REVOKE in a migration can remove, so an unfiltered count can never reach zero. Generation 3 scopes the TrackerPlus mutating-grant assertion, and its contract test, to service_role, authenticated, anon and PUBLIC, the shape already used by the wildbrain and sega landing guards.",
+    "Generation 4 repairs two defects the from-empty replay exposed once the migration applied. The in-place inventory rewrite was authored against the pre-20260909115140 definition and silently reverted the three append-only OPA capture tables to a current-snapshot count; the opa_capture root lateral and the latest-complete count, basis, status and note arms are restored ahead of the mutable opa_ family. The two new TrackerPlus read policies admitted only administrator and licensing, narrowing the Paramount read surface that #1249 forbids narrowing, so they now carry the same four-role staff set as every other plm.pmt_* read policy."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",
