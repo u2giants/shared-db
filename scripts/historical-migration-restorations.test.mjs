@@ -3,6 +3,58 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HISTORICAL_RESTORATIONS, validateHistoricalProductionProvenance, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
+test('pins the issue 2622 restoration without changing production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260909194231']
+  assert.equal(row.filename,'supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql')
+  assert.equal(row.fileSha256,'4db5068dab42833921153aad59d97ed9201ed093047296ec5cc58601004cc39d')
+  assert.equal(row.statementBytes,2575)
+  assert.equal(row.statementSha256,'5840ad59c1328329f523487d2431dc8ac6f40eeb55706b06070ad5ac70b25245')
+  assert.equal(Object.isFrozen(row),true)
+  assert.deepEqual(row.objects,[
+    'table coldlion.merch_group_detail',
+  ])
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260909194231_wrong.sql','select 1;\n'),
+    /not an approved exact historical restoration/,
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,'select 1;\n'),
+    /historical restoration file hash mismatch for 20260909194231/,
+  )
+})
+
+test('pins the issue 2543 restoration without changing production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260909115140']
+  assert.equal(row.filename,'supabase/migrations/20260909115140_opa_coherent_complete_capture.sql')
+  assert.equal(row.fileSha256,'8720f0a1fe9a6dbcfc3d40ca6ad5906e08424ea69d84df1284eb75ed544041bc')
+  assert.equal(row.statementBytes,61299)
+  assert.equal(row.statementSha256,'8e054097c5f73d050aacd6ef315b97c709e53f46618b034816c4536b6a28effc')
+  // The superseded pre-review bytes are no longer authorized by the registry.
+  assert.notEqual(row.fileSha256,'9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7')
+  assert.notEqual(row.statementSha256,'0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719')
+  assert.notEqual(row.statementBytes,61267)
+  assert.equal(Object.isFrozen(row),true)
+  assert.deepEqual(row.objects,[
+    'table plm.opa_capture',
+    'table plm.opa_capture_scope',
+    'table plm.opa_property_character_capture',
+    'function plm.begin_opa_capture',
+    'function plm.load_opa_capture_chunk',
+    'function plm.finalize_opa_capture',
+    'function api.source_capture_inventory_exact',
+    'table api.source_capture_inventory',
+    'view api.source_capture_inventory',
+  ])
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260909115140_wrong.sql','select 1;\n'),
+    /not an approved exact historical restoration/,
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,'select 1;\n'),
+    /historical restoration file hash mismatch for 20260909115140/,
+  )
+})
+
 test('pins the issue 2580 restoration without changing production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260909084253']
   assert.equal(row.filename,'supabase/migrations/20260909084253_sample_shipment_notice_outbox.sql')
