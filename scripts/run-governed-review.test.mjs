@@ -473,3 +473,30 @@ test('#2244: other wrappers are untouched by the codex bridge',()=>{
   })
   assert.deepEqual(order,['ai-glm','gh'])
 })
+
+// ISSUE #2307 — DO NOT MAKE THE CODEX WRAPPER PRINT A TERMINAL VERDICT LINE.
+// An abandoned 2026-09-04 branch added an opt-in `VERDICT: <decision> <sha>` line
+// to ai-devops/bin/ai-codex-review, because this reviewer looked dead: it printed
+// only a report path and every round was refused for "no recordable terminal
+// verdict". That was true of an older runner. This one reads the codex verdict
+// out of the published report, and it finds the report by taking the LAST line of
+// stdout, so appending anything after that path makes every codex review refuse.
+// The fix for a dead-looking codex reviewer is never to move its verdict onto
+// stdout.
+test('issue 2307: a verdict line appended after the codex report path breaks the round',()=>{
+  const codexPath='C:/review/.ai/reviews/codex-diff-review-20260908T190000-1-2.md'
+  assert.equal(codexReportPath(codexPath),codexPath)
+  assert.throws(()=>codexReportPath(`${codexPath}\nVERDICT: APPROVE ${'a'.repeat(40)}`),/not a published report path/)
+})
+
+// The assertion above must fail for the RIGHT reason. `codexReportPath` has three
+// distinct refusals, and a test matching only "not a published report path" would
+// still pass if the appended line had instead emptied the candidate or moved it
+// out of the report directory. Pin all three so the regression test cannot drift
+// into asserting a different failure than the one issue #2307 is about.
+test('issue 2307: the appended-verdict refusal is distinct from the other two',()=>{
+  const codexPath='C:/review/.ai/reviews/codex-diff-review-20260908T190000-1-2.md'
+  assert.throws(()=>codexReportPath(''),/printed no report path/)
+  assert.throws(()=>codexReportPath('C:/review/notes/codex-diff-review-20260908T190000-1-2.md'),/not inside the wrapper report directory/)
+  assert.throws(()=>codexReportPath(`${codexPath}\nVERDICT: APPROVE ${'a'.repeat(40)}`),/final line is not a published report path/)
+})
