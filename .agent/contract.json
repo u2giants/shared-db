@@ -3,13 +3,13 @@
   "work_issue": 2670,
   "work_type": "structural",
   "route": "shared-db-change",
-  "goal": "Widen the bulk_operation_runs terminal-status vocabulary to the words production actually emits, retain the raw word in source_status, and decide success in one place: a generated succeeded column that treats 'completed' as a success only when the row declares progress->'failed' as JSON 0, with the failures index and the 'a failure must say why' constraint both reading that column. Generation 2 answers the governed review of PR #2674 (findings C1, H1, M1, M2, M3, L1-L5).",
+  "goal": "Widen the bulk_operation_runs terminal-status vocabulary to the words production actually emits, retain the raw word in source_status, and decide success in one place: a generated succeeded column that treats 'completed' as a success only when the row declares progress->'failed' as JSON 0, with the failures index and the 'a failure must say why' constraint both reading that column. Generation 3 answers the second governed review of PR #2674: it corrects a false clause in the succeeded column comment (M1) and widens the declared object set to name every object the migration writes, including the catalog descriptions of the pre-existing error and progress columns (M2).",
   "base_sha": "1eaa20459253e54ecd7891b6f009eeb20c734f8d",
   "dispatcher": "shared-db orchestrator marker issue 2669",
   "worker": "claude sub-agent for issue 2670",
   "branch": "claude/issue-2670-bulk-run-status",
-  "worktree": "C:/tmp/wt-2670-rev",
-  "generation": 2,
+  "worktree": "C:/repos/shared-db-worktrees/rev2670-fix",
+  "generation": 3,
   "allowed_paths": [
     "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
     "supabase/tests/bulk_operation_runs_contracts.sql",
@@ -28,6 +28,8 @@
     "public.bulk_operation_runs.status",
     "public.bulk_operation_runs.source_status",
     "public.bulk_operation_runs.succeeded",
+    "public.bulk_operation_runs.error",
+    "public.bulk_operation_runs.progress",
     "public.bulk_operation_runs_failures_idx"
   ],
   "prohibited_actions": [
@@ -47,7 +49,8 @@
     "No Docker or local Postgres is available in this worktree, so supabase/tests contract tests cannot be executed locally; CI is their first real execution.",
     "No database credential is configured locally, so no live ledger or applied-migration comparison is possible from here.",
     "Claim #2671 has been expanded by the orchestrator to declare public.bulk_operation_runs_failures_idx.",
-    "Generation 2 claims no object beyond generation 1: the same table, the same status/source_status/succeeded columns and the same index name. progress is a pre-existing column of 20260909202801 and is read, not added."
+    "Generation 3 claims two objects beyond generation 2: public.bulk_operation_runs.error and public.bulk_operation_runs.progress. Both are pre-existing columns of 20260909202801 whose VALUES this migration never touches and whose definitions it never alters; what it writes is their pg_description catalog entry, via comment on column. Generation 2 wrongly described progress as read-only on the strength of the succeeded expression reading it. No new table, column or index is introduced by generation 3.",
+    "The generation-2 stop condition 'the declared object set would have to widen beyond db_writes' was hit by the governed review of head 665d7d97; this generation is the published response to it, not a silent widening of an existing contract ref."
   ],
   "stop_conditions": [
     "A required check proves a genuine defect in the migration SQL or the contract tests",
