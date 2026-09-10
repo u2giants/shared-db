@@ -575,6 +575,26 @@ test('reviewer cursor advances atomically through the durable round robin',()=>{
   assert.ok(io.refs.has(REVIEW_CURSOR_REF))
 })
 
+test('#2694 exact-head assignments let one reviewer hold concurrent independent reviews without overwriting either lease',()=>{
+  const io=withAtomicRefs(reviewIo()),heads=new Map()
+  io.requiresExactReviewHeadSha=true
+  io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr)),ref:'codex/x'}})
+  const assigned=[]
+  for(let n=0;n<=ACTIVE_REVIEWERS.length;n++){
+    const request={issue:2694+n,pr:3694+n,headSha:n.toString(16).padStart(40,'a')}
+    heads.set(request.pr,request.headSha)
+    assigned.push(assignNextReviewer(request,io))
+  }
+  const first=assigned[0],again=assigned.at(-1)
+  assert.equal(again.reviewer,first.reviewer,'round-robin may reuse a reviewer even while its earlier exact-head review is live')
+  const firstRef=reviewActiveRef(first.reviewer,first),againRef=reviewActiveRef(again.reviewer,again)
+  assert.notEqual(firstRef,againRef)
+  assert.ok(io.refs.has(firstRef),'the first exact assignment lease remains intact')
+  assert.ok(io.refs.has(againRef),'the concurrent exact assignment owns a separate lease')
+  assert.equal(io.refs.get(firstRef),io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${first.issue}-${first.pr}-${first.headSha}`))
+  assert.equal(io.refs.get(againRef),io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${again.issue}-${again.pr}-${again.headSha}`))
+})
+
 test('durable per-PR exclusion skips a truthfully disposed reviewer on a new head',()=>{
   const io=withAtomicRefs(reviewIo())
   io.getPr=()=>({number:1900,state:'open',head:{sha:'a'.repeat(40),ref:'codex/x'}})
@@ -6654,6 +6674,19 @@ test('a created verdict ref that reads back absent is retried, not burned', () =
   const result=recordReviewVerdict(VERDICT_OPTS,io)
   assert.equal(result.verdict,'APPROVE')
   assert.ok(io.state.waits>0)
+})
+
+test('#2694 a verdict accepts its own parallel exact-head lease even when no legacy provider lease exists', () => {
+  let verdictReads=0
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active-v2/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active/'))return null
+    return ++verdictReads<=3 ? null : 'b'.repeat(40)
+  }})
+  io.requiresExactReviewHeadSha=true
+  const result=recordReviewVerdict(VERDICT_OPTS,io)
+  assert.equal(result.verdict,'APPROVE')
 })
 
 test('a standing verdict with a genuinely different record still refuses, and is marked created', () => {
