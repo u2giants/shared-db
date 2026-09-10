@@ -1,5 +1,4 @@
 {
-
   "allowed_paths": [
     "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",
     "supabase/tests/coldlion_master_landing_contracts.sql",
@@ -16,9 +15,7 @@
   "base_sha": "e472592446826f1410449b23ab14adada69b514f",
   "branch": "codex/issue-2622-merch-group-detail-key",
   "db_reads": [],
-  "db_writes": [
-    "table coldlion.merch_group_detail"
-  ],
+  "db_writes": ["table coldlion.merch_group_detail"],
   "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
   "file_writes": [
     "supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql",

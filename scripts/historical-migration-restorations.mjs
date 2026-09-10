@@ -5,6 +5,20 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2622. The protected version and exact migration bytes were authored on
+  // PR #2651 before 20260909202801 reached main. This entry permits only those
+  // exact bytes to survive the backdated-version guard; it does not mark the
+  // migration preview-only or otherwise change its production eligibility.
+  '20260909194231': Object.freeze({
+    filename: 'supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql',
+    name: 'coldlion_merch_group_detail_category_identity',
+    statementBytes: 2575,
+    statementSha256: '5840ad59c1328329f523487d2431dc8ac6f40eeb55706b06070ad5ac70b25245',
+    fileSha256: '4db5068dab42833921153aad59d97ed9201ed093047296ec5cc58601004cc39d',
+    objects: Object.freeze([
+      'table coldlion.merch_group_detail',
+    ]),
+  }),
   // #2543. The protected version and exact migration bytes were authored on
   // PR #2631 before 20260909121403 reached main. This entry permits only those
   // exact bytes to survive the backdated-version guard; it does not mark the
@@ -12,9 +26,9 @@ export const HISTORICAL_RESTORATIONS = Object.freeze({
   '20260909115140': Object.freeze({
     filename: 'supabase/migrations/20260909115140_opa_coherent_complete_capture.sql',
     name: 'opa_coherent_complete_capture',
-    statementBytes: 61267,
-    statementSha256: '0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719',
-    fileSha256: '9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7',
+    statementBytes: 61299,
+    statementSha256: '8e054097c5f73d050aacd6ef315b97c709e53f46618b034816c4536b6a28effc',
+    fileSha256: '8720f0a1fe9a6dbcfc3d40ca6ad5906e08424ea69d84df1284eb75ed544041bc',
     objects: Object.freeze([
       'table plm.opa_capture',
       'table plm.opa_capture_scope',
