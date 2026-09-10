@@ -1,24 +1,21 @@
 {
   "schema_version": 1,
-  "work_issue": 2666,
+  "work_issue": 2652,
   "outcome": "ready-for-merge",
-  "pr": 2667,
+  "pr": 2653,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2666/3",
-  "contract_sha256": "2a5f9a16b440f251a583a231e2c24b11884adf797c0b9d0be77c2f35a888b1e0",
-  "head_sha": "8a49343b215812d833b4c611c8097853a73d03c6",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", "scripts/run-governed-review.mjs", "scripts/run-governed-review.test.mjs"],
+  "contract_ref": "refs/db-contracts/2652/6",
+  "contract_sha256": "d66c1d54e13f2371eafad7529e615c7cc07045842d207c0c5c6d102c44d42ef0",
+  "head_sha": "4345783a940670bd8d6cb59c1a88a9cb25339b15",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", "scripts/migration_derivation.py", "scripts/test_migration_derivation.py", "docs/verification/throughput-guard-truth-audit-20260828.json"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/run-governed-review.test.mjs", "exit_code": 0, "evidence": "49 governed-runner tests passed after current-main refresh, including Qwen-specific mismatch, repeated-flag, and subcommand refusal coverage."},
-    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 work-contract tests passed after current-main refresh."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors after current-main refresh."}
+    {"command": "python -m unittest scripts.test_migration_derivation -q", "exit_code": 0, "evidence": "44 tests passed, including exact-version/source positive coverage and altered/future prose refusals."},
+    {"command": "python -m unittest scripts.test_production_migration_guard -q", "exit_code": 0, "evidence": "237 tests passed, exercising the production gate's derivation integration after current main was merged."},
+    {"command": "node scripts/check-throughput-truth-audit.mjs", "exit_code": 0, "evidence": "273 reviewed semantic call sites passed; this PR's one new immutable-metadata refusal remains explicitly excluded as non-database state."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors before the evidence-only metadata commit."}
   ],
-  "assumptions_resolved": [
-    "ai-devops PR 368 carries the wrapper-side exact-head governed verdict implementation and passed 118 focused tests plus independent exact-head review.",
-    "The adapter derives the flag value only from its own headSha and validates every caller-supplied spelling against that same head.",
-    "The branch was refreshed through current main 59f7d2a7558a1359ef9e7a13c256ff23edf37c50 without changing database or coordination state."
-  ],
+  "assumptions_resolved": ["The exact six-line source in the merged migration is pinned; any alteration, removal, or added declaration fails closed.", "The migration has no migration-ledger base because it derives from the pre-adoption CI baseline; the exception resolves only that historical case to an empty set.", "No SQL migration, database, preview, production, or migration-ledger mutation was performed."],
   "stop_conditions_hit": []
 }

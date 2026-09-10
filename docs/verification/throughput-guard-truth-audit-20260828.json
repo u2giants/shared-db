@@ -988,6 +988,13 @@
       "reason": "Fail-closed immutable reviewer-evidence validation; the word missing does not describe database or migration state."
     },
     {
+      "site": "scripts/migration_derivation.py:225",
+      "semantic_key": "scripts/migration_derivation.py:13e755d6a1129cd3add09846c60ce788d0ff8d72386e995c222739c0c177d35f:1",
+      "line_sha256": "13e755d6a1129cd3add09846c60ce788d0ff8d72386e995c222739c0c177d35f",
+      "disposition": "excluded",
+      "reason": "Fail-closed immutable metadata validation; the word missing describes a changed migration file, not database or migration-ledger state."
+    },
+    {
       "site": "scripts/migration_derivation.py:245",
       "semantic_key": "scripts/migration_derivation.py:26f60dc532233c80066c58bf27667d6a94643ae283b3496d805c1476366947d1:1",
       "line_sha256": "26f60dc532233c80066c58bf27667d6a94643ae283b3496d805c1476366947d1",
@@ -1919,7 +1926,7 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     }
   ],
-  "call_site_count": 272,
-  "call_site_sha256": "891dc99b70efa90ba549cb5e6659012d0faf87ab46ecd2489e90687a93ae0813",
+  "call_site_count": 273,
+  "call_site_sha256": "eec274eff5a506d28d2e8549359f43663cfda98bcdcfc97999bcc2fe74c43063",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

@@ -1,37 +1,21 @@
 {
-  "schema_version": 1,
-  "work_issue": 2666,
-  "generation": 3,
-  "route": "repo-maintenance",
-  "work_type": "repo-maintenance",
-  "goal": "Make every manager-assigned ai-qwen review use the exact-head SHA-bound governed verdict contract automatically.",
-  "base_sha": "59f7d2a7558a1359ef9e7a13c256ff23edf37c50",
-  "dispatcher": "codex ai-qwen incident repair session",
-  "worker": "codex shared-db governed Qwen adapter repair",
-  "branch": "codex/qwen-requalify-20260910",
-  "worktree": "C:/repos/shared-db-worktrees/qwen-requalify-20260910",
-  "allowed_paths": [".agent/completion.json", ".agent/contract.json", "scripts/run-governed-review.mjs", "scripts/run-governed-review.test.mjs"],
-  "file_writes": [".agent/completion.json", ".agent/contract.json", "scripts/run-governed-review.mjs", "scripts/run-governed-review.test.mjs"],
+  "allowed_paths": ["scripts/migration_derivation.py", "scripts/test_migration_derivation.py", "docs/verification/throughput-guard-truth-audit-20260828.json", ".agent/contract.json", ".agent/completion.json"],
+  "assumptions": ["Migration 20260909005945 is already merged and its bytes must remain unchanged.", "Its exact pinned header source describes a pre-adoption CI baseline rather than a migration-ledger version.", "The local implementation began under the parent coordinator's direction before this contract was published; no branch, pull request, database, preview, production, or ref mutation occurred before publication.", "PR 2653 was refreshed through current main 236caf500edb01f78baf1d829855704b5d1093f9 after the Qwen governed-verdict adapter repair merged."],
+  "base_sha": "236caf500edb01f78baf1d829855704b5d1093f9",
+  "branch": "codex/issue-2652-ledger",
   "db_reads": [],
   "db_writes": [],
-  "prohibited_actions": [
-    "Do not change reviewer assignments, verdict records, migrations, preview, production, or database contents.",
-    "Do not relax exact-head validation or the adapter's fail-closed verdict grammar.",
-    "Do not special-case an issue, pull request, slot, or reviewer sequence."
-  ],
-  "required_checks": [
-    "node --test scripts/run-governed-review.test.mjs",
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-    "git diff --check"
-  ],
-  "assumptions": [
-    "ai-devops PR 368 provides the wrapper-side --governed-verdict contract before the adapter change is used live.",
-    "This repository-maintenance change authorizes no database or coordination-ref mutation beyond its own published work contract.",
-    "The branch is refreshed through current main 59f7d2a7558a1359ef9e7a13c256ff23edf37c50."
-  ],
-  "stop_conditions": [
-    "Stop if the adapter cannot bind the injected SHA to its own exact head.",
-    "Stop if the change requires bypassing an existing reviewer lease or verdict record.",
-    "Stop if current main moves before publication without refreshing the branch and contract evidence."
-  ]
+  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
+  "file_writes": ["scripts/migration_derivation.py", "scripts/test_migration_derivation.py", "docs/verification/throughput-guard-truth-audit-20260828.json", ".agent/contract.json", ".agent/completion.json"],
+  "generation": 6,
+  "goal": "Restore preview-ledger parsing for exactly migration 20260909005945 without changing its merged bytes or weakening malformed-declaration refusal for any other migration, and record its one new fail-closed truth-audit call site.",
+  "prohibited_actions": ["No database, preview, production, cloud, migration-ledger, or migration-ref mutation", "Do not edit any SQL migration", "Do not broaden the derivation parser to accept prose", "Do not weaken existing malformed-declaration tests", "No external review or merge"],
+  "required_checks": ["python -m unittest scripts.test_migration_derivation -q", "python -m unittest scripts.test_production_migration_guard -q", "git diff --check"],
+  "route": "repo-session",
+  "schema_version": 1,
+  "stop_conditions": ["The repair requires editing a merged SQL migration", "The exception cannot be pinned to exactly one version and exact historical source text", "A proposed change accepts malformed prose for a future migration", "The main merge lane becomes available only after a separate coordinator instruction"],
+  "work_issue": 2652,
+  "work_type": "repo-maintenance",
+  "worker": "codex repo-maintenance agent for issue 2652",
+  "worktree": "C:/tmp/shared-db-issue-2652-current-main-rebuild"
 }
