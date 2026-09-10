@@ -9,10 +9,11 @@
   "assumptions": [
     "Migration 20260909005945 is already merged and its bytes must remain unchanged.",
     "Its exact pinned header source describes a pre-adoption CI baseline rather than a migration-ledger version.",
-    "The local implementation began under the parent coordinator's direction before this contract was published; no branch, pull request, database, preview, production, or ref mutation occurred before publication."
+    "The local implementation began under the parent coordinator's direction before this contract was published; no branch, pull request, database, preview, production, or ref mutation occurred before publication.",
+    "PR 2653 was refreshed through current main 7b82064e3264f2921cade463cbb046fb292d0da5 after the in-process structural work completed."
   ],
-  "base_sha": "e472592446826f1410449b23ab14adada69b514f",
-  "branch": "codex/issue-2652-ledger",
+  "base_sha": "7b82064e3264f2921cade463cbb046fb292d0da5",
+  "branch": "codex/issue-2652-current-main-rebuild",
   "db_reads": [],
   "db_writes": [],
   "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
@@ -23,7 +24,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 2,
+  "generation": 3,
   "goal": "Restore preview-ledger parsing for exactly migration 20260909005945 without changing its merged bytes or weakening malformed-declaration refusal for any other migration, and record its one new fail-closed truth-audit call site.",
   "prohibited_actions": [
     "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
@@ -48,5 +49,5 @@
   "work_issue": 2652,
   "work_type": "repo-maintenance",
   "worker": "codex repo-maintenance agent for issue 2652",
-  "worktree": "C:/tmp/shared-db-issue-2652-ledger"
+  "worktree": "C:/tmp/shared-db-issue-2652-current-main-rebuild"
 }
