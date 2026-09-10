@@ -219,7 +219,7 @@ test('issue 2207: the preserved-findings header is inert on its own',()=>{
   assert.equal(anyVerdictFor([{author_association:'OWNER',body:PRESERVED_HEADER}],sha),false,'the header is not read as a verdict by the shared consumer predicate')
 })
 
-test('ai-gemini governed reviews are given the head under review as their verdict contract',()=>{
+test('Gemini and Qwen governed reviews are given the head under review as their verdict contract',()=>{
   const head='c'.repeat(40)
   assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','sess','--prompt','x'],head),['new','--governed-verdict',head,'sess','--prompt','x'])
   assert.deepEqual(wrapperVerdictContractArgs('C:/tools/ai-gemini.cmd',['ask','sess'],head),['ask','--governed-verdict',head,'sess'])
@@ -235,6 +235,18 @@ test('a caller-supplied gemini verdict head must match the head under review',()
   const head='e'.repeat(40)
   assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict',head,'sess'],head),['new','--governed-verdict',head,'sess'])
   assert.throws(()=>wrapperVerdictContractArgs('ai-gemini',['new','--governed-verdict','f'.repeat(40),'sess'],head),/does not match the head under review/)
+})
+
+test('every caller-supplied Qwen verdict head spelling is checked',()=>{
+  const head='e'.repeat(40),other='f'.repeat(40)
+  assert.deepEqual(wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict',head,'sess'],head),['new','--governed-verdict',head,'sess'])
+  assert.deepEqual(wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict='+head,'sess'],head),['new','--governed-verdict='+head,'sess'])
+  assert.throws(()=>wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict='+other,'sess'],head),/does not match the head under review/)
+  assert.throws(()=>wrapperVerdictContractArgs('ai-qwen',['new','--governed-verdict',head,'sess','--governed-verdict',other],head),/does not match the head under review/)
+})
+
+test('a Qwen review without new or ask is refused before spawn',()=>{
+  assert.throws(()=>wrapperVerdictContractArgs('ai-qwen',['--prompt','x'],'a'.repeat(40)),/new or ask subcommand/)
 })
 
 test('a gemini review that does not start with a subcommand is refused',()=>{
