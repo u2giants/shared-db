@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 4,
+  "generation": 5,
   "work_issue": 2576,
   "work_type": "structural",
   "route": "exclusive-db-lane",
@@ -59,7 +59,8 @@
     "The three dynamic-execution markers rewrite routine bodies in place. A verifier-owned catalog contract CAN read those bodies back via pg_get_functiondef, so all three markers are reviewed as 'checks' against the new dcp_stable_identity_property_match_v1 contract in scripts/production_catalog_verification.py, which is built as a strict superset of single_creative_submission_resolution_ledger_v1 so the #2449 assertions on the shared routines are not superseded away.",
     "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
     "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard.",
-    "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this."
+    "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this.",
+    "Generation 5 exists only to bind the completion report to the implementation head 339e4dba196e6fcef9c1d994e23e5dc05aeaa09c: the git-evidence check requires the two .agent files, and only those, to change in a commit following report.head_sha."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",
