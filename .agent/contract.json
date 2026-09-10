@@ -1,74 +1,45 @@
 {
   "allowed_paths": [
-    "supabase/migrations/20260909220101_popdam_item_state_and_prediction_identity.sql",
-    "supabase/tests/popdam_item_state_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "scripts/run-governed-review.test.mjs",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "assumptions": [
-    "api.plm_item_list keeps exactly its existing 21-column consumer contract.",
-    "A canonical item is resolved by the three-part source_system, division_code, source_id identity and ultimately references plm.item.id.",
-    "Every legacy dismissed=true decision must map exactly once or the migration refuses before switching the view.",
-    "Existing prediction rows must survive removal of the cascading legacy foreign key; ambiguous or missing historical identities remain visible and explicitly unresolved.",
-    "Only service_role or an authenticated PopDAM administrator may change dismissal state, and raw source payloads remain unexposed."
+    "run-governed-review.mjs locates the codex report by taking the last non-empty line of wrapper stdout, so any line printed after that path breaks every codex review.",
+    "The abandoned ai-devops commit 644341f5 would have appended exactly such a line, and nothing in this repository's tests named that hazard.",
+    "This is test-only repository maintenance: no database object, migration, preview, or production behaviour changes."
   ],
-  "base_sha": "7fc819f9a773f97ad6cc74f9e5028d3ce76b0aa9",
-  "branch": "codex/issue-2644-popdam-item-state",
-  "db_reads": [
-    "table plm.item",
-    "table public.erp_items_current",
-    "table public.product_category_predictions"
-  ],
-  "db_writes": [
-    "table public.popdam_item_state",
-    "function public.set_popdam_item_dismissed",
-    "view api.plm_item_list",
-    "table public.product_category_predictions",
-    "column public.product_category_predictions.erp_item_id",
-    "column public.product_category_predictions.plm_item_id",
-    "column public.product_category_predictions.item_identity_status",
-    "function public.resolve_product_category_prediction_item_identity",
-    "trigger product_category_predictions_resolve_item_identity on public.product_category_predictions",
-    "index public.idx_product_category_predictions_plm_item_id",
-    "table api.plm_item_list"
-  ],
-  "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
+  "base_sha": "2dfd6de555ac47d88375c2b8f6987a50e4056041",
+  "branch": "claude/issue-2307-codex-verdict-env",
+  "db_reads": [],
+  "db_writes": [],
+  "dispatcher": "claude repo-maintenance session working the oldest ready repo-maintenance queue",
   "file_writes": [
-    "supabase/migrations/20260909220101_popdam_item_state_and_prediction_identity.sql",
-    "supabase/tests/popdam_item_state_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "scripts/run-governed-review.test.mjs",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 8,
-  "goal": "Give PopDAM durable canonical item dismissal state and preserve category prediction history before the frozen ERP tables are retired.",
+  "generation": 1,
+  "goal": "Pin, as a test, that nothing may follow the codex report path on wrapper stdout, so the abandoned stdout-verdict fix cannot be re-landed and silently kill the codex reviewer.",
   "prohibited_actions": [
-    "No preview apply, reviewer allocation, merge, production promotion, or shared-database write",
-    "No weakening of existing administrator-only controls",
-    "No raw source payload exposure",
-    "No deletion of existing product category prediction history",
-    "No object or path outside claim 2648 and this contract"
+    "No change to scripts/run-governed-review.mjs or any other production script",
+    "No migration, preview apply, reviewer allocation, merge of other work, production promotion, or shared-database write",
+    "No relaxation of any existing verdict, head-binding, or preservation rule",
+    "No object or path outside this contract"
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check",
-    "supabase/tests/popdam_item_state_contracts.sql on a disposable database",
-    "Database Contract Tests CI from empty"
+    "node --test scripts/run-governed-review.test.mjs",
+    "git diff --check"
   ],
-  "route": "shared-db-orchestrator",
+  "route": "repo-maintenance",
   "schema_version": 1,
   "stop_conditions": [
-    "Claim 2648, reserved version 20260909184115, or coordinator route changes",
-    "A competing change touches any claimed object or contracted path",
-    "Implementation requires an object or path outside claim 2648 or this contract",
-    "Any legacy dismissed=true decision cannot resolve exactly once",
-    "The exact 21-column api.plm_item_list contract cannot be preserved"
+    "The regression cannot be expressed without changing production code",
+    "A competing change touches scripts/run-governed-review.mjs codex report resolution",
+    "Implementation requires a path outside this contract"
   ],
-  "work_issue": 2644,
-  "work_type": "structural",
-  "worker": "codex issue2644-author holding claim 2648",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2644-popdam-item-state"
+  "work_issue": 2307,
+  "work_type": "repo-maintenance",
+  "worker": "claude issue2307-repo-session",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2307-codex-verdict-env"
 }
