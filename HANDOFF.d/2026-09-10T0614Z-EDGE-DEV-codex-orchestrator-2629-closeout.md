@@ -90,7 +90,7 @@ Marker #2629 continued the clean handoff from marker #2597. The ordered agenda w
 - GitHub CLI was authenticated to `u2giants/shared-db`. Commit identity was verified as `Albert Hazan <u2giants@users.noreply.github.com>` before the closeout commit.
 - Supabase access came through 1Password vault `vibe_coding`, existing item `Supabase CLI Personal Access Token`, field `SUPABASE_ACCESS_TOKEN`, via the protected `mcp.env` reference file. No value was printed or written into the repository.
 - Secrets sweep: all owned diffs, untracked files, and the locally preserved Qwen incident evidence were checked; nothing new requires storage. The obsolete untracked PR #2653 prompt was removed from its exact worktree path.
-- Docs pass: `AGENTS.md` was stale about immutable non-ledger derivations and the Qwen roster, while `docs/agents/section-4-anti-collision-rules.md` repeated the obsolete Qwen quarantine. All three live-document defects are corrected in this handoff PR; no other stale instruction was found by the final repository scan and governed reviews.
+- Docs pass: `AGENTS.md` was stale about immutable non-ledger derivations and the Qwen roster, while `docs/agents/section-4-anti-collision-rules.md` repeated the obsolete Qwen quarantine and omitted Qwen from its rotation sentence. All four in-scope live-document defects are corrected in this handoff PR. A final governed review also found contradictory historical reviewer comments in `scripts/manage-migration-author-lanes.mjs`; that executable file is outside this documentation contract and was not changed during closeout, so successors must continue treating the executable roster values as authoritative.
 
 ## 9. Open questions and risks
 
