@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2656,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2655/1",
-  "contract_sha256": "402541a43c3ccf372163af038638678c5ee3e68b80f7cc5a81200bfbae8305d2",
-  "head_sha": "61ac818e92b862e6948a0b5054529715222ffaf0",
+  "contract_ref": "refs/db-contracts/2655/2",
+  "contract_sha256": "25849637aafd57d8afcf62418f2a6cf657def88a3c098f5dc2f3bd390ec8aeda",
+  "head_sha": "29cd88e6b321d3aea7858ee3f93dcf4fcc568d24",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -20,7 +20,7 @@
     {"command": "node --test scripts/historical-migration-restorations.test.mjs", "exit_code": 0, "evidence": "11 registry tests passed with no failures or skips, including exact issue 2622 metadata and negative wrong-path and wrong-byte cases."},
     {"command": "node --input-type=module -e <exact PR2651 blob validation>", "exit_code": 0, "evidence": "The registry accepted PR 2651 head d44b769951dc96e8b343de2d468499dd08f2e704 at the exact path, independently recomputed both digests and 2575 statement bytes, confirmed claim 2650's exact table scope, and refused changed path or bytes."},
     {"command": "python -m unittest scripts.test_production_migration_guard", "exit_code": 0, "evidence": "239 tests passed; issue 2622 remains production eligible while existing blocked and preview-only versions keep their refusals."},
-    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL checks passed through Git Bash against current origin/main 7fc819f9; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."},
+    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static SQL checks passed after refresh through current main cc5ae41e; this maintenance PR adds no migration file and changes no database content. The live-ledger comparison did not run because no ledger source was configured and is not claimed."},
     {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 contract tests passed with no failures or skips."},
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
