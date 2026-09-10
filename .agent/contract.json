@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "generation": 1,
+  "generation": 2,
   "work_issue": 2301,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Implement only Phase A Steps 1-2 of the author-lane abandonment lifecycle so capacity can be relinquished from any machine while all work authority remains protected and resume is recovery-gated.",
-  "base_sha": "5874305e5ac200677ecb3e5ab7e265734e21cef6",
+  "base_sha": "aef1504e7c3c7674a6a9709e42720b8f2a725f43",
   "dispatcher": "codex shared-db.orch route 01a085f2-a84f-7963-b474-e5770b149ecd",
   "worker": "codex issue-2301 Phase A repository-maintenance worker",
   "branch": "codex/issue-2301-phase-a",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2301-phase-a",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2301-phase-a-rebuild",
   "allowed_paths": [
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/orchestrator-flow/capacity-state.test.mjs",
