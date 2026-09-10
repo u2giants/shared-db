@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2657,
-  "generation": 1,
+  "generation": 2,
   "route": "repo-maintenance",
   "work_type": "repo-maintenance",
   "goal": "Replace the superseded issue 2543 restoration pin with only the corrected exact migration bytes while preserving ordinary collision and production safety refusals.",
-  "base_sha": "7fc819f9a773f97ad6cc74f9e5028d3ce76b0aa9",
+  "base_sha": "2dfd6de555ac47d88375c2b8f6987a50e4056041",
   "dispatcher": "codex repository session for PR 2631 High-finding dependency repair",
   "worker": "codex issue-2657 corrected historical restoration author",
   "branch": "codex/issue-2543-restoration-registry",
@@ -42,6 +42,7 @@
   ],
   "assumptions": [
     "PR 2631 migration blob at commit 9d776050bac9fe92b43099b20f6fdb3f8b0529d3 is the corrected protected implementation.",
+    "PR 2658 was refreshed from exact current main 2dfd6de555ac47d88375c2b8f6987a50e4056041 before fresh CI and governed review.",
     "This registry-only repair is repository maintenance and authorizes no database action.",
     "The structural PR will integrate this prerequisite before obtaining fresh exact-head CI and reviews."
   ],

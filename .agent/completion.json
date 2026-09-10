@@ -4,10 +4,12 @@
   "outcome": "ready-for-merge",
   "pr": 2658,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2657/1",
-  "contract_sha256": "bdcd1bf94b8f1be95638d9e2f8d2e2c51a99e9dba0c6606dfea045d5571bd154",
-  "head_sha": "965e82010d0b6e8f62506182e7b9bc5c063a5051",
+  "contract_ref": "refs/db-contracts/2657/2",
+  "contract_sha256": "b8a56679053dc0501c58de7ff24f321b70be3e9ccb699793d9a3704037d70674",
+  "head_sha": "2fb827066cf54613a7ea97f968e6a834d1f9dff9",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/historical-migration-restorations.mjs",
     "scripts/historical-migration-restorations.test.mjs"
   ],
@@ -24,6 +26,7 @@
   "assumptions_resolved": [
     "The corrected migration file SHA256 is 8720f0a1fe9a6dbcfc3d40ca6ad5906e08424ea69d84df1284eb75ed544041bc; its statement SHA256 is 8e054097c5f73d050aacd6ef315b97c709e53f46618b034816c4536b6a28effc over 61299 bytes.",
     "The prior file digest 9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7, statement digest 0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719, and 61267-byte statement are no longer present in the registry.",
+    "The executed wrong-path and wrong-byte validator tests prove fail-closed behavior; the superseded pin's three exact values are also asserted unequal to the authorized record, so they cannot silently become current authority.",
     "The exact database object list is unchanged from the protected claim and PR 2631.",
     "Issue 2543, claim 2630, migration 20260909115140, PR 2631, preview, production, reviewer refs, and merge state remain untouched."
   ],
