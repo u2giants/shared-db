@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2677,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/5",
-  "contract_sha256": "a527e132d069805b16e6425f7c699268efcd74e5b445003786f6d62a4ac159a6",
-  "head_sha": "6f4442c293c39d229689e66d19e2be4017827541",
+  "contract_ref": "refs/db-contracts/2326/6",
+  "contract_sha256": "e5c8f515848903de0318ad73b66d8bb3d46633ce0cefc2aaa66b3fe4fe0680cf",
+  "head_sha": "1dcd278d5ec45796e0bba90674f681c76b0c6590",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -19,7 +19,7 @@
     {
       "command": "node --test scripts/check-sql.test.mjs",
       "exit_code": 0,
-      "evidence": "56 tests passed; 0 failed, skipped, or cancelled."
+      "evidence": "tests 56; pass 56; fail 0; cancelled 0; skipped 0; todo 0."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -27,9 +27,9 @@
       "evidence": "Contract is valid."
     },
     {
-      "command": "git diff --check",
+      "command": "git diff --check b4b0962b5489e2e8235b97cf1b8b9661d34f237e..1dcd278d5ec45796e0bba90674f681c76b0c6590",
       "exit_code": 0,
-      "evidence": "No output; exit code 0."
+      "evidence": "No output; exit code 0. The range compares the committed delta of the four changed files against current main, so the absence of output is evidence about the committed change, not an empty worktree-to-index comparison."
     }
   ],
   "assumptions_resolved": [

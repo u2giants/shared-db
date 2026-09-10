@@ -21,7 +21,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 5,
+  "generation": 6,
   "goal": "Publish a durable Step 3 evidence closeout and accurately mark Step 3 complete, while preserving the separate future gates for Steps 4\u20138 and leaving issue #2662 open and unscheduled.",
   "prohibited_actions": [
     "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
@@ -30,7 +30,7 @@
     "Do not weaken review, merge, or programme evidence requirements"
   ],
   "required_checks": [
-    "git diff --check",
+    "git diff --check b4b0962b5489e2e8235b97cf1b8b9661d34f237e..1dcd278d5ec45796e0bba90674f681c76b0c6590",
     "node --test scripts/check-sql.test.mjs",
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
   ],
