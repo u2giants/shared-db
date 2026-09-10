@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2640,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2301/1",
-  "contract_sha256": "2f0173a6c0526a09d923e5091b03df6d87260de2a7e2847cb53ae66987b0160e",
-  "head_sha": "7693dad1d0348a9d189cc42e0f17f8f5a442390a",
+  "contract_ref": "refs/db-contracts/2301/2",
+  "contract_sha256": "945c8eb604496386173512a97a217bd15fb40e27f967e656ca79508fd5b66b61",
+  "head_sha": "d76acbbeb6c365acf21c70382c8859b579ad5224",
   "files_changed": [
     "plan_author_lane_abandonment_lifecycle.md",
     "scripts/coordination-scenarios.test.mjs",
@@ -19,17 +19,17 @@
     {
       "command": "node --test scripts/orchestrator-flow/capacity-state.test.mjs scripts/orchestrator-flow/reconcile.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/check-migration-pr-lease.test.mjs",
       "exit_code": 0,
-      "evidence": "528 tests passed, 0 failed, 0 skipped, 0 cancelled at implementation head 7693dad1."
+      "evidence": "528 tests passed, 0 failed, 0 skipped, 0 cancelled at the Phase A implementation head; rebasing changed no implementation file."
     },
     {
       "command": "node --test scripts/lib/exclusive-lease.test.mjs scripts/coordination-scenarios.test.mjs",
       "exit_code": 0,
-      "evidence": "57 tests passed, 0 failed, 0 skipped, 0 cancelled at implementation head 7693dad1."
+      "evidence": "57 tests passed, 0 failed, 0 skipped, 0 cancelled at the Phase A implementation head; rebasing changed no implementation file."
     },
     {
       "command": "python scripts/test_production_migration_guard.py",
       "exit_code": 0,
-      "evidence": "234 tests passed and both bounded manifest controls passed at implementation head 7693dad1."
+      "evidence": "234 tests passed and both bounded manifest controls passed at the Phase A implementation head; rebasing changed no implementation file."
     },
     {
       "command": "git diff --check",
@@ -40,8 +40,8 @@
   "assumptions_resolved": [
     "The live pre-parser census inspected seven open claims and found zero fences declaring expired-unconfirmed; the privacy-safe count and claim numbers are recorded on issue 2301.",
     "Claim 2574 records C:/repos/shared-db-worktrees/issue-2503-bootstrap and that exact EDGE-DEV path was absent; the implementation requires an explicit absent declaration and does not treat absence alone as authorization.",
-    "Muse Spark independently inspected exact implementation head 7693dad1 and recorded durable APPROVE artifact 4e67895e4bad2ab4e17f7630850a89e9008c83a0.",
-    "Issue 2301 is open for the remaining Phase B-D work, and pull request 2640 is parked without merge while issue 2466 pull request 2634 owns main."
+    "Muse Spark independently inspected the pre-rebase implementation and recorded durable APPROVE artifact 4e67895e4bad2ab4e17f7630850a89e9008c83a0; rebase invalidates that approval and requires fresh exact-head review.",
+    "Issue 2301 remains open for Phase B-D. This rebase resolves the protected source collision and requires fresh exact-head checks and approvals before PR 2640 may merge."
   ],
   "stop_conditions_hit": []
 }
