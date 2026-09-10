@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2677,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/3",
-  "contract_sha256": "6eeaf2d616201f7b68442583dbe3968ee113d47bc073ba954f74ec0a8b5bfb0d",
-  "head_sha": "1fb50c80805fb1d2ff983f5c6502de963d6c5b33",
+  "contract_ref": "refs/db-contracts/2326/4",
+  "contract_sha256": "4c2ff92030161b2065fe99d3defcf67dec0cf47d49f4075bfa5bb379cea1d6c6",
+  "head_sha": "cfeb942f370b6cf136326a87b77c9906261ddfd2",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -33,7 +33,7 @@
     }
   ],
   "assumptions_resolved": [
-    "The current upstream base was 1eaa20459253e54ecd7891b6f009eeb20c734f8d when the scoped worktree was created.",
+    "The current upstream base was e9f39d510050555ec18ab23668c9e8a2974a0c3b when the branch was refreshed.",
     "The active marker #2669 belongs to another session, and this closeout performed no database interaction.",
     "The durable evidence reconciles Step 3 without authorizing a new structural or #2662 change."
   ],

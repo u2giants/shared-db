@@ -1,21 +1,49 @@
 {
-  "allowed_paths": ["plan_database_efficiency_and_api_security.md", "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "assumptions": ["The current upstream base is 1eaa20459253e54ecd7891b6f009eeb20c734f8d.", "The active marker #2669 belongs to another session, so this is repository-maintenance work and performs no database interaction.", "The Step 3 closeout reconciles only already durable evidence and already merged outcomes; it creates no structural change and does not reopen #2213, #2214, #2215, or #2662."],
-  "base_sha": "1eaa20459253e54ecd7891b6f009eeb20c734f8d",
+  "allowed_paths": [
+    "plan_database_efficiency_and_api_security.md",
+    "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "assumptions": [
+    "The current upstream base is e9f39d510050555ec18ab23668c9e8a2974a0c3b.",
+    "The active marker #2669 belongs to another session, so this is repository-maintenance work and performs no database interaction.",
+    "The Step 3 closeout reconciles only already durable evidence and already merged outcomes; it creates no structural change and does not reopen #2213, #2214, #2215, or #2662."
+  ],
+  "base_sha": "e9f39d510050555ec18ab23668c9e8a2974a0c3b",
   "branch": "codex/issue-2326-step3",
   "db_reads": [],
   "db_writes": [],
   "dispatcher": "Albert Hazan current-chat authorization",
-  "file_writes": ["plan_database_efficiency_and_api_security.md", "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md", ".agent/contract.json", ".agent/completion.json"],
-  "generation": 3,
-  "goal": "Publish a durable Step 3 evidence closeout and accurately mark Step 3 complete, while preserving the separate future gates for Steps 4–8 and leaving issue #2662 open and unscheduled.",
-  "prohibited_actions": ["No database, preview, production, cloud, migration-ledger, or migration-ref mutation", "Do not edit SQL migrations, scripts, workflows, or configuration", "Do not close, schedule, or remediate #2662", "Do not weaken review, merge, or programme evidence requirements"],
-  "required_checks": ["git diff --check", "node --test scripts/check-sql.test.mjs", "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"],
+  "file_writes": [
+    "plan_database_efficiency_and_api_security.md",
+    "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "generation": 4,
+  "goal": "Publish a durable Step 3 evidence closeout and accurately mark Step 3 complete, while preserving the separate future gates for Steps 4\u00e2\u20ac\u201c8 and leaving issue #2662 open and unscheduled.",
+  "prohibited_actions": [
+    "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
+    "Do not edit SQL migrations, scripts, workflows, or configuration",
+    "Do not close, schedule, or remediate #2662",
+    "Do not weaken review, merge, or programme evidence requirements"
+  ],
+  "required_checks": [
+    "git diff --check",
+    "node --test scripts/check-sql.test.mjs",
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
+  ],
   "route": "repo-maintenance",
   "schema_version": 1,
-  "stop_conditions": ["Evidence does not support a claimed Step 3 completion", "The closeout would imply a new structural, scheduling, or #2662 remediation authorization", "The pull request base moves before guarded merge", "Any secret, row content, or private source material appears in the delta"],
+  "stop_conditions": [
+    "Evidence does not support a claimed Step 3 completion",
+    "The closeout would imply a new structural, scheduling, or #2662 remediation authorization",
+    "The pull request base moves before guarded merge",
+    "Any secret, row content, or private source material appears in the delta"
+  ],
   "work_issue": 2326,
   "work_type": "documentation",
-  "worker": "Codex Step 3 evidence closeout",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step3"
+  "worker": "Claude Step 3 evidence-pin refresh",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step3-fix"
 }
