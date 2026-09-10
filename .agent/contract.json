@@ -1,61 +1,72 @@
 {
   "schema_version": 1,
-  "work_issue": 2670,
+  "generation": 8,
+  "work_issue": 2576,
   "work_type": "structural",
-  "route": "shared-db-change",
-  "goal": "Widen the bulk_operation_runs terminal-status vocabulary to the words production actually emits, retain the raw word in source_status, and decide success in one place: a generated succeeded column that treats 'completed' as a success only when the row declares progress->'failed' as JSON 0, with the failures index and the 'a failure must say why' constraint both reading that column. Generation 3 answers the second governed review of PR #2674: it corrects a false clause in the succeeded column comment (M1) and widens the declared object set to name every object the migration writes, including the catalog descriptions of the pre-existing error and progress columns (M2).",
+  "route": "exclusive-db-lane",
+  "goal": "Serve DCP property-match review state by stable business identity: rewrite api.db_data_admin_property_match_queue to return one coherent review state per identity, retarget the copy-keyed creative-decision block inside api.db_data_admin_scraped_properties, and carry an identity decision state on api.db_data_admin_decide_property_match, with a hash-bound production verification sidecar covering both dynamic-execution markers. Revision: add a verifier-owned catalog contract asserting the rewritten routine bodies, count the decide-function rewrite needle exactly once and fail closed otherwise, and add a SQL write-side guard so a copy-keyed approval cannot un-serve a sibling mapping of the same stable identity.",
   "base_sha": "1eaa20459253e54ecd7891b6f009eeb20c734f8d",
-  "dispatcher": "shared-db orchestrator marker issue 2669",
-  "worker": "claude sub-agent for issue 2670",
-  "branch": "claude/issue-2670-bulk-run-status",
-  "worktree": "C:/repos/shared-db-worktrees/rev2670-fix",
-  "generation": 3,
+  "dispatcher": "claude shared-db orchestrator marker 2669",
+  "worker": "claude issue 2576 dcp stable identity",
+  "branch": "claude/issue-2576-dcp-identity",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2576-dcp-identity",
   "allowed_paths": [
-    "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
+    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
+    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
+    "scripts/production-verification-sidecars/20260910123636.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260910123601_bulk_operation_runs_live_status_vocabulary.sql",
-    "supabase/tests/bulk_operation_runs_contracts.sql",
+    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
+    "supabase/tests/dcp_stable_identity_property_match_contracts.sql",
+    "scripts/production-verification-sidecars/20260910123636.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/production_business_risk_gate.py",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "plm.dcp_opa_property_resolution",
+    "plm.dcp_opa_property_resolution_member",
+    "plm.dcp_opa_scraped_property"
+  ],
   "db_writes": [
-    "public.bulk_operation_runs",
-    "public.bulk_operation_runs.status",
-    "public.bulk_operation_runs.source_status",
-    "public.bulk_operation_runs.succeeded",
-    "public.bulk_operation_runs.error",
-    "public.bulk_operation_runs.progress",
-    "public.bulk_operation_runs_failures_idx"
+    "api.db_data_admin_property_match_queue",
+    "api.db_data_admin_scraped_properties",
+    "api.db_data_admin_decide_property_match"
   ],
   "prohibited_actions": [
-    "Do not apply this migration to preview or production",
-    "Do not weaken, skip, or edit any workflow, guard, or CI check to make a check pass",
-    "Do not edit files outside this worktree",
-    "Do not dispatch a workflow, run the lane manager, or merge the pull request",
-    "Do not claim database objects beyond those declared in db_writes"
+    "No preview or production apply, no workflow dispatch, no lane-manager run, no worktree reaper run",
+    "No merge of this pull request by the worker, and never gh pr merge --admin",
+    "Do not weaken, skip, edit or disable any workflow, guard script or required check",
+    "Do not edit any migration other than 20260910123636, and never edit an already-applied migration",
+    "No licensed or private licensor data in any file, commit message or issue comment; this repository is public"
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
-    "node scripts/check-applied-migration-edit.mjs",
+    "node scripts/check-production-verification-sidecars.mjs",
+    "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
     "git diff --check"
   ],
   "assumptions": [
-    "Migration version 20260910123601 is the version reserved by claim #2671 for this work; it is not applied anywhere, so it is edited in place rather than superseded.",
-    "No Docker or local Postgres is available in this worktree, so supabase/tests contract tests cannot be executed locally; CI is their first real execution.",
-    "No database credential is configured locally, so no live ledger or applied-migration comparison is possible from here.",
-    "Claim #2671 has been expanded by the orchestrator to declare public.bulk_operation_runs_failures_idx.",
-    "Generation 3 claims two objects beyond generation 2: public.bulk_operation_runs.error and public.bulk_operation_runs.progress. Both are pre-existing columns of 20260909202801 whose VALUES this migration never touches and whose definitions it never alters; what it writes is their pg_description catalog entry, via comment on column. Generation 2 wrongly described progress as read-only on the strength of the succeeded expression reading it. No new table, column or index is introduced by generation 3.",
-    "The generation-2 stop condition 'the declared object set would have to widen beyond db_writes' was hit by the governed review of head 665d7d97; this generation is the published response to it, not a silent widening of an existing contract ref."
+    "Docker is unavailable on this machine, so the full supabase/tests suite cannot be replayed locally; the ephemeral-database CI job is the first from-empty replay of this migration.",
+    "The three dynamic-execution markers rewrite routine bodies in place. A verifier-owned catalog contract CAN read those bodies back via pg_get_functiondef, so all three markers are reviewed as 'checks' against the new dcp_stable_identity_property_match_v1 contract in scripts/production_catalog_verification.py, which is built as a strict superset of single_creative_submission_resolution_ledger_v1 so the #2449 assertions on the shared routines are not superseded away.",
+    "The sidecar is bound to the exact migration text; any later edit to the migration invalidates it and it must be regenerated.",
+    "Every sidecar file must be individually listed in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py; adding that one line is a registration required by the offline gate test, not a relaxation of any guard.",
+    "Changing scripts/production_catalog_verification.py changes the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json must have its detector_source_sha256 regenerated in the same commit; precedent commit c740c820 did exactly this.",
+    "Generation 8 covers the independent review's two Low findings: the create-or-replace of api.db_data_admin_property_match_queue now restates its own comment on function, since the comment set by 20260902053756 still claimed the queue derives no identity state while the new body derives identity_decision_state and identity_conflict. Editing the migration invalidated the hash-bound sidecar, so its migration_sha256 and its three dynamic-execution line ranges were recomputed after that edit and this report was rebound to implementation head dd8c353610dabb5ae63f72ca52fbf7f78d693e93. The review's High finding concerned migration 20260910123601, which is already on main and is not part of this pull request.",
+    "Generation 7 rebinds the completion report to implementation head f26c1a01510f03337aca4c4dec693e8d5e247bee, the commit that merges current main (e9f39d510050555ec18ab23668c9e8a2974a0c3b) into this branch. Generation 6 named pre-merge head b2c68f37ae6145fdd0a2929935dc08425dbb3b30, which stopped being a descendant of the PR base once the base advanced, so the git-evidence ancestry check refused it. No file outside the two .agent evidence files changes between f26c1a01 and the PR head."
   ],
   "stop_conditions": [
-    "A required check proves a genuine defect in the migration SQL or the contract tests",
-    "The declared object set would have to widen beyond db_writes",
-    "Making a check pass would require editing a workflow or guard",
-    "The pull request base moves such that the reported evidence no longer describes the branch"
+    "A required check proves a real defect in the migration or its contract test",
+    "The migration would have to be edited after the hash-bound sidecar is published without regenerating it",
+    "The pull request base moves so that the reported files_changed no longer matches Git",
+    "Any check failure could only be cleared by weakening a guard, a workflow or a required check"
   ]
 }
