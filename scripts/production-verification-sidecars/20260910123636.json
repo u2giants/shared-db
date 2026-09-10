@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "migration_version": "20260910123636",
+  "migration_sha256": "2b24586d5786b62924f4496ce3a2d8b4646172ea034396f5ed0c06e46cfea3ca",
+  "checks": [],
+  "marker_schema_version": 1,
+  "marker_reviews": [
+    {
+      "line_start": 193,
+      "line_end": 205,
+      "disposition": "no_durable_target",
+      "reason": "Line 200 is a targeted in-place rewrite of api.db_data_admin_scraped_properties: the block reads the CURRENT body with pg_get_functiondef, refuses with an exception unless that body still contains the exact literal text this migration was derived from, and then executes the same definition with only that one block replaced. No identifier, literal or user value is interpolated - both the old and the new text are fixed dollar-quoted literals written in this file - and the block raises again if the new text is not present in the routine afterwards, so the migration cannot commit having half-applied it. Its post-apply outcome is the TEXT OF A ROUTINE BODY, and none of the three sidecar check kinds available here can read a routine body back: exact_row_count reads rows, catalog_absence asserts an object is missing, and catalog_contract may only select a fixed verifier-owned contract, of which none covers this routine. There is therefore no durable target this hash-bound sidecar can assert. The behaviour the rewrite installs is asserted instead by supabase/tests/dcp_stable_identity_property_match_contracts.sql, which runs against an ephemeral database on every pull request."
+    },
+    {
+      "line_start": 560,
+      "line_end": 572,
+      "disposition": "no_durable_target",
+      "reason": "Line 567 is the same targeted in-place rewrite pattern applied to api.db_data_admin_decide_property_match: the block reads the CURRENT body with pg_get_functiondef, refuses with an exception unless that body still contains the exact literal return block this migration was derived from, executes the same definition with only that block replaced, and raises again unless the new identity_decision_state payload is present in the routine afterwards. Both the old and the new text are fixed dollar-quoted literals written in this file, so nothing is interpolated and no untrusted text can reach the statement. Its post-apply outcome is the TEXT OF A ROUTINE BODY, which none of the three sidecar check kinds available here can read back: exact_row_count reads rows, catalog_absence asserts an object is missing, and catalog_contract may only select a fixed verifier-owned contract, of which none covers this routine. There is therefore no durable target this hash-bound sidecar can assert. The behaviour the rewrite installs is asserted instead by supabase/tests/dcp_stable_identity_property_match_contracts.sql, which runs against an ephemeral database on every pull request."
+    }
+  ]
+}
