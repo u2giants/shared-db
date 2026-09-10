@@ -1,5 +1,6 @@
 -- Issue #2579: expose the complete all-licensor Property-source coverage in DB Data Admin.
 -- Claim #2679; reserved version 20260910155753.
+-- derived-from: 20260909115140
 --
 -- SCHEMA ONLY. This public migration contains no licensed values, labels, URLs,
 -- contracts, raw evidence or fixtures. Exact source strings arrive only at runtime
