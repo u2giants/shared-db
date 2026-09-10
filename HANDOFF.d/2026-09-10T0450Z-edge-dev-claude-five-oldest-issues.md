@@ -1,6 +1,6 @@
 ---
 issue: 2326
-status: DONE
+status: OPEN
 owner: claude/five-oldest-open-issues-ad33ca
 ---
 
@@ -39,7 +39,9 @@ Nothing still held. Both of my worktrees (`C:/repos/shared-db-worktrees/issue-23
 
 ## 6. What I was about to do next
 
-Nothing. The requested scope is finished to the extent one session can finish it.
+Nothing in the five-issue scope — it is finished to the extent one session can finish it.
+
+**The workstream this file is filed against is still open.** `plan_database_efficiency_and_api_security.md` Steps 3-8 remain, tracked on #2326. Step 3 is the next one, and it is a declared blocker for structural issues #2213, #2214 and #2215. Read the plan's STATUS table first: Step 1 and Step 2 rows are now authoritative, and Step 2's row records exactly what was and was not proven, so do not re-derive it. Start Step 3 in a fresh session with a fresh worktree from current upstream; the plan requires one session per phase.
 
 ## 7. Blocked on
 
