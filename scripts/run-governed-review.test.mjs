@@ -223,6 +223,8 @@ test('ai-gemini governed reviews are given the head under review as their verdic
   const head='c'.repeat(40)
   assert.deepEqual(wrapperVerdictContractArgs('ai-gemini',['new','sess','--prompt','x'],head),['new','--governed-verdict',head,'sess','--prompt','x'])
   assert.deepEqual(wrapperVerdictContractArgs('C:/tools/ai-gemini.cmd',['ask','sess'],head),['ask','--governed-verdict',head,'sess'])
+  assert.deepEqual(wrapperVerdictContractArgs('ai-qwen',['new','sess','--prompt','x'],head),['new','--governed-verdict',head,'sess','--prompt','x'])
+  assert.deepEqual(wrapperVerdictContractArgs('C:/tools/ai-qwen.cmd',['ask','sess'],head),['ask','--governed-verdict',head,'sess'])
 })
 
 test('other wrappers keep their arguments untouched',()=>{
