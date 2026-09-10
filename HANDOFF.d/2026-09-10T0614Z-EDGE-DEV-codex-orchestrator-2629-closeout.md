@@ -49,6 +49,7 @@ Marker #2629 continued the clean handoff from marker #2597. The ordered agenda w
 - Kimi reviewer calls hit provider quota. Qwen initially had stale sessions and a repository lock, and an earlier adapter could omit the mandatory governed-verdict SHA. Stale session metadata was preserved before deletion; PR #2667 fixed the adapter; the final normal adapter call produced durable Qwen replacement verdict `3fdbf2ead6f17f8e60b6943e3c37e6191a6f251b`. It took about 21 minutes with no streaming output but completed inside its 30-minute bound.
 - Main moved repeatedly while PR #2653 was under review. Each move correctly voided the old evidence and verdicts, so the branch, contract, checks, both reviewer reservations, and reviews were refreshed before guarded merge.
 - `gh pr merge --admin` is not a valid escape hatch here. Every merge named above used the repository's guarded merge path.
+- The first guarded dispatch for closeout PR #2668, run 34445162477, failed before checkout because PowerShell passed `$j.headRefOid` as a literal property expression inside the external command. No repository or authorization state changed; storing the SHA in a scalar variable fixes the invocation.
 - Worktree cleanup was deliberately not applied. Issue #2624 proves the current reap script can delete worktrees containing unpushed commits.
 
 ## 5. Root causes and key findings
