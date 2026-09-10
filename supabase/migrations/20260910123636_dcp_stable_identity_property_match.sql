@@ -87,11 +87,15 @@
 -- ACCEPTED RESIDUAL RISKS (recorded, not hidden)
 -- ---------------------------------------------
 --   * NOT RE-RUNNABLE, BY DESIGN. Every in-place rewrite here refuses unless
---     the current body is exactly the text it was derived from, and the two
---     decide-function rewrites now COUNT exact-once hits before replacing, so
---     a second pass raises rather than duplicating a payload or a guard.
---     supabase_migrations.schema_migrations already runs each version once;
---     the counting makes an isolated re-run of a single block fail closed too.
+--     the current body is exactly the text it was derived from. In the two
+--     decide-function rewrites the replacement text ENDS with the needle it
+--     replaces, so an exact-once hit count alone cannot tell a fresh body from
+--     an already-rewritten one. Each of those blocks therefore ASSERTS FIRST
+--     that the marker it installs ('identity_decision_state' in section 3,
+--     'would give the stable identity' in section 4) is absent, and only then
+--     checks the needle occurs exactly once. supabase_migrations.schema_migrations
+--     already runs each version once; the absence assertion is what makes an
+--     isolated re-run of a single block fail closed too.
 --   * GROUPING IS PREFIX-ONLY, NOT A CLOSED SYSTEM ALLOW-LIST. 'dcpvault:' is
 --     the id's own emitted namespace and today all 462 such rows belong to the
 --     three DCP copies (census above). Since #2449 dropped the three-table
@@ -601,11 +605,18 @@ declare
 begin
   v_definition := pg_get_functiondef(v_sig::regprocedure);
   -- The needle survives its own replacement: v_new ENDS with the same
-  -- 'idempotent_repeat', v_repeat, fragment. replace() substitutes EVERY
-  -- occurrence, so a second pass over an already-rewritten body would insert a
-  -- second identity payload into this SECURITY DEFINER return object. Count
-  -- exact-once hits first and fail closed on anything else, matching the
+  -- 'idempotent_repeat', v_repeat, fragment. So an already-rewritten body
+  -- still contains the needle exactly once and the exact-once count alone
+  -- CANNOT detect a re-run. Assert first that the marker this block installs
+  -- is absent, which is true only of a body that has not been rewritten yet;
+  -- that is what makes an isolated re-run fail closed. The exact-once count
+  -- is kept as well, so a body carrying an unexpected number of needles is
+  -- refused instead of being rewritten in more than one place, matching the
   -- exactly-once rewrite discipline of 20260907200221 lines 456-460.
+  if position('identity_decision_state' in v_definition) > 0 then
+    raise exception
+      'issue #2576: api.db_data_admin_decide_property_match already carries the stable-identity decision payload; this block is not re-runnable, re-derive from the current merged body';
+  end if;
   v_hits := (length(v_definition) - length(replace(v_definition, v_old, '')))
             / nullif(length(v_old), 0);
   if v_hits is distinct from 1 then
@@ -709,6 +720,15 @@ $old$;
 $new$;
 begin
   v_definition := pg_get_functiondef(v_sig::regprocedure);
+  -- Same trap as section 3: v_new ENDS with the v_old preamble, so an
+  -- already-guarded body still contains the needle exactly once and the count
+  -- alone cannot detect a re-run. Assert first that this block's own guard
+  -- text is absent; only an un-guarded body passes, so an isolated re-run
+  -- fails closed. The exact-once count is kept as well.
+  if position('would give the stable identity' in v_definition) > 0 then
+    raise exception
+      'issue #2576: api.db_data_admin_decide_property_match already carries the stable-identity write guard; this block is not re-runnable, re-derive from the current merged body';
+  end if;
   v_hits := (length(v_definition) - length(replace(v_definition, v_old, '')))
             / nullif(length(v_old), 0);
   if v_hits is distinct from 1 then
