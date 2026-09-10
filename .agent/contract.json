@@ -13,7 +13,7 @@
     "PR 2653 was refreshed through current main 7b82064e3264f2921cade463cbb046fb292d0da5 after the in-process structural work completed."
   ],
   "base_sha": "7b82064e3264f2921cade463cbb046fb292d0da5",
-  "branch": "codex/issue-2652-current-main-rebuild",
+  "branch": "codex/issue-2652-ledger",
   "db_reads": [],
   "db_writes": [],
   "dispatcher": "codex shared-db orchestrator route 01a085f2-a84f-7963-b474-e5770b149ecd",
@@ -24,7 +24,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 3,
+  "generation": 4,
   "goal": "Restore preview-ledger parsing for exactly migration 20260909005945 without changing its merged bytes or weakening malformed-declaration refusal for any other migration, and record its one new fail-closed truth-audit call site.",
   "prohibited_actions": [
     "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
