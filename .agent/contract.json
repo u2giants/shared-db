@@ -1,49 +1,37 @@
 {
-  "allowed_paths": [
-    "docs/verification/database-efficiency/20260910T002917Z/api-access-matrix.md",
-    "plan_database_efficiency_and_api_security.md",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "assumptions": [
-    "Step 1 of the plan landed 2026-09-04 and left the PostgREST exposed-schema list unread, because current_setting returned NULL in the SQL session.",
-    "The exposed-schema list is obtainable from the API boundary instead: an unexposed Accept-Profile is refused with PGRST106 and the refusal names the full list.",
-    "information_schema.role_table_grants is identity-filtered and returns an empty set on production, which would read as 'no anon/authenticated grants exist'; has_table_privilege against pg_class is the correct source.",
-    "This session is read-only for production. No write of any kind may be issued, and no row contents, column values or credential values may appear in the artifact.",
-    "db_reads is declared empty because ungated read-only inspection is not a claimed database read under AGENTS.md; the exact read-only sources used are listed in the completion report and in the artifact itself."
-  ],
-  "base_sha": "e4c98ab2b06f9db70ef6f26516efea6334f9d21e",
-  "branch": "claude/issue-2326-api-access-matrix",
+  "schema_version": 1,
+  "work_issue": 2666,
+  "generation": 3,
+  "route": "repo-maintenance",
+  "work_type": "repo-maintenance",
+  "goal": "Make every manager-assigned ai-qwen review use the exact-head SHA-bound governed verdict contract automatically.",
+  "base_sha": "59f7d2a7558a1359ef9e7a13c256ff23edf37c50",
+  "dispatcher": "codex ai-qwen incident repair session",
+  "worker": "codex shared-db governed Qwen adapter repair",
+  "branch": "codex/qwen-requalify-20260910",
+  "worktree": "C:/repos/shared-db-worktrees/qwen-requalify-20260910",
+  "allowed_paths": [".agent/completion.json", ".agent/contract.json", "scripts/run-governed-review.mjs", "scripts/run-governed-review.test.mjs"],
+  "file_writes": [".agent/completion.json", ".agent/contract.json", "scripts/run-governed-review.mjs", "scripts/run-governed-review.test.mjs"],
   "db_reads": [],
   "db_writes": [],
-  "dispatcher": "claude repo-maintenance session working the oldest ready repo-maintenance queue",
-  "file_writes": [
-    "docs/verification/database-efficiency/20260910T002917Z/api-access-matrix.md",
-    "plan_database_efficiency_and_api_security.md",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "generation": 1,
-  "goal": "Execute Step 2 of plan_database_efficiency_and_api_security.md: prove the Data API access boundary at four layers across three identities, retire or reproduce each 2026-09-03 advisor family, and record the result as a durable verification artifact with the plan STATUS row updated.",
   "prohibited_actions": [
-    "No write of any kind against production, preview, or any shared database",
-    "No row contents, column values, or credential values in the artifact",
-    "No migration, schema change, reviewer allocation, preview apply, or production promotion",
-    "No remediation of any finding; each remediation is a separate governed claim",
-    "No path outside this contract"
+    "Do not change reviewer assignments, verdict records, migrations, preview, production, or database contents.",
+    "Do not relax exact-head validation or the adapter's fail-closed verdict grammar.",
+    "Do not special-case an issue, pull request, slot, or reviewer sequence."
   ],
   "required_checks": [
+    "node --test scripts/run-governed-review.test.mjs",
+    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
     "git diff --check"
   ],
-  "route": "repo-maintenance",
-  "schema_version": 1,
-  "stop_conditions": [
-    "A probe would require a write, an RPC call, or fetching row contents",
-    "A finding cannot be proved with both catalog and HTTP evidence",
-    "The artifact cannot be written without naming credential values"
+  "assumptions": [
+    "ai-devops PR 368 provides the wrapper-side --governed-verdict contract before the adapter change is used live.",
+    "This repository-maintenance change authorizes no database or coordination-ref mutation beyond its own published work contract.",
+    "The branch is refreshed through current main 59f7d2a7558a1359ef9e7a13c256ff23edf37c50."
   ],
-  "work_issue": 2326,
-  "work_type": "repo-maintenance",
-  "worker": "claude issue2326-step2-repo-session",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step2"
+  "stop_conditions": [
+    "Stop if the adapter cannot bind the injected SHA to its own exact head.",
+    "Stop if the change requires bypassing an existing reviewer lease or verdict record.",
+    "Stop if current main moves before publication without refreshing the branch and contract evidence."
+  ]
 }

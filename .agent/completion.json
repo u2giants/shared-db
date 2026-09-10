@@ -1,33 +1,24 @@
 {
   "schema_version": 1,
-  "work_issue": 2326,
+  "work_issue": 2666,
   "outcome": "ready-for-merge",
-  "pr": 2661,
+  "pr": 2667,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/1",
-  "contract_sha256": "076d1e1bf47a3e5243e46a417e16da05d4f22106c20a0e8439884dedcc7599bb",
-  "head_sha": "bdb0e3397b01d4499849d2d50dec02768a69f61c",
-  "evidence_note": "Step 2 of plan_database_efficiency_and_api_security.md. Read-only throughout: every HTTP probe used select=*&limit=0 with Prefer: count=exact, so each response body was the literal [] and only the Content-Range total was read; no write of any kind was issued and no row contents, column values or credential values appear in the artifact. Catalog reads were pg_class, pg_proc, pg_policy, pg_views, pg_matviews and information_schema.role_table_grants; the last is identity-filtered and returned an empty set on production, which is recorded in the artifact as a proven false negative rather than a finding, and the grants were re-read with has_table_privilege against pg_class (437 relations, positive control). Albert authorized publishing this in the public repository on 2026-09-09 despite it naming a live, unremediated cross-application read path; the remediation is tracked as #2662. A durable REVISE at head 913f88de found five statements stronger than their evidence; commit 45ab3165 narrows each one -- the two dflow tables are marked catalog-only, the zero-policy result is qualified to the two identities tested, the anon-401 claim is limited to the six public objects probed, the verification gate excludes the catalog-only function grants, and the five public definer-class views are named. The information_schema false-negative control now records its own limits. The following evidence-only commit changes only .agent files. A second durable REVISE at head 7cfad95a found four further overclaims: a DAM result attributed to an unprobed view, a self-contradicting catalog census, a misattribution of the three RLS-disabled tables to Step 1's scan, and a 'true total' claim for public.properties with no independent count. All four are corrected, and the Layer 2 census was re-derived from a single recorded predicate. A third durable REVISE at head 58bf4d6b found the Layer 3 public-view count (six) contradicted the catalog and this report own name list (five), and that the plan DML wording was not supported by the SELECT predicate actually recorded; both are corrected. The branch was then rebased onto the current main tip cc5ae41e so the guarded merge could run against it; no content changed in the rebase and the head_sha above names the rebased implementation commit.",
-  "files_changed": [
-    "docs/verification/database-efficiency/20260910T002917Z/api-access-matrix.md",
-    "plan_database_efficiency_and_api_security.md"
-  ],
+  "contract_ref": "refs/db-contracts/2666/3",
+  "contract_sha256": "2a5f9a16b440f251a583a231e2c24b11884adf797c0b9d0be77c2f35a888b1e0",
+  "head_sha": "8a49343b215812d833b4c611c8097853a73d03c6",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", "scripts/run-governed-review.mjs", "scripts/run-governed-review.test.mjs"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
-    }
+    {"command": "node --test scripts/run-governed-review.test.mjs", "exit_code": 0, "evidence": "49 governed-runner tests passed after current-main refresh, including Qwen-specific mismatch, repeated-flag, and subcommand refusal coverage."},
+    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 work-contract tests passed after current-main refresh."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors after current-main refresh."}
   ],
   "assumptions_resolved": [
-    "The exposed-schema list was obtained from the API boundary as predicted: an unexposed Accept-Profile returns 406 PGRST106 naming public, graphql_public, api, crm, pim, core, app. Controls distinguish it from 404 PGRST205 and from 200.",
-    "The 2026-09-03 plan named three RLS-disabled tables carrying authenticated DML. Step 1's scan did not reproduce them; the corrected has_table_privilege method surfaces them. All three sit in unexposed schemas; dam.sku_human_description was demonstrated over HTTP (406) and the two dflow tables rest on the catalog fact that dflow is not exposed. That Step 1 open item is retired, not a Data API exposure.",
-    "function_search_path_mutable is closed for security-definer functions: zero of them have a mutable search path.",
-    "rls_enabled_no_policy is denied at count 0 on the two identities tested (anonymous and the CRM test identity); the over-broad anon/authenticated DML grant is retained as a Medium finding rather than dismissed.",
-    "security_definer_view and materialized_view_in_api were REPRODUCED as a live cross-application read, and the probe is shown to discriminate because the same identity gets 0 from api.crm_contact_list, which gates internally on app.has_app_access('crm'). api.crm_opportunity_list was not probed with that identity and is not part of the comparison.",
-    "Anonymous and authenticated SECURITY DEFINER function execution is catalogued but NOT exercised, with cause: an RPC call is write-shaped against production. Carried forward explicitly in #2662."
+    "ai-devops PR 368 carries the wrapper-side exact-head governed verdict implementation and passed 118 focused tests plus independent exact-head review.",
+    "The adapter derives the flag value only from its own headSha and validates every caller-supplied spelling against that same head.",
+    "The branch was refreshed through current main 59f7d2a7558a1359ef9e7a13c256ff23edf37c50 without changing database or coordination state."
   ],
   "stop_conditions_hit": []
 }
