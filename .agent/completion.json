@@ -1,79 +1,34 @@
 {
   "schema_version": 1,
-  "work_issue": 2644,
+  "work_issue": 2307,
   "outcome": "ready-for-merge",
-  "pr": 2649,
-  "migration_versions": ["20260909220101"],
-  "contract_ref": "refs/db-contracts/2644/8",
-  "contract_sha256": "086433aac94c56aabc5ec1b04ca16c5393ef2bf3e8a3b3c99ce7dda7a637be9f",
-  "head_sha": "d848d6fc36435074b37a60857d1b63ec1108c43f",
-  "evidence_note": "Implementation head d848d6fc is refreshed from current main 7fc819f9 and uses reserved migration version 20260909220101 without changing its SQL. It adds a PopDAM-owned canonical item state table, atomic admin/service-role dismissal RPC, the unchanged 21-column serving projection, non-destructive canonical identity for category predictions, and focused proof for missing, duplicate, and ambiguous identity refusal plus both legacy ERP-row and canonical item retirement history preservation. The following evidence-only commit changes only .agent files. Fresh exact-head CI is tracked on PR #2649.",
+  "pr": 2659,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2307/1",
+  "contract_sha256": "486d972bdb648b85a72e349c150f0d10e8cc0064f92971b69a7a45fcdbf9acb1",
+  "head_sha": "7d0b6d8ce5a66404ff5cc038665f1c478f1d379d",
+  "evidence_note": "Test-only. Issue #2307 asked for an abandoned ai-devops branch to be landed. One of its two commits added an opt-in terminal VERDICT line to bin/ai-codex-review because codex looked like a dead provider. run-governed-review.mjs resolves the codex report with lines.at(-1), so that change would have made every codex review refuse with 'the codex wrapper final line is not a published report path'. Nothing named the hazard. This adds the naming regression test, plus a second test pinning all three codexReportPath refusals to their own messages so the regression cannot drift onto a different failure -- the answering commit for the durable reviewer refusal recorded against head 848c14ce. Production code is untouched. The still-valid half of that branch, the ai-glm doctor fallback, is popcre/ai-devops#358. The following evidence-only commit changes only .agent files.",
   "files_changed": [
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260909220101_popdam_item_state_and_prediction_identity.sql",
-    "supabase/tests/popdam_item_state_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql"
+    "scripts/run-governed-review.test.mjs"
   ],
-  "db_reads": [
-    "table plm.item",
-    "table public.erp_items_current",
-    "table public.product_category_predictions"
-  ],
-  "db_writes": [
-    "table public.popdam_item_state",
-    "function public.set_popdam_item_dismissed",
-    "view api.plm_item_list",
-    "table public.product_category_predictions",
-    "column public.product_category_predictions.erp_item_id",
-    "column public.product_category_predictions.plm_item_id",
-    "column public.product_category_predictions.item_identity_status",
-    "function public.resolve_product_category_prediction_item_identity",
-    "trigger product_category_predictions_resolve_item_identity on public.product_category_predictions",
-    "index public.idx_product_category_predictions_plm_item_id",
-    "table api.plm_item_list"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node --test scripts/run-governed-review.test.mjs",
       "exit_code": 0,
-      "evidence": "Static migration guards passed. Guard B2 disclosed that no live-ledger source was configured locally, so no database clearance is claimed from this run."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "Status OK; all 44 existing sidecars validated and this migration contains no dynamic verification marker requiring a new sidecar."
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "exit_code": 0,
-      "evidence": "Claim #2648 and reserved version 20260909184115 verified after the sanctioned parser expansion added table api.plm_item_list and column public.product_category_predictions.erp_item_id."
+      "evidence": "47 tests pass, 0 fail, including 'issue 2307: a verdict line appended after the codex report path breaks the round' and 'issue 2307: the appended-verdict refusal is distinct from the other two'."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
-    },
-    {
-      "command": "supabase/tests/popdam_item_state_contracts.sql on a disposable database",
-      "exit_code": 0,
-      "evidence": "The focused contract covers direct-access denial, RPC authorization, atomic missing-key and duplicate-key refusal, dismiss/fresh-read/restore, exact canonical prediction identity, legacy ERP-row and canonical item deletion history preservation, and explicit unresolved history. Exact-head execution is tracked by PR #2649 CI."
-    },
-    {
-      "command": "Database Contract Tests CI from empty",
-      "exit_code": 0,
-      "evidence": "Fresh exact-head execution is tracked externally on PR #2649; no earlier-head run is presented as exact-head evidence."
     }
   ],
   "assumptions_resolved": [
-    "The exact 21 output column names and order remain unchanged; raw source payloads are not exposed.",
-    "Dismissal state is keyed to plm.item.id plus a readable three-part source identity snapshot and is not stored on source-owned plm.item.",
-    "Every legacy dismissed=true row must resolve exactly once by ColdLion source, division, and item number before migration continues.",
-    "The batch RPC accepts item_keys and dismissed exactly as PopDAM PR #119 calls it, caps batches at 5000, rejects nulls, duplicates, missing and ambiguous keys, and changes the whole batch atomically; focused fixtures execute both zero-match and two-match refusal paths.",
-    "Browser roles have no direct table access; the RPC permits only service_role or authenticated users holding the existing admin role.",
-    "The cascading ERP foreign key is removed before table retirement; existing predictions gain exact plm.item links where provable and otherwise remain visible with item_identity_status unresolved.",
-    "New three-part prediction keys resolve through a trigger and refuse when missing or ambiguous; legacy-format prediction writes remain visible even when unresolved.",
-    "No preview, governed review, merge, production action, or shared-database write was performed."
+    "Confirmed on current main that run-governed-review.mjs codexReportPath reads lines.at(-1) and throws 'not a published report path' for anything else, so a trailing verdict line is fatal rather than ignored.",
+    "Confirmed the ai-devops commit 644341f5 appends that line after 'printf %s\n \"$OUT\"', and it is deliberately not recovered.",
+    "No preview, governed review, merge of other work, production action, or shared-database write was performed."
   ],
   "stop_conditions_hit": []
 }
