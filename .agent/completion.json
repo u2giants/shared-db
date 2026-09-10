@@ -1,68 +1,24 @@
 {
   "schema_version": 1,
-  "work_issue": 2576,
+  "work_issue": 2326,
   "outcome": "ready-for-merge",
-  "pr": 2676,
-  "migration_versions": [
-    "20260910123636"
-  ],
-  "contract_ref": "refs/db-contracts/2576/8",
-  "contract_sha256": "7563c777bae324e06c80290dda50f1a25473ecd654e070ec677764b4224f9c83",
-  "head_sha": "dd8c353610dabb5ae63f72ca52fbf7f78d693e93",
+  "pr": 2684,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2326/9",
+  "contract_sha256": "962ec37b1677a893f265398c27e9a9f080b7287442b0e45ea8b05d029dc0b4fc",
+  "head_sha": "585dd5095174cc40d01735f4810e490724c5ccda",
   "files_changed": [
-    ".agent/completion.json",
     ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/production-verification-sidecars/20260910123636.json",
-    "scripts/production_business_risk_gate.py",
-    "scripts/production_catalog_verification.py",
-    "supabase/migrations/20260910123636_dcp_stable_identity_property_match.sql",
-    "supabase/tests/dcp_stable_identity_property_match_contracts.sql"
+    "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md",
+    "plan_database_efficiency_and_api_security.md"
   ],
-  "db_reads": [
-    "plm.dcp_opa_property_resolution",
-    "plm.dcp_opa_property_resolution_member"
-  ],
-  "db_writes": [
-    "api.db_data_admin_property_match_queue",
-    "api.db_data_admin_scraped_properties",
-    "api.db_data_admin_decide_property_match"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node --test scripts/check-sql.test.mjs",
       "exit_code": 0,
-      "evidence": "Static checks passed. Set DATABASE_URL to run migrations against a disposable database."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs",
-      "exit_code": 0,
-      "evidence": "{\"status\":\"OK\",\"sidecars\":46,...,{\"version\":\"20260910123636\",\"markers\":[243,630,742],\"sidecar\":true}]}"
-    },
-    {
-      "command": "python scripts/check_production_verification_sidecars.py",
-      "exit_code": 0,
-      "evidence": "{\"status\":\"OK\",\"sidecars\":46,\"scans\":[]}"
-    },
-    {
-      "command": "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
-      "exit_code": 0,
-      "evidence": "381 passed, 210 subtests passed in 36.12s"
-    },
-    {
-      "command": "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py -q",
-      "exit_code": 0,
-      "evidence": "244 passed, 68 subtests passed in 1.92s"
-    },
-    {
-      "command": "python -m pytest scripts/test_production_business_risk_gate.py scripts/test_production_migration_guard.py scripts/test_check_pass2_routine_supersession.py scripts/test_production_catalog_verification_noop_narrowing.py scripts/test_mutation_sweep_guards.py -q",
-      "exit_code": 0,
-      "evidence": "427 passed, 519 subtests passed in 52.10s"
-    },
-    {
-      "command": "node scripts/check-applied-migration-edit.mjs",
-      "exit_code": 0,
-      "evidence": "UNKNOWN: the applied-migration-edit guard COULD NOT RUN - SUPABASE_ACCESS_TOKEN is not set. The migration 20260910123636 is not applied anywhere and was edited in place, keeping its version."
+      "evidence": "Completed with no diagnostic output in this worktree."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -70,29 +26,14 @@
       "evidence": "Contract is valid."
     },
     {
-      "command": "git diff --check",
+      "command": "git diff --check 7652d93c56c4af59e97f8cca27b1f47c5f25293e..HEAD",
       "exit_code": 0,
       "evidence": "No output; exit code 0."
     }
   ],
   "assumptions_resolved": [
-    "REVIEW HIGH FINDING RESOLVED, NOT RE-ASSERTED: scripts/production_catalog_verification.py was read, and a verifier-owned catalog contract CAN read routine bodies back. dcp_stable_identity_property_match_v1 was added following the exact pattern of single_creative_submission_resolution_ledger_v1, asserting identity_key, mapped_fingerprints and the dcpvault: prefix in api.db_data_admin_scraped_properties; identity_decision_state, identity_conflict, identity_copies and member_fingerprint in api.db_data_admin_property_match_queue; and identity_decision_state, identity_copies and the write-guard message in api.db_data_admin_decide_property_match. All three sidecar marker_reviews are now disposition 'checks' bound to check id dcp_stable_identity_property_match.",
-    "SUPERSESSION SAFETY: catalog_contract_objects() keys routines by full signature and a later contract supersedes an earlier one for shared objects, so the new contract is built as SINGLE_CREATIVE_SUBMISSION_RESOLUTION_LEDGER_CONTRACT + additional assertions, a strict superset that carries every issue #2449 assertion forward.",
-    "REVIEW MEDIUM FINDING 1 RESOLVED: the decide-function rewrite block now counts occurrences of its needle and raises unless the count is exactly 1, matching the 20260907200221 precedent.",
-    "REVIEW MEDIUM FINDING 2 RESOLVED IN SQL: a new in-place rewrite installs a write-side guard in api.db_data_admin_decide_property_match that refuses (errcode restrict_violation) an approval whose member set disagrees with a terminal mapping already recorded on another retained copy of the same dcpvault identity and is not itself held by any such copy. Approving the member set an existing terminal mapping carries stays allowed, so an identity can always be reconciled and is never stranded. Stated in the migration header and covered by test 8 in supabase/tests/dcp_stable_identity_property_match_contracts.sql.",
-    "GUARD PROVED ABLE TO FAIL: on a throwaway PostgreSQL 18.6 cluster the extracted guard refused a divergent new member set and a subset-only set, and allowed the agreeing sets, an unmapped approval, a rejection, a non-dcpvault identity, an identity with no siblings, and the same set in reversed order.",
-    "REVIEW LOW ITEMS RECORDED: the migration header now carries an ACCEPTED RESIDUAL RISKS section covering not-re-runnable-by-design, prefix-only grouping not being a closed DCP-system allow-list, tie ordering being total rather than arbitrary, and the identity_copies read/write asymmetry. Determinism of the newest-terminal tie is additionally covered by test 9.",
-    "MIGRATION VERSION UNCHANGED: 20260910123636 is not applied anywhere and was edited in place; the filename and the bare 14-digit -- derived-from: 20260907200221, 20260902053756 header parse cleanly under scripts/migration_derivation.py.",
-    "NO NEW DATABASE OBJECT IS CLAIMED: only the three api routines already claimed by this pull request are edited.",
-    "DETECTOR BASELINE: scripts/production_catalog_verification.py is the throughput-guard detector source, so docs/verification/throughput-guard-truth-baseline-20260828.json detector_source_sha256 was regenerated to 89157c2a007553ddd8215401c2a821121610784bd016d6a07aa8b6077f6e7c9d, matching precedent commit c740c820. Without it check-production-verification-sidecars.mjs returned UNVERIFIABLE.",
-    "SIDECAR REBOUND: migration_sha256 is now 469735d609e25ff8d9618f6c77db111e940ec282df30def877ac3d59ba710d73 and the marker lines are 243, 630 and 742. The PREVIEW_PRODUCER_PATHS registration in scripts/production_business_risk_gate.py is unchanged and still correct.",
-    "REVIEW LOW FINDING A RESOLVED: the migration now ends the queue-function block with a comment on function api.db_data_admin_property_match_queue(text, text, integer) restating the contract. The comment set by 20260902053756 was left in place by the create or replace and still said the queue covers exact DCP source Property identities and derives no authority verdict, while the new body derives identity_decision_state and identity_conflict. The restated comment keeps the original voice, keeps the no-authority-verdict claim scoped to licensor scope where it is still true, and names only what the body actually returns.",
-    "REVIEW LOW FINDING B RESOLVED: editing the migration changed its hash, so the sidecar was recomputed AFTER that edit and this report was then brought into exact agreement with the tree. migration_sha256 is 469735d609e25ff8d9618f6c77db111e940ec282df30def877ac3d59ba710d73 and the marker_reviews line ranges are 236-248, 614-639 and 728-749; the three reasons' in-text line references were moved to 243, 630 and 742 to match.",
-    "REVIEW HIGH FINDING VOID: it concerned migration 20260910123601, which is on main and is not part of this pull request. Nothing was changed for it.",
-    "PROOF LIMIT, STATED PLAINLY: Docker is unavailable on this machine, so the full supabase/tests suite was not replayed locally. The ephemeral-database CI run is the first from-empty replay of this migration and its two new tests.",
-    "No preview or production apply, workflow dispatch, lane-manager run, worktree reaper run or merge was performed by this worker.",
-    "EVIDENCE REBOUND TO THE POST-MERGE HEAD: the PR base advanced to e9f39d510050555ec18ab23668c9e8a2974a0c3b, so the generation 6 report head b2c68f37ae6145fdd0a2929935dc08425dbb3b30 was no longer a descendant of the base and the git-evidence ancestry check refused it. Contract generation 7 was published at refs/db-contracts/2576/7 and this report now names head f26c1a01510f03337aca4c4dec693e8d5e247bee, the merge of current main into this branch. files_changed is exactly git diff --name-only e9f39d51..f26c1a01. No implementation file was edited to clear the check."
+    "The active marker #2669 belongs to another session, and this closeout performed no database interaction.",
+    "The durable evidence reconciles Step 3 without authorizing a new structural or #2662 change."
   ],
-  "ci_defect_fixed": "CI run 34487056728 executed 179 test files; the single non-quarantined failure was dcp_stable_identity_property_match_contracts.sql line 565, ERROR: function max(uuid) does not exist. Contract test 9 now derives the expected tie winner with order by r.decision_version desc, r.approved_at desc nulls last, r.resolution_id desc limit 1 -- byte-for-byte the ordering the migration itself applies -- with no text cast, so the comparison stays uuid-to-uuid. No migration, guard, workflow or quarantine list was touched.",
   "stop_conditions_hit": []
 }
