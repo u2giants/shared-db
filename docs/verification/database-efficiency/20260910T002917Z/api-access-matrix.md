@@ -22,7 +22,7 @@ GET /rest/v1/sku_human_description?select=*&limit=0   Accept-Profile: dam    -> 
 
 Controls: `Accept-Profile: public` returns 200; `Accept-Profile: graphql_public` returns 404 `PGRST205` (schema exposed, table absent). The three answers are distinguishable, so a 406 is a real exposure refusal and not a malformed header.
 
-**This retires a Step 1 open item.** Step 1 found three RLS-disabled tables carrying `authenticated` DML privilege. All three — `dam.sku_human_description`, `dflow.item_user_assignment`, `dflow.item_workflow_action` — sit in unexposed schemas. Only `dam.sku_human_description` was probed over HTTP (406, below); the two `dflow` tables rest on the catalog fact that `dflow` is not in the exposed list, which is the same fact the 406 demonstrates. On that basis they are **not** a Data API exposure, but the HTTP demonstration covers one of the three, not all three.
+**This retires a Step 1 open item.** The 2026-09-03 plan named three RLS-disabled tables carrying `authenticated` DML privilege. Step 1's own scan did **not** reproduce them (it found zero) and deferred the question to Step 2; the corrected `has_table_privilege` method used here is what surfaces them, which is itself an instance of the `information_schema` false negative recorded in Layer 2. All three — `dam.sku_human_description`, `dflow.item_user_assignment`, `dflow.item_workflow_action` — sit in unexposed schemas. Only `dam.sku_human_description` was probed over HTTP (406, below); the two `dflow` tables rest on the catalog fact that `dflow` is not in the exposed list, which is the same fact the 406 demonstrates. On that basis they are **not** a Data API exposure, but the HTTP demonstration covers one of the three, not all three.
 
 ## Layer 2 — catalog grants (method correction)
 
@@ -30,7 +30,15 @@ Controls: `Accept-Profile: public` returns 200; `Accept-Profile: graphql_public`
 
 Positive control: the corrected query returns 437 relations across nine schemas carrying `anon` or `authenticated` table privilege, against zero rows from `information_schema` for the same roles. The two sources disagree on the same question, and only one of them returns objects that HTTP probing then confirms are reachable, so the empty `information_schema` result is a false negative rather than a finding. **Limitation:** the querying role, its memberships, and a per-object granted/empty pair are not recorded here, so a later reader must re-run both queries rather than check the correction from this document alone.
 
-Of those 437: 51 carry some `anon` privilege; 3 are RLS-disabled tables (all in unexposed schemas, above); 4 are RLS-enabled with zero policies; 8 are views or materialized views.
+Census, re-derived so that every figure below comes from one predicate — any `SELECT` privilege held by `anon` or `authenticated`, read with `has_table_privilege` against `pg_class`:
+
+- **517** relations project-wide, across 14 schemas.
+- **217** of those sit in the seven exposed schemas: 145 tables, 70 views, 2 materialized views.
+- **51** of those 217 carry `anon` `SELECT`.
+- **4** are RLS-enabled with zero policies (all `public`, named in finding 1).
+- **3** are the RLS-disabled tables above, all in unexposed schemas and therefore outside the 217.
+
+An earlier draft of this section reported 437 relations of which 8 were views, from a query whose exact predicate was not recorded; those two figures are superseded by the census above and should not be cited.
 
 ## Layer 3 — RLS, policies, view semantics, function exposure
 
@@ -38,7 +46,7 @@ Of those 437: 51 carry some `anon` privilege; 3 are RLS-disabled tables (all in 
 |---|---|
 | RLS enabled, zero policies, API privilege | 4 tables (all `public`) |
 | Views reachable by `anon`/`authenticated` | 6 in `public`, 65 in `api`, 1 in `dflow` |
-| `api` views by semantics | 50 `security_invoker=true`; 9 `security_invoker=false`; 7 unset (definer default) |
+| `api` views by semantics | 49 `security_invoker=true`; 9 `security_invoker=false`; 7 unset (definer default) — 65 in total, matching the row above |
 | Materialized views in an exposed schema | 2 (`public.style_guide_folders`, `public.style_guide_file_groups`) — RLS cannot apply to a materialized view |
 | Functions executable by `anon` | 107 (38 of them `SECURITY DEFINER`) |
 | Functions executable by `authenticated` | 205 (111 `SECURITY DEFINER`) |
@@ -96,7 +104,7 @@ Definer-semantics views and materialized views bypass RLS entirely. A **PopDAM v
 - `public.style_tracker_rows_with_bridge` — **15,742** PLM style-tracker rows
 - `public.style_guide_file_groups` — **22,045** style-guide file-group rows
 
-The same identity gets **0** from `api.crm_contact_list` and `api.crm_opportunity_list`, which filter by the caller. The boundary is therefore not merely permissive — it is **inconsistent**, and that inconsistency is what proves the probe discriminates rather than always succeeding.
+The same identity gets **0** from `api.crm_contact_list`, a definer view that gates internally on `app.has_app_access('crm')`. (`api.crm_opportunity_list` returned 0 to the CRM test identity and was **not probed** with the DAM viewer; it is an invoker view, a different mechanism, and is not part of this comparison.) The boundary is therefore not merely permissive — it is **inconsistent**, and that inconsistency is what proves the probe discriminates rather than always succeeding.
 
 Sixteen `api` views carry definer semantics while granting `SELECT` to `authenticated`: `crm_account_list`, `crm_contact_list`, `crm_contact_segment_counts`, `crm_contact_segment_list`, `crm_customer_list`, `crm_customer_picker_list`, `crm_factory_picker_list`, `crm_ingested_domain_list`, `dam_customer_list`, `dam_factory_list`, `opa_disney_property`, `opa_lucasfilm_property`, `opa_marvel_property`, `pm_customer_list`, `pm_factory_list`, `source_capture_inventory`. In `public`, five objects are in the same class: three definer views — `sg_archive_usage`, `style_tracker_audit_log_with_user`, `style_tracker_rows_with_bridge` — and the two materialized views `style_guide_folders` and `style_guide_file_groups`. (`public.dam_character_catalog` and `public.style_guide_file_tags_display` are reachable but carry invoker semantics, so RLS applies to them.)
 
@@ -126,5 +134,5 @@ Untouched here. It is a platform setting rather than a migration and remains a s
 
 - Every alleged exposure **that this report presents as a live finding** has both catalog and HTTP evidence — met. This does not extend to the function-execution grants in finding 3, which are catalog-only and are reported as NOT MEASURED rather than as exposures.
 - Negative controls denied: unexposed schema 406; absent table 404; zero-policy tables count 0 on the two identities tested; anonymous access denied 401 on every `public` definer view and materialized view listed above. The `api` views were not probed anonymously, so no claim is made about anonymous access to them.
-- Positive controls still work: `public.properties` returns its true total for both authenticated identities, and `Accept-Profile: public` succeeds.
+- Positive controls still work: `public.properties` returns the same non-zero count (500) to both authenticated identities while returning 0 to anonymous, so the probe distinguishes identities rather than always succeeding. No independent service-role count was taken, so 500 is the authenticated-visible count, not a demonstrated table cardinality. `Accept-Profile: public` succeeds.
 - The report contains no row data and no credential values — met.
