@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2579,
   "work_type": "structural",
   "route": "exclusive-db-lane",
@@ -87,7 +87,8 @@
     "Every verification sidecar and every file on the preview job's data surface must be individually pinned in PREVIEW_PRODUCER_PATHS in scripts/production_business_risk_gate.py. Adding the sidecar and the coverage manifest there is a registration the offline gate test demands, not a relaxation.",
     "scripts/check-sql.sh forbids migration verification from reading api.source_capture_inventory or plm.* rows, so the migration's own verification proves the new classification from the installed definition text and the LIVE classification is proved after apply by the catalog contract.",
     "Three existing landing contract tests (peanuts, sega, wildbrain) carry a v_map prefix array whose own error text instructs a new landing to add one row. The plm.marvel_* and plm.wwe_* rows are appended below every pre-existing prefix, and no earlier prefix is a prefix of marvel_ or wwe_, so no existing classification can change meaning.",
-    "The reserved migration version 20260910155753 was assigned by the dispatcher and is used exactly as given."
+    "The reserved migration version 20260910155753 was assigned by the dispatcher and is used exactly as given.",
+    "An append-only grant guard must name the application roles it constrains. information_schema.role_table_grants also lists the table owner's own implicit UPDATE/DELETE/TRUNCATE, which no REVOKE in a migration can remove, so an unfiltered count can never reach zero. Generation 3 scopes the TrackerPlus mutating-grant assertion, and its contract test, to service_role, authenticated, anon and PUBLIC, the shape already used by the wildbrain and sega landing guards."
   ],
   "stop_conditions": [
     "A required check proves a real defect in the migration or its contract test",
