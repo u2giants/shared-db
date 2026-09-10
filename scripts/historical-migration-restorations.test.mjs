@@ -6,9 +6,13 @@ import { HISTORICAL_RESTORATIONS, validateHistoricalProductionProvenance, valida
 test('pins the issue 2543 restoration without changing production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260909115140']
   assert.equal(row.filename,'supabase/migrations/20260909115140_opa_coherent_complete_capture.sql')
-  assert.equal(row.fileSha256,'9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7')
-  assert.equal(row.statementBytes,61267)
-  assert.equal(row.statementSha256,'0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719')
+  assert.equal(row.fileSha256,'8720f0a1fe9a6dbcfc3d40ca6ad5906e08424ea69d84df1284eb75ed544041bc')
+  assert.equal(row.statementBytes,61299)
+  assert.equal(row.statementSha256,'8e054097c5f73d050aacd6ef315b97c709e53f46618b034816c4536b6a28effc')
+  // The superseded pre-review bytes are no longer authorized by the registry.
+  assert.notEqual(row.fileSha256,'9d1d67c4caef29a50a3b8097a3e17381cd48705d364a444ea3967093394456c7')
+  assert.notEqual(row.statementSha256,'0f1b7fa0c17a1bffb2bfc67c625b85a14d71b15ffc8ee1169771f98ec79e2719')
+  assert.notEqual(row.statementBytes,61267)
   assert.equal(Object.isFrozen(row),true)
   assert.deepEqual(row.objects,[
     'table plm.opa_capture',
