@@ -36,13 +36,6 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": ".github/workflows/coldlion-licensor-property-phase6-parallel.yml:206",
-      "semantic_key": ".github/workflows/coldlion-licensor-property-phase6-parallel.yml:72967da3d143aa346024f14f74a69456d77f37005f4844fe7b98b4beace0a24a:1",
-      "line_sha256": "72967da3d143aa346024f14f74a69456d77f37005f4844fe7b98b4beace0a24a",
-      "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
-    },
-    {
       "site": ".github/workflows/coldlion-licensor-property-phase6-parallel.yml:222",
       "semantic_key": ".github/workflows/coldlion-licensor-property-phase6-parallel.yml:7fdcedcfa410a8186a55d216fb113dd25dddface71466bab2860c3e93742e93a:1",
       "line_sha256": "7fdcedcfa410a8186a55d216fb113dd25dddface71466bab2860c3e93742e93a",
@@ -1954,7 +1947,7 @@
       "reason": "Issue 2789 early refusal: with the automatic risk policy active, a production apply review dispatched without a numeric source_pr is refused by name before any credential is used. It adds a refusal and changes no existing check."
     }
   ],
-  "call_site_count": 277,
-  "call_site_sha256": "a66e4c5db54972afa39365d18921e73821459712fe918ca3242a272495ff7206",
+  "call_site_count": 276,
+  "call_site_sha256": "47bdb0498faf251bd5b7aaed1dee88711aa1898c705ef083431104f4e6d7ebd3",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
