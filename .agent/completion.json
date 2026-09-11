@@ -1,41 +1,38 @@
 {
   "schema_version": 1,
-  "work_issue": 2769,
+  "work_issue": 2772,
   "outcome": "ready-for-merge",
-  "pr": 2776,
-  "migration_versions": [
-    "20260911203057"
-  ],
-  "contract_ref": "refs/db-contracts/2769/3",
-  "contract_sha256": "14cfa0bafbc8ec1ecc61f966c7940ff4346aa2cb8ce43d2292a916aebb1e7dd1",
-  "head_sha": "60712d0d6c2d3b2bfff276adda1968917ae5eeae",
+  "pr": 2771,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2772/13",
+  "contract_sha256": "969c95f83eb66fb2e651bda0516c8f4ef96a0ba7603f049d3073935772c3f6ea",
+  "head_sha": "04a52ebe8d3c1bcead0f270804355cd261877d99",
   "files_changed": [
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
-    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
-  ],
+  "db_writes": [],
   "checks": [
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Run at c42e3673 (after merging main f15f0f0e) in C:/repos/shared-db-worktrees/issue-2769: Static checks passed. No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
-    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check f15f0f0e c42e3673 reported no whitespace errors."
+      "evidence": "No whitespace errors at 04a52ebe."
+    },
+    {
+      "command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py",
+      "exit_code": 0,
+      "evidence": "189 passed, 158 subtests passed at 04a52ebe (merge of origin/main 9a62bd23); pytest -q on the three named files."
     }
   ],
   "assumptions_resolved": [
-    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
-    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
-    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
-    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
+    "The contract-test workflow now uploads applied-migrations.txt; runs from before this merge are refused, so preview stays required for them."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
 }
