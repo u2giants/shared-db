@@ -302,6 +302,8 @@ export function wrapperFailureReason(run){
   if(/timed-out|timed out|deadline|time limit/i.test(stderr))reasons.push('the wrapper reported a timeout')
   if(/local_dependency_unavailable/i.test(stderr))reasons.push('a local reviewer dependency is unavailable')
   if(/execution-context-denied/i.test(stderr))reasons.push('the wrapper reported execution-context-denied')
+  if(/\bcontent-filter\b|\bDataInspectionFailed\b/i.test(stderr))reasons.push('provider_unavailable: content-filter rejected the request')
+  else if(/\bprovider-unavailable\b/i.test(stderr))reasons.push('provider_unavailable: the provider refused the request')
   if(/usage-limit|insufficient.quota|quota exceeded|usage limit/i.test(stderr))reasons.push('the wrapper reported a usage limit')
   if(/already active|already in progress|held for reconciliation|retained/i.test(stderr))reasons.push('the wrapper reported retained or active work; inspect that exact session')
   return reasons.join('; ')||(stderr?'wrapper stderr was present but its reason was not recognized; inspect the exact wrapper session':'the wrapper supplied no recognized diagnostic')

@@ -111,6 +111,9 @@ test('wrapper failure preserves a safe cause without publishing a verdict or raw
     ["unknown option '--review-kind'; token=private-value",/unsupported option/],
     ['ai-grok-review: Grok cancelled without a final answer. private-value',/provider cancelled/],
     ['timed-out private-value',/reported a timeout/],
+    ['terminal reason: content-filter private-value',/provider_unavailable: content-filter/],
+    ['[API Error: 400 InternalError.Algo.DataInspectionFailed: private-value]',/provider_unavailable: content-filter/],
+    ['provider-unavailable: private-value',/provider_unavailable/],
     ['private-value',/reason was not recognized/],
   ]){
     let calls=0
