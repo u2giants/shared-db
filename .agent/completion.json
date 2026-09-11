@@ -8,7 +8,7 @@
   ],
   "contract_ref": "refs/db-contracts/2506/25",
   "contract_sha256": "80b0a254ebda7516641c39895b209aab986dd28a6d4b38868a445e2c8c21fdaa",
-  "head_sha": "aad198622834b6827dfda4e591d9b89ab6101294",
+  "head_sha": "ab4915e9fd046ea0e538906ce2446866b8c50cb1",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
