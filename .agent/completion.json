@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260910155753"
   ],
-  "contract_ref": "refs/db-contracts/2579/6",
-  "contract_sha256": "505edbc24ba58f90c8d8243d60df110a7a7371031059929b58718a8f324965d5",
-  "head_sha": "38f1c7cd3657bb8932644ea86464666e82c7b17d",
+  "contract_ref": "refs/db-contracts/2579/7",
+  "contract_sha256": "53f2a204ca5180b3e0096417e3f0d421aba103d58413a16f8fe2f824ceb4191b",
+  "head_sha": "3fe848e5c7dc1bb3049a54b9ba48fb8dd185bae0",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -53,7 +53,7 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "{\"status\":\"OK\",\"sidecars\":47,... {\"version\":\"20260910155753\",\"markers\":[1122],\"sidecar\":true}]}"
+      "evidence": "{\"status\":\"OK\",\"sidecars\":47,... {\"version\":\"20260910155753\",\"markers\":[1144],\"sidecar\":true}]}"
     },
     {
       "command": "node scripts/check-db-data-admin-property-source-coverage.mjs",
@@ -63,12 +63,12 @@
     {
       "command": "node --test scripts/check-db-data-admin-property-source-coverage.test.mjs",
       "exit_code": 0,
-      "evidence": "# pass 15 / # fail 0"
+      "evidence": "# tests 18 / # pass 18 / # fail 0"
     },
     {
       "command": "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
       "exit_code": 0,
-      "evidence": "381 passed, 211 subtests passed in 36.80s"
+      "evidence": "381 passed, 211 subtests passed in 61.38s"
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -92,7 +92,8 @@
     "The claim on issue #2679 was amended through the supported path `--expand-active-claim-from-pr`, never by hand, adding the two TrackerPlus staff-read policies and api.source_capture_inventory as declared writes. Contract generation 2 (refs/db-contracts/2579/2) adds docs/verification/throughput-guard-truth-audit-20260828.json to allowed_paths: the truth-audit inventory needed the one new call site introduced by scripts/check-db-data-admin-property-source-coverage.mjs:188, which reports the reserved migration missing only after a direct fs.existsSync test, so it is dispositioned 'excluded'.",
     "CI round 3: the ephemeral-database replay aborted the migration at its own append-only assertion, '#2579: 6 mutating grants survive on the TrackerPlus landing'. The count read information_schema.role_table_grants with no grantee filter, so it included the table owner's implicit UPDATE/DELETE/TRUNCATE on both new tables (2 x 3 = 6) which no REVOKE can remove. The guard and the matching contract-test assertion now filter to service_role, authenticated, anon and PUBLIC, the same shape used by the wildbrain and sega landing guards; the guarantee is unchanged and the sidecar migration_sha256 was rebound to 9a1dfaccef8867701ace74dfdf1c5634c71bb420f98781b729f3167eb2084a2a.",
     "CI round 4: the migration applied and the four earlier database-contract failures cleared, leaving two. opa_coherent_complete_capture_contracts A0 showed api.source_capture_inventory_exact('opa_capture_scope') reporting a zero current-snapshot count where the coherent-capture contract requires an unknown latest-complete count, because this migration's in-place rewrite of the inventory was authored against the definition that preceded 20260909115140 and dropped its OPA clock. wildbrain_nbcu_licensing_read_access C showed the two new TrackerPlus read policies no longer admitting designer, which #1249 forbids. Both were repaired in the migration rather than in the tests; no contract expectation was changed.",
-    "Pre-merge update from main at ef06ca5aec77ad4eccf0e3b40accc2c2faca2cd6 by the shared-db orchestrator. The only conflicts were .agent/completion.json and .agent/contract.json, resolved by keeping this pull request own evidence; no non-.agent file conflicted and no implementation file changed. Contract generation 6 was published and the recorded check outputs were re-run against merge commit 38f1c7cd3657bb8932644ea86464666e82c7b17d."
+    "Pre-merge update from main at ef06ca5aec77ad4eccf0e3b40accc2c2faca2cd6 by the shared-db orchestrator. The only conflicts were .agent/completion.json and .agent/contract.json, resolved by keeping this pull request own evidence; no non-.agent file conflicted and no implementation file changed. Contract generation 6 was published and the recorded check outputs were re-run against merge commit 38f1c7cd3657bb8932644ea86464666e82c7b17d.",
+    "Generation 7: the four grok-4.6 REVISE findings on this pull request were fixed in place, in implementation commit 3fe848e5, because migration 20260910155753 is applied nowhere yet and no follow-up migration is warranted. Enforcing the non-empty-family rule on the CI path (finding 1) exposed one real gap it had been hiding: the samples family selects plm.sample_*, which predates this repository's migration history and so cannot appear in the catalog derived from supabase/migrations. It is declared with a reason in absent_from_repo_migrations, which is honoured on the derived path only, is still refused on the live path, and fails loudly if it ever goes stale. Finding 3's fix was proved to discriminate on a disposable local PostgreSQL 18.6 cluster: with `exception when sqlstate 'P0001'`, a real refusal sets v_refused, a call that does NOT refuse fails the test, and an unrelated error (SQLSTATE 42883, a missing function) escapes and fails the test, where the previous `exception when others` accepted it as a refusal. Finding 2's occurrence-count assertion was proved the same way: three unique anchors are accepted, a duplicated anchor raises 'anchor is not unique: 2 occurrence(s), expected exactly 1'. The rewritten do-block was parse-checked against that cluster and fails closed on the expected 'differs from the reviewed #2579 definition'. Nothing was applied to preview or production, no reviewer was assigned, no workflow was dispatched and no guard, check or test assertion was weakened."
   ],
   "assumptions_resolved": [
     {
@@ -134,8 +135,13 @@
       "assumption": "A derivation marker is required when an earlier migration also replaces the same objects.",
       "resolution": "confirmed",
       "detail": "scripts/test_migration_derivation.py failed naming api.source_capture_inventory and api.source_capture_inventory_exact until -- derived-from: 20260909115140 was added; the suite then reported 44 passed."
+    },
+    {
+      "assumption": "The full from-empty replay of the edited migration and of supabase/tests/pmt_trackerplus_submission_landing_contracts.sql cannot be run locally.",
+      "resolution": "unresolved-deferred",
+      "detail": "A disposable local PostgreSQL 18.6 cluster was created for this round. It cannot replay the migration history, which needs Supabase's auth schema and roles (the first migration aborts on `schema \"auth\" does not exist`), so the from-empty replay stays with the ephemeral-database CI job. What the local cluster did prove is exactly what this round changed: the rewritten do-block parses and fails closed, the anchor occurrence-count assertion refuses a duplicated anchor, the contract test file parses and reaches its own first assertion, and the SQLSTATE 'P0001' catch discriminates a real refusal from a non-refusal and from an unrelated error."
     }
   ],
   "stop_conditions_hit": [],
-  "generation": 6
+  "generation": 7
 }
