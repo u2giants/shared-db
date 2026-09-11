@@ -6,8 +6,8 @@
   "migration_versions": [
     "20260911204023"
   ],
-  "contract_ref": "refs/db-contracts/2478/2",
-  "contract_sha256": "e0b45c2dc24aa6310adecd88ade690de5d501a77b215d4dffb43d3255463852f",
+  "contract_ref": "refs/db-contracts/2478/3",
+  "contract_sha256": "f52a3b1bf1d44f3e6018ec557c525f83f17f3cd3bfc0ed0489d584c048946a24",
   "head_sha": "986bb3ed173029268f983e214d24a33770800812",
   "files_changed": [
     "supabase/migrations/20260911204023_shared_style_group_sku_key.sql",
