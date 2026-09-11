@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2772/3",
   "contract_sha256": "cd14a0eb56f6492daec5cf8f3fd6e02004f58bb1056f4855d307d7c16104f9e3",
-  "head_sha": "54fedd08dfdd0b666334d64565096ab318f0922a",
+  "head_sha": "b40d449bdfac7b84df8bb23a6922b20ba2211b85",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -20,7 +20,7 @@
   "db_writes": [],
   "checks": [
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
-    {"command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py", "exit_code": 0, "evidence": "174 passed, 153 subtests passed."}
+    {"command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py", "exit_code": 0, "evidence": "178 passed, 153 subtests passed (adds hidden-default, PostgreSQL identity, search_path, and same-table recreate cases from the #2771 review)."}
   ],
   "assumptions_resolved": [
     "The contract-test workflow now uploads applied-migrations.txt; runs from before this merge are refused, so preview stays required for them."
