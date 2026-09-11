@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911124016"
   ],
-  "contract_ref": "refs/db-contracts/2506/23",
-  "contract_sha256": "43072fdce6ced81b6d65b2bbed7d212c1aff2e80b02de25b2a1e5337b75774c1",
-  "head_sha": "f721c5d0faa7b55ad86466208b4981b852bf6f33",
+  "contract_ref": "refs/db-contracts/2506/24",
+  "contract_sha256": "5b0b8e147cdbbf0d3c09e929b7831b640f53fb651bdff7ade804625d4868b2b5",
+  "head_sha": "a2b587468fbec78813a78c03f1bc9262b9366a2f",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -66,7 +66,8 @@
     "Main5eaebe7c integrated; supersession re-reserved 20260911051552 as 20260911124016 (rename only, SQL bytes unchanged). Contract20 published; Grok assignment2323 stays bound to superseded head84e9bd0c, fresh exact-head review pending.",
     "Contract21 binds both evidence files after implementation head967d6349.",
     "Refreshed on main b68a1900 at implementation head 8bde76f5 (merge commit; only the two .agent evidence files conflicted). Contract generation 22 records the new base; both evidence files follow that head together.",
-    "Refreshed on main 9da98ede at implementation head f721c5d0 (merge commit; only the two .agent evidence files conflicted). Contract generation 23 records the new base; both evidence files follow that head together."
+    "Refreshed on main 9da98ede at implementation head f721c5d0 (merge commit; only the two .agent evidence files conflicted). Contract generation 23 records the new base; both evidence files follow that head together.",
+    "Refreshed on main 9b02ad48 at implementation head a2b58746 (merge commit; only the two .agent evidence files conflicted). Contract generation 24 records the new base; both evidence files follow that head together."
   ],
   "stop_conditions_hit": []
 }

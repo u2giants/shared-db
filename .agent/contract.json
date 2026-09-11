@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 23,
+  "generation": 24,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
+  "base_sha": "9b02ad489d09427fc0556248c0a85b7cc78807ff",
   "dispatcher": "Claude orchestrator marker2758",
   "worker": "Claude issue2506 refresh worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -65,7 +65,8 @@
     "Main5eaebe7c integrated (truth-audit digest recomputed, 276 sites); supported supersession re-reserved 20260911051552 as 20260911124016 with no SQL byte change. Grok assignment 2323 is bound to superseded head 84e9bd0c; fresh exact-head review required.",
     "Implementation head 967d6349 points the parity benchmark at 20260911124016; both evidence files follow that head together.",
     "Implementation head 8bde76f5 merges current main b68a1900 into the branch; only the two .agent evidence files conflicted and kept the branch copies. Both evidence files follow that head together.",
-    "Implementation head f721c5d0 merges current main 9da98ede (PR #2748) into the branch; only the two .agent evidence files conflicted and kept the branch copies. Search migration and benchmark bytes unchanged. Both evidence files follow that head together."
+    "Implementation head f721c5d0 merges current main 9da98ede (PR #2748) into the branch; only the two .agent evidence files conflicted and kept the branch copies. Search migration and benchmark bytes unchanged. Both evidence files follow that head together.",
+    "Implementation head a2b58746 merges current main 9b02ad48 (PR #2767) into the branch; only the two .agent evidence files conflicted and kept the branch copies. Search migration and benchmark bytes unchanged. Both evidence files follow that head together."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
