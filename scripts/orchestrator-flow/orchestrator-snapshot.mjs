@@ -74,9 +74,13 @@ function validateSnapshotSeal(snapshot, label = 'snapshot') {
   return sealedDigest
 }
 
-export function verifyOrchestratorSnapshot(snapshot, currentInput) {
+export function verifyOrchestratorSnapshot(snapshot, { readCurrent, now = new Date().toISOString(), maxAgeMs = 300000 } = {}) {
   validateSnapshotSeal(snapshot)
-  const current = snapshotInputs(currentInput)
+  if (typeof readCurrent !== 'function') throw new OrchestratorSnapshotError('trusted current-state reader is required')
+  if (!Number.isFinite(maxAgeMs) || maxAgeMs <= 0 || Number.isNaN(Date.parse(now))) throw new OrchestratorSnapshotError('snapshot freshness policy is invalid')
+  const age = Date.parse(now) - Date.parse(snapshot.captured_at)
+  if (age < 0 || age > maxAgeMs) throw new OrchestratorSnapshotError('snapshot is outside the trusted freshness window')
+  const current = snapshotInputs(readCurrent())
   const currentDigest = sha256(canonicalJson(current))
   if (currentDigest !== snapshot.state_digest) {
     throw new OrchestratorSnapshotError(`snapshot is stale: current state digest is ${currentDigest}`)
@@ -96,7 +100,21 @@ export function transitionNotification(previousSnapshot, nextSnapshot) {
   return {...notification,event_id:sha256(canonicalJson(notification))}
 }
 
-export function publishSnapshotTransition(input, { previousSnapshot = null, capturedAt, publish } = {}) {
+function exactReadback(readPublished, key, expected, label) {
+  if (typeof readPublished !== 'function') throw new OrchestratorSnapshotError(`${label} requires durable readback`)
+  const stored = readPublished(key)
+  if (!stored || canonicalJson(stored) !== canonicalJson(expected)) throw new OrchestratorSnapshotError(`${label} durable readback does not match the immutable event`)
+}
+
+function snapshotReadback(readPublished,key,record){
+  if(typeof readPublished!=='function')throw new OrchestratorSnapshotError('snapshot event requires durable readback')
+  const stored=readPublished(key)
+  if(!stored||canonicalJson(stored.notification)!==canonicalJson(record.notification))throw new OrchestratorSnapshotError('snapshot event durable readback does not match the immutable event')
+  validateSnapshotSeal(stored.snapshot,'stored snapshot')
+  if(stored.snapshot.snapshot_id!==record.snapshot.snapshot_id)throw new OrchestratorSnapshotError('snapshot event durable readback does not match the immutable snapshot identity')
+}
+
+export function publishSnapshotTransition(input, { previousSnapshot = null, capturedAt, publish, readPublished } = {}) {
   const snapshot = buildOrchestratorSnapshot(input, { capturedAt })
   let notification = previousSnapshot ? transitionNotification(previousSnapshot, snapshot) : {
     event_type: 'orchestrator_snapshot_created', snapshot_id: snapshot.snapshot_id,
@@ -104,8 +122,9 @@ export function publishSnapshotTransition(input, { previousSnapshot = null, capt
   if(notification&&!notification.event_id)notification={...notification,event_id:sha256(canonicalJson(notification))}
   if (notification) {
     if (typeof publish !== 'function') throw new OrchestratorSnapshotError('changed snapshot requires a publisher')
-    const acknowledgement=publish({ snapshot, notification })
+    const record={snapshot,notification},acknowledgement=publish({key:`snapshot:${notification.event_id}`,record})
     if(!acknowledgement||acknowledgement.event_id!==notification.event_id||!['created','existing'].includes(acknowledgement.status))throw new OrchestratorSnapshotError('snapshot event lacks exact compare-and-create acknowledgement')
+    snapshotReadback(readPublished,`snapshot:${notification.event_id}`,record)
   }
   return { snapshot, notification }
 }
@@ -120,21 +139,31 @@ export function agentCheckInNotification({ status, issue, evidence_id: evidenceI
   return {...event,event_id:sha256(canonicalJson(event))}
 }
 
-export function publishAgentCheckIn(input,{publish}={}){
+export function publishAgentCheckIn(input,{publish,readTerminalOutcome,readPublished}={}){
   const event=agentCheckInNotification(input);if(!event)return null
   if(typeof publish!=='function')throw new OrchestratorSnapshotError('terminal agent check-in requires a publisher')
-  const acknowledgement=publish(event)
+  if(typeof readTerminalOutcome!=='function')throw new OrchestratorSnapshotError('terminal agent check-in requires an authoritative issue outcome reader')
+  const key=`agent-terminal:${event.work_issue}`,prior=readTerminalOutcome(event.work_issue)
+  if(prior&&canonicalJson(prior)!==canonicalJson(event))throw new OrchestratorSnapshotError('issue already has a conflicting terminal outcome')
+  if(prior){exactReadback(readPublished,key,event,'terminal agent check-in');return{event,acknowledgement:{status:'existing',event_id:event.event_id}}}
+  const acknowledgement=publish({key,event})
   if(!acknowledgement||acknowledgement.event_id!==event.event_id||!['created','existing'].includes(acknowledgement.status))throw new OrchestratorSnapshotError('agent check-in lacks exact compare-and-create acknowledgement')
+  exactReadback(readPublished,key,event,'terminal agent check-in')
   return {event,acknowledgement}
 }
 
-export function main(argv) {
+function configuredCurrentReader(file){return()=>{
+  if(typeof file!=='string'||!path.isAbsolute(file))throw new OrchestratorSnapshotError('trusted current-state source must be an absolute configured path')
+  try{return JSON.parse(readFileSync(file,'utf8'))}catch{throw new OrchestratorSnapshotError('trusted current-state source is unreadable')}
+}}
+
+export function main(argv,{readCurrent=configuredCurrentReader(process.env.ORCHESTRATOR_CURRENT_STATE_FILE),now,maxAgeMs}={}) {
   try {
     const value = (name) => { const index=argv.indexOf(name); if(index<0||!argv[index+1])return null; return argv[index+1] }
     const inputFile=value('--input'),verifyFile=value('--verify'),previousFile=value('--previous')
+    if(verifyFile){console.log(JSON.stringify(verifyOrchestratorSnapshot(JSON.parse(readFileSync(verifyFile,'utf8')),{readCurrent,now,maxAgeMs}),null,2));return 0}
     if(!inputFile)throw new OrchestratorSnapshotError('--input <json> is required')
     const input=JSON.parse(readFileSync(inputFile,'utf8'))
-    if(verifyFile){console.log(JSON.stringify(verifyOrchestratorSnapshot(JSON.parse(readFileSync(verifyFile,'utf8')),input),null,2));return 0}
     const snapshot=buildOrchestratorSnapshot(input)
     const notification=previousFile?transitionNotification(JSON.parse(readFileSync(previousFile,'utf8')),snapshot):null
     console.log(JSON.stringify({snapshot,notification},null,2));return 0

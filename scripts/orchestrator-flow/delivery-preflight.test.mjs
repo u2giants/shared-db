@@ -11,16 +11,13 @@ import {
   validateDeliveryPreflight,
 } from './delivery-preflight.mjs'
 
-const input = () => ({
-  issue: 2728,
-  pr: 2800,
-  head_sha: 'a'.repeat(40),
-  checks: Object.fromEntries(DELIVERY_CHECKS.map((name) => [name, { status: 'PASS', evidence_id: `${name}-proof` }])),
-})
+const input = () => {const value={issue:2728,pr:2800,head_sha:'a'.repeat(40),checks:Object.fromEntries(DELIVERY_CHECKS.map((name)=>[name,{status:'PASS',evidence_id:`${name}-proof`}]))};for(const name of ['sidecars','producers']){const registration={evidence_id:value.checks[name].evidence_id,kind:name,issue:value.issue,pr:value.pr,head_sha:value.head_sha,producer_id:`${name}-producer`,artifact_digest:'b'.repeat(64)};Object.assign(value.checks[name],{producer_id:registration.producer_id,artifact_digest:registration.artifact_digest,registry_digest:sha256(canonicalJson(registration))})}return value}
+const registry=(value)=>({readEvidenceRegistration:(id)=>{for(const name of ['sidecars','producers'])if(value.checks[name].evidence_id===id){const check=value.checks[name];return{evidence_id:id,kind:name,issue:value.issue,pr:value.pr,head_sha:value.head_sha,producer_id:check.producer_id,artifact_digest:check.artifact_digest}}return null}})
+const run=(value)=>runDeliveryPreflight(value,registry(value))
 
 test('composition invokes every existing gate once and registers exact-head evidence',()=>{
   const calls=[]
-  const adapters=Object.fromEntries(DELIVERY_CHECKS.map((name)=>[name,()=>{calls.push(name);return{status:'PASS',evidence_id:`${name}-proof`}}]))
+  const value=input(),adapters=Object.fromEntries(DELIVERY_CHECKS.map((name)=>[name,()=>{calls.push(name);return value.checks[name]}]));Object.assign(adapters,registry(value))
   const result=composeDeliveryPreflight({issue:2728,pr:2800,head_sha:'a'.repeat(40)},adapters)
   assert.deepEqual(calls,DELIVERY_CHECKS)
   const identity={policy_version:1,migrations:[],focused_files:[],verification_files:[],claims:{writes:[],reads:[]},global_invalidators:[],migration_order_digest:'0'.repeat(64)}
@@ -38,40 +35,40 @@ test('composition refuses before work when any gate adapter is absent',()=>{
 })
 
 test('one composed preflight binds every early gate to the exact head', () => {
-  const result = runDeliveryPreflight(input())
+  const value=input(),result = run(value)
   assert.equal(result.status, 'PASS')
   assert.equal(result.preflight_id, result.input_digest)
-  assert.equal(reuseDeliveryPreflight(result, input()), result)
+  assert.equal(reuseDeliveryPreflight(result, value,registry(value)), result)
 })
 
 for (const name of DELIVERY_CHECKS) test(`missing or blocked ${name} refuses early`, () => {
   const blocked = input()
   blocked.checks[name].status = 'BLOCKED'
-  assert.throws(() => runDeliveryPreflight(blocked), new RegExp(`blocked by ${name}`))
+  assert.throws(() => run(blocked), new RegExp(`blocked by ${name}`))
   const missing = input()
   delete missing.checks[name]
-  assert.throws(() => runDeliveryPreflight(missing), DeliveryPreflightError)
+  assert.throws(() => run(missing), DeliveryPreflightError)
 })
 
 test('changed head, evidence, or status invalidates reuse', () => {
   const original = input()
-  const result = runDeliveryPreflight(original)
+  const result = run(original)
   const changedHead = input()
   changedHead.head_sha = 'b'.repeat(40)
-  assert.equal(reuseDeliveryPreflight(result, changedHead), null)
+  assert.equal(reuseDeliveryPreflight(result, changedHead,registry(changedHead)), null)
   const changedEvidence = input()
   changedEvidence.checks.producers.evidence_id = 'new-producer-proof'
-  assert.equal(reuseDeliveryPreflight(result, changedEvidence), null)
+  assert.equal(reuseDeliveryPreflight(result, changedEvidence,registry(changedEvidence)), null)
   const blocked = input()
   blocked.checks.runner_capacity.status = 'BLOCKED'
-  assert.equal(reuseDeliveryPreflight(result, blocked), null)
+  assert.equal(reuseDeliveryPreflight(result, blocked,registry(blocked)), null)
 })
 
 test('matching outer ids cannot conceal tampered preflight input',()=>{
-  const result=runDeliveryPreflight(input()),tampered=structuredClone(result)
+  const source=input(),result=run(source),tampered=structuredClone(result)
   tampered.input.pr=999
   assert.throws(()=>validateDeliveryPreflight(tampered),/canonical input/)
-  assert.equal(reuseDeliveryPreflight(tampered,tampered.input),null)
+  assert.equal(reuseDeliveryPreflight(tampered,tampered.input,registry(source)),null)
   const identity={policy_version:1,migrations:[],focused_files:[],verification_files:[],claims:{writes:[],reads:[]},global_invalidators:[],migration_order_digest:'0'.repeat(64)}
   const bundle={schema_version:1,bundle_id:sha256(canonicalJson(identity)),identity,metadata:{issue:2728,pr:999,claim:1,base_main_sha:'b'.repeat(40),integration_sha:'a'.repeat(40),review:null,ci:null}}
   assert.throws(()=>registerDeliveryPreflight(bundle,tampered),/canonical input/)
@@ -80,8 +77,12 @@ test('matching outer ids cannot conceal tampered preflight input',()=>{
 test('unknown checks and evidence-free success fail closed', () => {
   const unknown = input()
   unknown.checks.extra = { status: 'PASS', evidence_id: 'x' }
-  assert.throws(() => runDeliveryPreflight(unknown), /must contain exactly/)
+  assert.throws(() => run(unknown), /must contain exactly/)
   const emptyEvidence = input()
   emptyEvidence.checks.sidecars.evidence_id = ''
-  assert.throws(() => runDeliveryPreflight(emptyEvidence), /lacks durable evidence/)
+  assert.throws(() => run(emptyEvidence), /lacks durable evidence/)
 })
+
+test('composition stops immediately after the first blocker',()=>{const value=input(),calls=[];const adapters=Object.fromEntries(DELIVERY_CHECKS.map((name,index)=>[name,()=>{calls.push(name);return index===0?{status:'BLOCKED',evidence_id:'blocked'}:value.checks[name]}]));Object.assign(adapters,registry(value));assert.throws(()=>composeDeliveryPreflight({issue:value.issue,pr:value.pr,head_sha:value.head_sha},adapters),/blocked by route/);assert.deepEqual(calls,['route'])})
+
+test('fabricated sidecar or producer registrations fail authoritative readback',()=>{for(const name of ['sidecars','producers']){const value=input();value.checks[name].producer_id='fabricated';assert.throws(()=>runDeliveryPreflight(value,registry(input())),/authoritative registry readback/)}})

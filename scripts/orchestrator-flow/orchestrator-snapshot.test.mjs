@@ -22,12 +22,12 @@ const input = () => ({
 })
 
 test('publishing is edge-triggered and unchanged state emits no check-in',()=>{
-  const first=buildOrchestratorSnapshot(input()),published=[]
-  const writer=(row)=>{published.push(row);return{status:'created',event_id:row.notification.event_id}}
-  const same=publishSnapshotTransition(input(),{previousSnapshot:first,publish:writer})
+  const first=buildOrchestratorSnapshot(input()),published=[],stored=new Map()
+  const writer=({key,record})=>{published.push(record);stored.set(key,record);return{status:'created',event_id:record.notification.event_id}}
+  const same=publishSnapshotTransition(input(),{previousSnapshot:first,publish:writer,readPublished:(key)=>stored.get(key)})
   assert.equal(same.notification,null);assert.equal(published.length,0)
   const changed=input();changed.eligible_queue.push({issue:32,priority:1})
-  publishSnapshotTransition(changed,{previousSnapshot:first,publish:writer})
+  publishSnapshotTransition(changed,{previousSnapshot:first,publish:writer,readPublished:(key)=>stored.get(key)})
   assert.equal(published.length,1);assert.equal(published[0].notification.event_type,'orchestrator_state_changed')
 })
 
@@ -39,14 +39,14 @@ test('agents suppress progress chatter and report one terminal fact',()=>{
 })
 
 test('snapshot and terminal check-in retries converge to one immutable event',()=>{
-  const stored=new Map(),compareCreate=(event)=>{const value=event.notification??event,key=value.event_id,prior=stored.get(key);if(prior&&canonicalJson(prior)!==canonicalJson(value))throw new Error('collision');if(prior)return{status:'existing',event_id:key};stored.set(key,value);return{status:'created',event_id:key}}
+  const stored=new Map(),compareCreate=({key,record,event})=>{const value=record??event,prior=stored.get(key);if(prior){if(!record&&canonicalJson(prior)!==canonicalJson(value))throw new Error('collision');return{status:'existing',event_id:(record?record.notification:event).event_id}}stored.set(key,value);return{status:'created',event_id:(record?record.notification:event).event_id}}
   const first=buildOrchestratorSnapshot(input()),changed=input();changed.claims.push({issue:99,writes:['core.z']})
-  const one=publishSnapshotTransition(changed,{previousSnapshot:first,publish:compareCreate}),two=publishSnapshotTransition(changed,{previousSnapshot:first,publish:compareCreate})
+  const readers={readPublished:(key)=>stored.get(key)},one=publishSnapshotTransition(changed,{previousSnapshot:first,publish:compareCreate,...readers}),two=publishSnapshotTransition(changed,{previousSnapshot:first,publish:compareCreate,...readers})
   assert.equal(one.notification.event_id,two.notification.event_id);assert.equal(stored.size,1)
   const check={status:'blocked',issue:99,evidence_id:'artifact:block-99'}
-  publishAgentCheckIn(check,{publish:compareCreate});publishAgentCheckIn(check,{publish:compareCreate})
+  const terminal={...readers,readTerminalOutcome:(issue)=>stored.get(`agent-terminal:${issue}`)};publishAgentCheckIn(check,{publish:compareCreate,...terminal});publishAgentCheckIn(check,{publish:compareCreate,...terminal})
   assert.equal(stored.size,2)
-  assert.throws(()=>publishAgentCheckIn(check,{publish:()=>({status:'created',event_id:'wrong'})}),/acknowledgement/)
+  assert.throws(()=>publishAgentCheckIn({...check,issue:100},{publish:()=>({status:'created',event_id:'wrong'}),readTerminalOutcome:()=>null,readPublished:()=>null}),/acknowledgement/)
 })
 
 test('snapshot is deterministic despite collection order and capture time', () => {
@@ -60,7 +60,7 @@ test('snapshot is deterministic despite collection order and capture time', () =
 
 test('successor accepts one exact fresh snapshot', () => {
   const snapshot = buildOrchestratorSnapshot(input(), { capturedAt: '2026-09-11T17:00:00Z' })
-  assert.deepEqual(verifyOrchestratorSnapshot(snapshot, input()), {
+  assert.deepEqual(verifyOrchestratorSnapshot(snapshot, {readCurrent:input,now:'2026-09-11T17:01:00Z'}), {
     status: 'CURRENT', snapshot_id: snapshot.snapshot_id,
   })
 })
@@ -69,13 +69,13 @@ test('changed live input refuses as stale', () => {
   const snapshot = buildOrchestratorSnapshot(input())
   const changed = input()
   changed.pull_requests[0].head = 'c'.repeat(40)
-  assert.throws(() => verifyOrchestratorSnapshot(snapshot, changed), /snapshot is stale/)
+  assert.throws(() => verifyOrchestratorSnapshot(snapshot, {readCurrent:()=>changed,now:snapshot.captured_at}), /snapshot is stale/)
 })
 
 test('tampered snapshot refuses even when current input matches the original', () => {
   const snapshot = buildOrchestratorSnapshot(input())
   snapshot.state.claims[0].issue = 999
-  assert.throws(() => verifyOrchestratorSnapshot(snapshot, input()), /snapshot seal is invalid/)
+  assert.throws(() => verifyOrchestratorSnapshot(snapshot, {readCurrent:input,now:snapshot.captured_at}), /snapshot seal is invalid/)
 })
 
 test('unchanged state produces no notification and a transition wakes once', () => {
@@ -102,6 +102,14 @@ test('forged equal previous snapshot id cannot suppress a real transition', () =
   assert.throws(() => transitionNotification(previous, next), /previous snapshot seal is invalid/)
   assert.throws(() => publishSnapshotTransition(changed, { previousSnapshot: previous, publish: () => assert.fail('must not publish') }), /previous snapshot seal is invalid/)
 })
+
+test('snapshot verification requires trusted current state and a bounded fresh capture',()=>{const snapshot=buildOrchestratorSnapshot(input(),{capturedAt:'2020-01-01T00:00:00Z'});assert.throws(()=>verifyOrchestratorSnapshot(snapshot),/trusted current-state reader/);assert.throws(()=>verifyOrchestratorSnapshot(snapshot,{readCurrent:input,now:'2026-09-11T00:00:00Z'}),/freshness window/)})
+
+test('contradictory terminal outcomes contend on one issue key',()=>{const completed=agentCheckInNotification({status:'completed',issue:7,evidence_id:'artifact:done'});assert.throws(()=>publishAgentCheckIn({status:'blocked',issue:7,evidence_id:'artifact:block'},{publish:()=>assert.fail('must not publish'),readTerminalOutcome:()=>completed,readPublished:()=>completed}),/conflicting terminal outcome/)})
+
+test('a conflicting terminal race is rejected after compare-and-create',()=>{const completed=agentCheckInNotification({status:'completed',issue:7,evidence_id:'artifact:done'});assert.throws(()=>publishAgentCheckIn({status:'blocked',issue:7,evidence_id:'artifact:block'},{readTerminalOutcome:()=>null,publish:({event})=>({status:'existing',event_id:event.event_id}),readPublished:()=>completed}),/durable readback/)})
+
+test('created and existing events require exact durable readback',()=>{const changed=input();changed.claims.push({issue:99});const prior=buildOrchestratorSnapshot(input());for(const status of ['created','existing'])assert.throws(()=>publishSnapshotTransition(changed,{previousSnapshot:prior,publish:({record})=>({status,event_id:record.notification.event_id}),readPublished:()=>null}),/durable readback/);assert.throws(()=>publishAgentCheckIn({status:'completed',issue:7,evidence_id:'artifact:done'},{publish:({event})=>({status:'existing',event_id:event.event_id}),readTerminalOutcome:()=>null,readPublished:()=>null}),/durable readback/)})
 
 test('corrupt previous snapshot state refuses before publication', () => {
   const previous = buildOrchestratorSnapshot(input())
