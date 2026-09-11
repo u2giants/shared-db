@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2727/7",
   "contract_sha256": "ab931efead3de6ec044de3afc30a13c2841e19b1c20b51d3bfd77c9b99aab19a",
-  "head_sha": "a090ff58b593ec1534928f911824281bc8883716",
+  "head_sha": "f7b2ccca1d0a754d04105fb23f68a4b49a66a021",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -28,12 +28,12 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors after the reviewer repairs and current base check."
+      "evidence": "No whitespace errors after merging current main and repairing the linked-PR admission tests."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "658 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 1011 tests."
+      "evidence": "659 tests passed; zero failed, skipped, cancelled, or todo (includes new linked-PR, reopen-after-merge, and outcome object-binding adversarial cases)."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
@@ -51,7 +51,8 @@
     "The sealed be971275 review REJECT is retained in PR evidence, and all three findings were repaired before this report.",
     "PR 2737 and its successful prose-only canary are integrated; its mutex-only command remains outside claims, reviewer assignment, shared stages, and lifecycle events.",
     "PR 2736 remains correctly held until this resolver and admission interface reaches main.",
-    "The final sealed review rejected unadmitted legacy dispatch and unbound claim objects; both findings are fixed and covered by adversarial tests before this report."
+    "The final sealed review rejected unadmitted legacy dispatch and unbound claim objects; both findings are fixed and covered by adversarial tests before this report.",
+    "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects."
   ],
   "stop_conditions_hit": []
 }
