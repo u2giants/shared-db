@@ -1,33 +1,30 @@
 {
   "schema_version": 1,
-  "work_issue": 2759,
+  "work_issue": 2768,
   "outcome": "ready-for-merge",
-  "pr": 2760,
+  "pr": 2770,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2759/1",
-  "contract_sha256": "915f615a7aa3e69b1c1067a6d806983bb20cf73c253357d278aa608d11d5df18",
-  "head_sha": "443f8254cbdd138c65befcc3cdc90a6262e4e5d5",
+  "contract_ref": "refs/db-contracts/2768/1",
+  "contract_sha256": "4aa01a1148542d9ced0d3fa621e22fcb6ac4546fcde1f202fd25a288234aefc7",
+  "head_sha": "1602d0afbdecc490a0b04b15cfdcbf30f123e828",
   "files_changed": [
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/test_production_migration_guard.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors between base 5eaebe7c and implementation head 443f8254."
-    },
-    {
-      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
-      "exit_code": 0,
-      "evidence": "48 tests passed, 0 failed, 0 skipped at 443f8254."
-    }
+    {"command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs", "exit_code": 0, "evidence": "40 tests, 40 pass, 0 fail, 0 skipped."},
+    {"command": "python -m unittest scripts.test_production_migration_guard", "exit_code": 0, "evidence": "OK."},
+    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static checks passed."},
+    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
   "assumptions_resolved": [
-    "The exemption is filtered against the mirror, so a required context of the same name would still be enforced."
+    "Run 34281856111 log binding confirmed: rehearsalMode claim, appliedCommit 69226335c20fef57f8a7c15cd7b014a157b61484, previewProjectRef mvpkijzfmfcxhnzqogzs, allowlist [20260908202651].",
+    "git rev-parse shows blob 578c06da0161d7d19d7a254d03f6f4404d4c35b0 at 69226335, d669c43e, and main."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
+  "evidence_note": "Registry-only change; ready for exact-head governed review, CI, and guarded merge."
 }
