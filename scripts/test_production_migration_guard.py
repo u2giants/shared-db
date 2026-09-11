@@ -258,6 +258,7 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(
             HARD_BLOCKED,
             {
+                "20260906222338",
                 "20260814170749",
                 "20260726190000",
                 "20260726200000",
@@ -291,6 +292,14 @@ class GuardTests(unittest.TestCase):
         with self.assertRaisesRegex(GuardError, "20260903200951"):
             parse_allowlist("20260903200951,20260905024139")
         self.assertEqual(parse_allowlist("20260905024139"), ["20260905024139"])
+    def test_character_alias_mismatched_original_is_retired(self) -> None:
+        for allowlist in ("20260906222338", "20260906222338,20260911063554"):
+            with self.subTest(allowlist=allowlist), self.assertRaisesRegex(GuardError, "20260906222338"):
+                parse_allowlist(allowlist)
+        self.assertEqual(parse_allowlist("20260911063554"), ["20260911063554"])
+        for applied in (set(), {"20260906222338"}):
+            self.assertEqual(classify_pending_version("20260906222338", applied, REPO)["kind"], "retired")
+
     def test_stranded_coldlion_division_reissue_is_byte_identical(self) -> None:
         """The reissue is only safe because it is the SAME executable SQL.
 

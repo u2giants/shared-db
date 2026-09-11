@@ -238,3 +238,61 @@ $verify$;
 -- legacy freshness, RLS/grants and preservation of the original circuit breakers.
 \ir character_alias_and_source_provenance_contracts.sql
 ROLLBACK;
+
+-- Production has never applied #2355. Reconstruct that pre-2355 schema while
+-- retaining every older provenance field, then prove the replacement stands alone.
+BEGIN;
+CREATE TEMP VIEW forward_catalog_now AS
+SELECT 'constraint'::text AS kind,conrelid::regclass::text AS object_name,conname AS member,
+ pg_get_constraintdef(oid)||' validated='||convalidated AS definition
+FROM pg_constraint WHERE conrelid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+UNION ALL
+SELECT 'index',schemaname||'.'||tablename,indexname,indexdef FROM pg_indexes
+WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref')
+UNION ALL
+SELECT 'relation',oid::regclass::text,'security',relrowsecurity::text||'|'||coalesce(relacl::text,'')
+FROM pg_class WHERE oid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+UNION ALL
+SELECT 'policy',schemaname||'.'||tablename,policyname,roles::text||'|'||cmd||'|'||coalesce(qual,'')||'|'||coalesce(with_check,'')
+FROM pg_policies WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref');
+
+CREATE TEMP TABLE fresh_expected_schema AS SELECT * FROM forward_catalog_now;
+CREATE TEMP TABLE fresh_base_rows AS
+SELECT to_jsonb(t)-ARRAY['source_licensor_id','first_seen_at','last_seen_at','missing_since'] AS row_value
+FROM core.taxonomy_source_ref t;
+DO $empty_alias_fixture$
+BEGIN
+ IF EXISTS(SELECT 1 FROM core.character_alias) THEN
+  RAISE EXCEPTION 'Fresh-shape fixture requires an empty synthetic alias table';
+ END IF;
+END
+$empty_alias_fixture$;
+DROP TABLE core.character_alias RESTRICT;
+DROP INDEX core.character_id_licensor_id_key;
+DROP TRIGGER a_taxonomy_source_ref_identity_guard ON core.taxonomy_source_ref;
+DROP TRIGGER b_taxonomy_source_ref_last_seen ON core.taxonomy_source_ref;
+DROP FUNCTION core.guard_character_alias_licensor() RESTRICT;
+DROP FUNCTION core.guard_taxonomy_source_ref_identity() RESTRICT;
+DROP FUNCTION core.bump_taxonomy_source_ref_last_seen() RESTRICT;
+ALTER TABLE core.taxonomy_source_ref
+ DROP COLUMN source_licensor_id RESTRICT,
+ DROP COLUMN first_seen_at RESTRICT,
+ DROP COLUMN last_seen_at RESTRICT,
+ DROP COLUMN missing_since RESTRICT;
+\ir ../migrations/20260911063554_character_alias_provenance_forward_repair.sql
+DO $fresh_verify$
+BEGIN
+ IF EXISTS ((SELECT * FROM fresh_base_rows EXCEPT ALL
+ SELECT to_jsonb(t)-ARRAY['source_licensor_id','first_seen_at','last_seen_at','missing_since'] FROM core.taxonomy_source_ref t)
+ UNION ALL (SELECT to_jsonb(t)-ARRAY['source_licensor_id','first_seen_at','last_seen_at','missing_since'] FROM core.taxonomy_source_ref t
+ EXCEPT ALL SELECT * FROM fresh_base_rows)) THEN
+  RAISE EXCEPTION 'Fresh replacement changed pre-existing provenance fields';
+ END IF;
+ IF EXISTS ((SELECT * FROM fresh_expected_schema EXCEPT ALL SELECT * FROM forward_catalog_now)
+ UNION ALL (SELECT * FROM forward_catalog_now EXCEPT ALL SELECT * FROM fresh_expected_schema)) THEN
+  RAISE EXCEPTION 'Fresh standalone replacement differs from final reviewed schema';
+ END IF;
+END
+$fresh_verify$;
+\ir character_alias_and_source_provenance_contracts.sql
+ROLLBACK;
