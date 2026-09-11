@@ -11,7 +11,6 @@
   "head_sha": "e03eb06923f7d9125e447fa7070caf5529b07f6b",
   "files_changed": [
     ".agent/contract.json",
-    ".agent/completion.json",
     "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
     "supabase/tests/dam_order_list_find_position.sql",
     "scripts/test_order_list_find_position.py"
