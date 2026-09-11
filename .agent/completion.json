@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/27",
-  "contract_sha256": "ceaae2e191c75e6c16c49f597befaf7af6662a523f94c312715af719e777d6aa",
-  "head_sha": "bce1321e2da5d866512fb30a704deef6739c5b7a",
+  "contract_ref": "refs/db-contracts/2727/28",
+  "contract_sha256": "8cfdde41971c7560cb80f7998e61066f812eec4597ea9da5db31a6fb6fd37d8b",
+  "head_sha": "16f794dda9c6c8af2a97d63ceb2a65c35790163e",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -31,22 +31,22 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 5761bc5e bce1321e reports no whitespace errors."
+      "evidence": "git diff --check 25c4ca3b 16f794dd reports no whitespace errors."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "At bce1321e: tests 712,pass 712,fail 0,cancelled 0,skipped 0."
+      "evidence": "716 tests, 716 pass, 0 fail, 0 skipped at 16f794dd."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "At bce1321e: truth audit OK: call_sites=278"
+      "evidence": "truth audit OK: call_sites=279 at 16f794dd."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "At bce1321e: GitHub transport conformance: 215 files scanned, every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "GitHub transport conformance: 215 files scanned at 16f794dd."
     }
   ],
   "assumptions_resolved": [
@@ -58,7 +58,8 @@
     "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects.",
     "Reviewer assignment, reviewer replacement, shared-stage acquisition, and preview preparation now revalidate admission inside their own single mutex interval; preview preparation with --admit-issue executes preparation rather than silently returning after admission.",
     "Dependency completion is trusted only from the explicitly identified repository owner; preview marker ownership is rechecked inside the mutex; lifecycle advances require durable references; and unsupported compound commands refuse before any operation runs.",
-    "Generation 26 takeover: merged main 9b02ad48 (#2767); the only code conflict was two lane-manager hunks, resolved by keeping requireAdmissionArguments and admissionOptions inside assignWithMutexRetry with enableReviewerQueue:false. No database, preview, or production operation was performed."
+    "Generation 26 takeover: merged main 9b02ad48 (#2767); the only code conflict was two lane-manager hunks, resolved by keeping requireAdmissionArguments and admissionOptions inside assignWithMutexRetry with enableReviewerQueue:false. No database, preview, or production operation was performed.",
+    "The governed review REJECT at 56ca196e (preview filename-only readiness, open-ended legacy admission, truncated patches) was repaired in 21d86cab with regression tests before this report."
   ],
   "stop_conditions_hit": []
 }
