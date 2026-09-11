@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2684,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/14",
-  "contract_sha256": "9878fd814884be78a1b1cdcfcd137973d3bdb78b5c08438695f4f25e1dd259ba",
-  "head_sha": "fb8ef8ffdd2c4200d7e8c63a012bfca4be1cdc72",
+  "contract_ref": "refs/db-contracts/2326/15",
+  "contract_sha256": "705a7ebb5b0db9829c48cc551111043c60974e9efde493802d5232a480759250",
+  "head_sha": "e091a629a7731bcb3854cd37cd0a7ba3e8677edb",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -19,7 +19,7 @@
     {
       "command": "node --test scripts/check-sql.test.mjs",
       "exit_code": 0,
-      "evidence": "Completed with no diagnostic output in this worktree."
+      "evidence": "tests 56, pass 56, fail 0, skipped 0, todo 0."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -27,7 +27,7 @@
       "evidence": "Contract is valid."
     },
     {
-      "command": "git diff --check aef1504e7c3c7674a6a9709e42720b8f2a725f43..HEAD",
+      "command": "git diff --check 5532d2bd401e67af39f0e60c6b08bcd1ebb0723f..HEAD",
       "exit_code": 0,
       "evidence": "No output; exit code 0."
     }
