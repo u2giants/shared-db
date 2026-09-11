@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 26,
+  "generation": 27,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "11d0e2b48fa9f8872e4988619edc1516f675fb1e",
+  "base_sha": "120fb6125907386ce2b93bd9ae0a91de700fb738",
   "dispatcher": "Claude orchestrator marker2758",
   "worker": "Claude issue2506 refresh worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -70,7 +70,8 @@
     "Implementation head f721c5d0 merges current main 9da98ede (PR #2748) into the branch; only the two .agent evidence files conflicted and kept the branch copies. Search migration and benchmark bytes unchanged. Both evidence files follow that head together.",
     "Implementation head a2b58746 merges current main 9b02ad48 (PR #2767) into the branch; only the two .agent evidence files conflicted and kept the branch copies. Search migration and benchmark bytes unchanged. Both evidence files follow that head together.",
     "Governed Grok review REVISE 6a1d4ad7 addressed at implementation head aad19862 on main 5761bc5e: migration-local lock_timeout 2s and statement_timeout 30s bound the transactional index builds (a timeout aborts atomically and is retryable); benchmark asserts full-width baseline/forward hashes equal and exercises the authorization boundary for both bodies; unit test binds catalog md5 to the forward body. Backdated guard forced supersession 20260911124016 -> 20260911170219 via the lane tool (ref 1eda7bf5).",
-    "Generation 26 rebases the contract on main 11d0e2b4 (after #2786) with no scope change, so the checked PR base is an ancestor of the reported implementation head."
+    "Generation 26 rebases the contract on main 11d0e2b4 (after #2786) with no scope change, so the checked PR base is an ancestor of the reported implementation head.",
+    "Generation 27 rebases the contract on main 120fb612 (after #2743) with no scope change."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
