@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "72c299b86ac68555fc66276302fb901df8bb8c6e",
+  "base_sha": "3ff51ae88def32de2d86731d3d893e3818961c84",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
@@ -81,12 +81,13 @@
     "Generation 36 integrates current main f938f36f after PR 2776; only the repository evidence pair conflicted and the implementation remained unchanged.",
     "Generation 37 integrates current main 72c299b8 after PR 2765; only the repository evidence pair conflicted and the implementation remained unchanged.",
     "Generation 38 repairs exact-head review findings at 9b75c623: the workflow resolver now preserves the same bounded pre-cutover legacy policy as PR-backed acquisition, and closed-issue admission filters untrusted completion comments before parsing or counting.",
-    "Generation 39 repairs workflow execution at 6f8b4b15: only admission-calling workflows receive issues write so validated merge-closed issues can reopen, and standalone PR-backed admission uses the same bounded legacy policy as resolver and acquisition paths."
+    "Generation 39 repairs workflow execution at 6f8b4b15: only admission-calling workflows receive issues write so validated merge-closed issues can reopen, and standalone PR-backed admission uses the same bounded legacy policy as resolver and acquisition paths.",
+    "Generation 40 refreshes the completed repair onto current main 3ff51ae8; only the evidence pair conflicted, and all admission, permission, unlimited-lane, disabled-reviewer-queue, and no-Step-7 guarantees remain intact."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 39
+  "generation": 40
 }

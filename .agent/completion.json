@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/39",
-  "contract_sha256": "296673aa9b33c133b750e5eed6fc4a4eba92cd8710db046ec87466656cf17fd5",
-  "head_sha": "6f8b4b154fa36019b4e0421b416764edc3a2f2cd",
+  "contract_ref": "refs/db-contracts/2727/40",
+  "contract_sha256": "b6127a74d833d6914a09b560d0d74534387231f4294098f824a5557bcca897dc",
+  "head_sha": "e0ff5e2358bdf4b87f7f8b105607ebfcbff2c6a0",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -34,27 +34,27 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 72c299b8 6f8b4b15 reports no whitespace errors."
+      "evidence": "git diff --check 3ff51ae8 e0ff5e23 reports no whitespace errors."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at 6f8b4b15."
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at e0ff5e23."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "727 tests, 727 pass, 0 fail, 0 skipped at 6f8b4b15."
+      "evidence": "727 tests, 727 pass, 0 fail, 0 skipped at e0ff5e23."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=279 at 6f8b4b15."
+      "evidence": "truth audit OK: call_sites=279 at e0ff5e23."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "221 files scanned at 6f8b4b15; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "221 files scanned at e0ff5e23; every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
@@ -71,7 +71,8 @@
     "Current main 72c299b8 is integrated; #2780 approval carry-over, #2777 unlimited author lanes, and #2767 reviewer queue removal remain active alongside the admission lifecycle.",
     "Every workflow acquisition caller now supplies authoritative admission and PR identity; the resolver preserves the exact same bounded pre-cutover legacy path as PR-backed acquisition, while post-cutover omissions still refuse.",
     "Closed-issue admission filters non-owner completion noise before parsing and counting; trusted malformed, duplicate, or mismatched completion evidence still refuses without mutation.",
-    "The three admission-calling workflow surfaces have issues write and static coverage, while unrelated workflows retain their narrower permissions; standalone PR-backed admission has the same pre-cutover success and post-cutover refusal as resolver and acquisition."
+    "The three admission-calling workflow surfaces have issues write and static coverage, while unrelated workflows retain their narrower permissions; standalone PR-backed admission has the same pre-cutover success and post-cutover refusal as resolver and acquisition.",
+    "Current main 3ff51ae8 is integrated; only the sealed evidence pair conflicted, and the implementation repair remained unchanged."
   ],
   "stop_conditions_hit": []
 }
