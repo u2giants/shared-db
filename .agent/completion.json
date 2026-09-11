@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911051552"
   ],
-  "contract_ref": "refs/db-contracts/2506/16",
-  "contract_sha256": "b5e50fb8f406c193bc4c5d3880a8821e3ac0243dc67df4f0ae601f292278533e",
-  "head_sha": "b7b0c0df5a7ae1abf8d276a61914f13cc9b70cd6",
+  "contract_ref": "refs/db-contracts/2506/17",
+  "contract_sha256": "bec5ba119b68ec5d0f44e6b40b7010684bb315befc14fc42d636f3f02a074c08",
+  "head_sha": "ce843b56395ed8cc80edeb2a52a2af9f33f4832b",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -54,12 +54,13 @@
     }
   ],
   "assumptions_resolved": [
-    "Full production-width synthetic benchmark217193 docs and11660 queue rows: files6469\u21923315ms; guides4520\u21923292ms, identical complete-result hashes. Eight-second timeout unchanged.",
+    "Full production-width synthetic benchmark217193 docs and11660 queue rows: files6469→3315ms; guides4520→3292ms, identical complete-result hashes. Eight-second timeout unchanged.",
     "No shared database writes performed.",
     "Main39ee46b2 merged without SQL changes.188 verifier tests and complete sidecar inventory pass on this integration.",
     "Existing160 exact JSON parity cases, production-width benchmark and dirty visibility-map proof retained; no unchanged benchmark rerun.",
     "One governed external review, required CI, parent preview and actual production runtime acceptance remain separate delivery gates.",
-    "Exact-PR supported expansion added the CREATE INDEX parent table to claim2722; no structural SQL changed. Contract16 immutable ref readback confirmed after transient GitHub visibility delay."
+    "Exact-PR supported expansion added the CREATE INDEX parent table to claim2722; no structural SQL changed. Contract16 immutable ref readback confirmed after transient GitHub visibility delay.",
+    "Main8e81462f integration preserves SQL and benchmarks; 188 catalog tests and 275-site truth audit pass again. Contract17 published for refreshed exact-head review."
   ],
   "stop_conditions_hit": []
 }

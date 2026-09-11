@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 16,
+  "generation": 17,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "39ee46b2def37e1b1e14217bd145537aa57ef265",
+  "base_sha": "8e81462f6a4809b4ad16f0671b0a7ecb75c6b5e7",
   "dispatcher": "Codex orchestrator marker2714",
   "worker": "Codex issue2506 production-performance worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -58,7 +58,8 @@
     "Local diagnostic candidate predates this fresh contract; no false claim of publication before diagnostic authorship.",
     "All fixture rows are synthetic. Production acceptance remains a separate parent-owned gate.",
     "Supported unapplied-version supersession reserved20260911051552; main39ee46b2 integrated without SQL changes. Existing benchmark evidence remains applicable; no unchanged benchmark rerun.",
-    "CREATE INDEX parser additionally declares its parent table; supported exact-PR claim expansion binds that table without any extra SQL change. Synthetic benchmark missing-state literal receives a reviewed truth-audit disposition."
+    "CREATE INDEX parser additionally declares its parent table; supported exact-PR claim expansion binds that table without any extra SQL change. Synthetic benchmark missing-state literal receives a reviewed truth-audit disposition.",
+    "Main8e81462f maintenance integration preserves all SQL and benchmark bytes; current exact-head evidence refreshed."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
