@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "generation": 10,
+  "generation": 14,
   "work_issue": 2326,
   "work_type": "documentation",
   "route": "repo-maintenance",
   "goal": "Publish a durable Step 3 evidence closeout and accurately update the programme status while preserving named unknowns, future gates, and issue #2662.",
-  "base_sha": "4bffc3894c6fa446a7853276f4a62b31ef3315a1",
+  "base_sha": "aef1504e7c3c7674a6a9709e42720b8f2a725f43",
   "dispatcher": "Albert Hazan current-chat authorization",
   "worker": "Codex Step 3 evidence closeout",
   "branch": "codex/issue-2326-step3-phase",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step3-phase",
+  "worktree": "C:/repos/shared-db-worktrees/fix-2684",
   "allowed_paths": [
     "plan_database_efficiency_and_api_security.md",
     "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md",
@@ -31,7 +31,7 @@
     "Do not weaken review, merge, or programme evidence requirements"
   ],
   "required_checks": [
-    "git diff --check 4bffc3894c6fa446a7853276f4a62b31ef3315a1..HEAD",
+    "git diff --check aef1504e7c3c7674a6a9709e42720b8f2a725f43..HEAD",
     "node --test scripts/check-sql.test.mjs",
     "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
   ],
