@@ -41,6 +41,8 @@ import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; impo
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, assertFindingsRefForPr, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
+import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, assertPrCarriesStructuralChange } from './orchestrator-flow/admission.mjs'
+import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -706,11 +708,23 @@ export function parseQueueScope(body = '') {
   // make every other open issue unauditable.
   const returnTo = fields.get('return_to') ?? null
   if (returnTo !== null && !RETURN_ADDRESS_PATTERN.test(returnTo)) throw new LaneError('db-work-scope return_to must be an owner/repo slug')
-  if (returnTo !== null && workType === 'structural') throw new LaneError('structural db-work-scope must not carry a return_to address')
+  if (returnTo !== null && workType === 'structural') throw new LaneError('structural db-work-scope must not carry a return_to address; use application_return_to')
+  const serviceClass = fields.get('service_class') ?? (workType === 'structural' ? 'standard-application' : 'maintenance')
+  if (!SERVICE_CLASSES.includes(serviceClass)) throw new LaneError(`db-work-scope service_class must be one of ${SERVICE_CLASSES.join(', ')}`)
+  if (workType !== 'structural' && serviceClass !== 'maintenance') throw new LaneError(`${workType} work cannot self-promote to application service class`)
+  const changeType = fields.get('change_type') ?? null
+  if (changeType !== null && !CHANGE_TYPES.includes(changeType)) throw new LaneError(`db-work-scope change_type must be one of ${CHANGE_TYPES.join(', ')}`)
+  const applicationReturnTo = fields.get('application_return_to') ?? null
+  if (applicationReturnTo !== null && !RETURN_ADDRESS_PATTERN.test(applicationReturnTo)) throw new LaneError('db-work-scope application_return_to must be an owner/repo slug')
+  if (applicationReturnTo !== null && workType !== 'structural') throw new LaneError('application_return_to is only valid for structural outcomes')
+  const liveAssertion = fields.get('live_assertion') ?? null
+  const generatedTypes = fields.get('generated_types') ?? null
+  const outcomeStage = fields.get('outcome_stage') ?? 'entered'
+  if (!OUTCOME_STATES.includes(outcomeStage)) throw new LaneError(`db-work-scope outcome_stage must be one of ${OUTCOME_STATES.join(', ')}`)
   // `objects` stays as an alias for `writes` so every existing caller keeps working
   // during the compatibility window. Step 8A removes it once the queue audit finds
   // zero open legacy claims.
-  return { status, workType, route, priority, dependencies, returnTo, writes, reads, legacyObjects, objects: writes }
+  return { status, workType, route, priority, dependencies, returnTo, writes, reads, legacyObjects, objects: writes, serviceClass, changeType, applicationReturnTo, liveAssertion, generatedTypes, outcomeStage }
 }
 
 export const COORDINATION_LABELS = new Set(['db-claim','orchestrator-marker'])
@@ -760,12 +774,16 @@ function downstreamBlockerCounts(dependencyEdges) {
 }
 
 function queueOrder(a,b) {
-  return b.blockedIssueCount-a.blockedIssueCount
+  const serviceRank = { 'urgent-application': 0, 'standard-application': 1, maintenance: 2 }
+  const stageRank = Object.fromEntries(OUTCOME_STATES.map((state,index)=>[state,index]))
+  return serviceRank[a.serviceClass]-serviceRank[b.serviceClass]
+    || (stageRank[b.outcomeStage]??0)-(stageRank[a.outcomeStage]??0)
+    || b.blockedIssueCount-a.blockedIssueCount
     || a.createdAt-b.createdAt
     || a.issue-b.issue
 }
 
-export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssueNumbers = issues.map((issue)=>issue.number), dependencyStates = null, claimPullStates = new Map(), authoredOnMain = new Set()) {
+export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssueNumbers = issues.map((issue)=>issue.number), dependencyStates = null, claimPullStates = new Map(), authoredOnMain = new Set(), outcomeStates = new Map()) {
   const openNumbers = new Set(allOpenIssueNumbers.map(Number))
   const skipped = [], unclassified = [], malformed = [], unlabelled = [], candidates = [], notOrchestratorWork = []
   const dependencyEdges = {}
@@ -832,7 +850,12 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
       if (waiting.length) { skipped.push({ issue:issue.number, reason:`depends-on-open:${waiting.join(',')}` }); continue }
     }
     const createdAt = Date.parse(issue.createdAt ?? issue.created_at ?? '')
-    candidates.push({ issue:issue.number, title:issue.title, createdAt:Number.isFinite(createdAt)?createdAt:Number(issue.number), ...scope })
+    if (scope.changeType !== null) {
+      try { evaluateAdmission(issue, scope, parseImpactBlock(issue.body)) }
+      catch (error) { malformed.push({ issue: issue.number, reason: error.message }); continue }
+    }
+    const authoritativeOutcome=outcomeStates.get(Number(issue.number)) ?? 'entered'
+    candidates.push({ issue:issue.number, title:issue.title, createdAt:Number.isFinite(createdAt)?createdAt:Number(issue.number), ...scope, outcomeStage:authoritativeOutcome })
   }
   const blockerCounts = downstreamBlockerCounts(dependencyEdges)
   for (const candidate of candidates) candidate.blockedIssueCount = blockerCounts.get(candidate.issue) ?? 0
@@ -870,11 +893,14 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
   const authorQueues = queues.filter((q)=>q.lane !== null)
   const emptyLanes = authorQueues.filter((q)=>!q.active).length
   const dispatchable = authorQueues.filter((q)=>!q.active && !q.protected.length && q.queued.length).map((q)=>q.queued[0])
+  const urgentWaitingCapacity = candidates.filter((candidate)=>candidate.serviceClass==='urgent-application'&&!dispatchable.includes(candidate.issue)).filter((candidate)=>{
+    const queue=authorQueues.find((row)=>row.queued.includes(candidate.issue));return Boolean(queue?.active)||Boolean(queue?.protected?.length)
+  }).map((candidate)=>candidate.issue)
   const expiredClaims = authorQueues.filter((q)=>q.active && q.activeLeaseState === 'expired-unconfirmed').map((q)=>({ claim:q.active, lane:q.lane, expires_at:q.activeExpiresAt, pr_state:q.activePrState, queued:[...q.queued] }))
   // A CYCLE IS NEVER STARTABLE and is invisible to an open/closed test, so it is
   // reported as its own finding rather than as N tasks that merely look blocked.
   const dependencyCycles = findDependencyCycles(dependencyEdges)
-  return { queues, expiredClaims, skipped, unclassified, malformed, unlabelled, notOrchestratorWork, dependencyCycles, grandfatheredDependencies, blockerCounts:Object.fromEntries(blockerCounts), dispatchable, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length&&!unlabelled.length&&!dependencyCycles.length }
+  return { queues, expiredClaims, skipped, unclassified, malformed, unlabelled, notOrchestratorWork, dependencyCycles, grandfatheredDependencies, blockerCounts:Object.fromEntries(blockerCounts), dispatchable, urgentWaitingCapacity, emptyLanes, fullyAudited:!unclassified.length&&!malformed.length&&!unlabelled.length&&!dependencyCycles.length }
 }
 
 // RETURN PATH (AGENTS.md 0.0-C). A rejected task is forwarded to the repository
@@ -1337,6 +1363,7 @@ function requireClaimCloseReason(reason) {
 }
 
 export const githubIo = {
+  enforceAdmission:true,
   enableReviewerQueue:true,
   enableReviewerSilence:true,
   requiresExactReviewHeadSha: true,
@@ -1555,6 +1582,13 @@ export const githubIo = {
   getCommitStatus(headSha,context) {
     return selectNewestCommitStatus(ghPaginated(`repos/${REPO}/commits/${headSha}/statuses?per_page=100`),context)
   },
+  closingIssuesForPr(number) {
+    const query=`query{repository(owner:"u2giants",name:"shared-db"){pullRequest(number:${Number(number)}){closingIssuesReferences(first:10){nodes{number state} pageInfo{hasNextPage}}}}}`
+    const data=ghJson(['api','graphql','-f',`query=${query}`])
+    const connection=data?.data?.repository?.pullRequest?.closingIssuesReferences
+    if(!connection||!Array.isArray(connection.nodes)||connection.pageInfo?.hasNextPage!==false)throw new LaneError('pull request closing-issue linkage is unreadable or paginated')
+    return connection.nodes
+  },
   // Issue #2342: the caller reads a whole SET of files at one ref, which used to
   // be a Contents call each. One recursive tree read now answers every path, and
   // blobs are cached by SHA, so a file unchanged across refs is fetched once.
@@ -1743,6 +1777,28 @@ export const githubIo = {
   createIssueIn(repo, title, body) { return gh(['issue','create','--repo',repo,'--title',title,'--body',body]).trim() },
   commentIssue(number, body) { gh(['issue','comment',String(number),'--repo',REPO,'--body',body]) },
   issueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body: c.body })) },
+  readOutcomeEvidence(ref) {
+    const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/\d+#issuecomment-(\d+)$/.exec(String(ref??''))
+    if(!match)throw new LaneError('outcome evidence must be an exact GitHub issue or pull-request comment URL')
+    return ghJson(['api',`repos/${match[1]}/issues/comments/${match[2]}`])?.body??''
+  },
+  applicationCommitInDefaultBranch(repository,sha) {
+    const repo=ghJson(['api',`repos/${repository}`]),branch=repo?.default_branch
+    if(!branch)return false
+    const comparison=ghJson(['api',`repos/${repository}/compare/${sha}...${encodeURIComponent(branch)}`])
+    return comparison?.behind_by===0&&['identical','ahead'].includes(comparison?.status)
+  },
+  verifyLiveAssertion(evidence) {
+    const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)$/.exec(String(evidence?.live_evidence??''))
+    if(!match)return false
+    const run=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}`])
+    if(run?.conclusion!=='success'||String(run?.head_sha??'').toLowerCase()!==String(evidence.application_commit_sha).toLowerCase())return false
+    const artifacts=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}/artifacts`])?.artifacts
+    if(!Array.isArray(artifacts))return false
+    const artifact=artifacts.find((row)=>Number(row.id)===Number(evidence.live_artifact_id))
+    const expectedName=`shared-db-live-proof-${evidence.work_issue}-${String(evidence.application_commit_sha).toLowerCase()}`
+    return artifact?.name===expectedName&&artifact.expired===false&&String(artifact.digest??'').toLowerCase()===String(evidence.live_artifact_digest).toLowerCase()
+  },
   closeIssue(number) { gh(['issue','close',String(number),'--repo',REPO]) },
   closeClaim(number, reason) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', requireClaimCloseReason(reason)]) },
   reversionFiles(worktree,oldVersion) {
@@ -5262,6 +5318,70 @@ function activateReviewCutoverOperation(io) {
 
 export function activateReviewCutover(io=githubIo){return withReviewRequestBudget(()=>activateReviewCutoverOperation(reviewOperationIo(io)))}
 
+export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-migration-author-lanes', allowLegacy = false } = {}) {
+  const issue = io.getIssue(Number(number))
+  const scope = parseQueueScope(issue?.body ?? '')
+  try {
+    let admitted
+    if(allowLegacy&&scope?.changeType===null){
+      if(issue?.state!=='open'||scope.workType!=='structural'||scope.route!=='shared-db-orchestrator'||scope.status!=='ready'||!scope.writes.length)throw new AdmissionError('legacy in-flight work is not an open ready structural issue with exact writes')
+      admitted={admitted:true,issue:Number(number),legacy:true,service_class:'standard-application'}
+    }else admitted = evaluateAdmission(issue, scope, parseImpactBlock(issue?.body ?? ''))
+    if (pr !== null) assertPrCarriesStructuralChange(io.getPrFiles(Number(pr)))
+    if(!admitted.legacy&&io.issueComments&&io.commentIssue){
+      let history=outcomeHistory(io.issueComments(Number(number)))
+      if(!history.valid)throw new OutcomeError(`outcome history is invalid: ${history.problems.join('; ')}`)
+      for(const state of ['entered','classified']){
+        if((history.state?OUTCOME_STATES.indexOf(history.state):-1)>=OUTCOME_STATES.indexOf(state))continue
+        advanceOutcome({issue:Number(number),state,actor},io)
+        history=outcomeHistory(io.issueComments(Number(number)))
+      }
+    }
+    return admitted
+  } catch (error) {
+    if(error instanceof AdmissionError&&!error.result&&/contains no added or modified migration/.test(error.message)){
+      error.result={reason:error.message,return_to:scope?.applicationReturnTo??'u2giants/shared-db',evidence_required:['an added or modified migration file carrying the proposed structural change']}
+    }
+    if (error instanceof AdmissionError && error.result && io.commentIssue) {
+      const comments = io.issueComments?.(Number(number)) ?? []
+      const already = comments.flatMap((comment)=>{
+        try { return parseEventComment(comment?.body ?? '') } catch { return [] }
+      }).some((event)=>event.event_type==='rejected_non_structural'&&event.detail===error.result.reason)
+      if (!already) {
+        const event = coordinationEvent({
+          eventType:'rejected_non_structural', workIssue:Number(number), actor,
+          timestamp:new Date().toISOString(), result:'refused', detail:error.result.reason,
+          return_to:error.result.return_to, evidence_required:error.result.evidence_required,
+        })
+        io.commentIssue(Number(number), formatEventComment(event))
+      }
+    }
+    throw error
+  }
+}
+
+export function resolveAdmittedIssueForPr(pr, io = githubIo) {
+  if (!Number.isInteger(Number(pr)) || Number(pr) < 1) throw new LaneError('--resolve-admitted-issue-for-pr requires a pull request number')
+  const linked = io.closingIssuesForPr(Number(pr))
+  if (!Array.isArray(linked)) throw new LaneError('pull request closing-issue linkage is unreadable')
+  const open = linked.filter((issue)=>String(issue?.state ?? '').toLowerCase() === 'open')
+  if (open.length !== 1) throw new LaneError(`pull request must close exactly one open structural work issue; found ${open.length}`)
+  const result = admitIssue(Number(open[0].number), io, { pr:Number(pr), allowLegacy:false })
+  return { issue:Number(open[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
+}
+
+function requireAdmission(options, io, { pr = null } = {}) {
+  if (io.enforceAdmission !== true) return null
+  if (!Number.isInteger(Number(options.admitIssue)) || Number(options.admitIssue) <= 0) {
+    throw new LaneError('--admit-issue <work issue> is required before claim, reviewer assignment, or shared-stage acquisition')
+  }
+  if (options.issue !== undefined && Number(options.issue) !== Number(options.admitIssue)) {
+    throw new LaneError(`--admit-issue #${options.admitIssue} does not match --issue #${options.issue}`)
+  }
+  if(pr===null&&options.acquireExclusive)throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
+  return admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null })
+}
+
 export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
   options = { ...options, objects: validateClaimObjects(options.objects) }
   const requestId = options.requestId ?? randomUUID()
@@ -5827,6 +5947,11 @@ export function completeWork({ issue, report }, io = githubIo) {
   if (record.work_issue !== Number(issue)) {
     throw new DependencyError(`report is for issue #${record.work_issue} but --issue said #${issue}`)
   }
+  const workIssue=io.getIssue?.(Number(issue))
+  const scope=workIssue?parseQueueScope(workIssue.body??''):null
+  if(record.outcome==='merged'&&scope&&scope.changeType!==null){
+    throw new DependencyError(`issue #${issue} uses the authoritative outcome lifecycle; merge is a stage, not completion. Keep it open through --complete-outcome and live application proof.`)
+  }
 
   const existing = findCompletionRecord(io.issueComments(issue))
   if (existing) {
@@ -6171,6 +6296,11 @@ function parseArgs(argv) {
     if (a === '--claim') out.claim = true
     else if (a === '--authorize-repository-maintenance-status') out.authorizeRepositoryMaintenanceStatus = true
     else if (a === '--revoke-required-status') out.revokeRequiredStatus = true
+    else if (a === '--admit-issue') out.admitIssue = Number(next(i++))
+    else if (a === '--resolve-admitted-issue-for-pr') out.resolveAdmittedIssueForPr = Number(next(i++))
+    else if (a === '--outcome-status') out.outcomeStatus = Number(next(i++))
+    else if (a === '--advance-outcome') out.advanceOutcome = next(i++)
+    else if (a === '--complete-outcome') out.completeOutcome = Number(next(i++))
     else if (a === '--audit') out.audit = true
     else if (a === '--queue-audit') out.queueAudit = true
     else if (a === '--complete-work') out.completeWork = true
@@ -6216,7 +6346,7 @@ function parseArgs(argv) {
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--target-url','--description','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha','--verdict','--findings-ref','--replacement-sequence','--run-id','--artifact-id','--artifact-digest','--manifest-digest'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--target-url','--description','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence','--evidence-sha','--verdict','--findings-ref','--replacement-sequence','--run-id','--artifact-id','--artifact-digest','--manifest-digest'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
     else if(a==='--confirm-local-dependency-unfixable')out.confirmLocalDependencyUnfixable=true
     else if(a==='--skip-doctor')out.skipDoctor=true
     else if(a==='--confirm-no-verdict')out.confirmNoVerdict=true
@@ -6233,6 +6363,21 @@ export function main(argv, now = new Date(), io = githubIo) {
   try {
     const o = parseArgs(argv)
     if(o.authorizeRepositoryMaintenanceStatus){console.log(JSON.stringify(authorizeRepositoryMaintenanceStatus(o,io),null,2));return 0}
+    if(o.resolveAdmittedIssueForPr){console.log(JSON.stringify(resolveAdmittedIssueForPr(o.resolveAdmittedIssueForPr,io),null,2));return 0}
+    const admissionOnly=o.admitIssue&&!o.claim&&!o.assignReviewer&&!o.acquireExclusive&&!o.replaceFailedReviewer&&!o.completeOutcome&&!o.outcomeStatus&&!o.advanceOutcome
+    if(admissionOnly){console.log(JSON.stringify(admitIssue(o.admitIssue,io),null,2));return 0}
+    if(o.outcomeStatus){console.log(JSON.stringify(outcomeHistory(io.issueComments(o.outcomeStatus)),null,2));return 0}
+    if(o.advanceOutcome){
+      if(!o.issue)throw new LaneError('--advance-outcome requires --issue <n>')
+      if(!o.evidence)throw new LaneError('--advance-outcome requires --evidence <durable URL>')
+      requireAdmission(o,io,{pr:o.pr??null})
+      console.log(JSON.stringify(advanceOutcome({issue:Number(o.issue),state:o.advanceOutcome,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString(),evidenceUrls:[o.evidence]},io),null,2));return 0
+    }
+    if(o.completeOutcome){
+      if(!o.evidence)throw new LaneError('--complete-outcome requires --evidence <durable comment URL>')
+      console.log(JSON.stringify(completeOutcome({issue:o.completeOutcome,evidenceRef:o.evidence,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString()}, {...io,parseScope:parseQueueScope}),null,2));return 0
+    }
+    if(o.claim)requireAdmission(o,io)
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
     if(o.reconcileFlow){
       if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('reconcile runtime adapter is unavailable')
@@ -6240,6 +6385,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     }
     if(o.preparePreviewDispatch){
       if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('preview preparation runtime adapter is unavailable')
+      requireAdmission(o,io,{pr:o.pr})
       console.log(JSON.stringify(preparePreviewDispatch(o.preparePreviewDispatch,io.orchestratorFlowAdapter(o.claimNumber)),null,2));return 0
     }
     if(o.repairPreviewReady){
@@ -6266,7 +6412,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.resumeAuthorLease){console.log(JSON.stringify(resumeAuthorLease({...o,claim:o.claimNumber??o.claim},now,io),null,2));return 0}
     if(o.reissueMergedClaim){console.log(JSON.stringify(reissueMergedStrandedClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
     if(o.reversionClaim){console.log(JSON.stringify(reversionActiveClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
-    if(o.replaceFailedReviewer){console.log(JSON.stringify(replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
+    if(o.replaceFailedReviewer){requireAdmission(o,io,{pr:o.pr});console.log(JSON.stringify(replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.releaseFailedReviewer){console.log(JSON.stringify(releaseFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.probeSilentReviewer){console.log(JSON.stringify(probeSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
     if(o.reclaimSilentReviewer){console.log(JSON.stringify(reclaimSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
@@ -6274,14 +6420,23 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.excludeReviewer){console.log(JSON.stringify(excludeReviewerForPr(o,io),null,2));return 0}
     if(o.reinstateReviewerExclusion){console.log(JSON.stringify(reinstateReviewerExclusion(o,io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
-    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
+    if(o.assignReviewer){requireAdmission(o,io,{pr:o.pr});assertReviewerDrawIsWarranted(o.pr,io);console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
-    if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
+    if (o.acquireExclusive) { requireAdmission(o,io,{pr:o.pr??null});console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     const claims = io.openClaims()
     if (o.returnIssue) { console.log(JSON.stringify(returnIssueToOwner(o.returnIssue, io), null, 2)); return 0 }
     if (o.queueAudit) {
       const issues = io.openWorkIssues()
+      const outcomeStates=new Map()
+      for(const issue of issues){
+        let scope=null
+        try{scope=parseQueueScope(issue.body)}catch{continue}
+        if(scope?.workType!=='structural'||scope.route!=='shared-db-orchestrator')continue
+        const history=outcomeHistory(io.issueComments(issue.number))
+        if(!history.valid)throw new LaneError(`issue #${issue.number} has invalid authoritative outcome history: ${history.problems.join('; ')}`)
+        outcomeStates.set(Number(issue.number),history.state??'entered')
+      }
       // Gather dependency state before building the queue so the pure function
       // stays pure. Referenced numbers come from the scope blocks themselves.
       const referenced = new Set()
@@ -6297,7 +6452,7 @@ export function main(argv, now = new Date(), io = githubIo) {
           if (state.open || state.unreadable || state.exists === false) continue
           let record = null
           try { record = findCompletionRecord(state.comments) } catch { continue }
-          if (record?.outcome === 'merged') state.mergeInMain = io.mergeCommitInMain(record.merge_sha)
+          if (['merged','live_verified'].includes(record?.outcome)) state.mergeInMain = io.mergeCommitInMain(record.merge_sha)
         }
       }
       const openPulls = io.openPulls?.() ?? []
@@ -6312,7 +6467,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       // Resolve historical authoring only for the bounded set that would be
       // dispatched. This catches merged work without scanning all historical
       // claim refs or spending an unbounded GitHub API budget.
-      let result = buildDynamicQueues(issues, claims, now, io.openIssueNumbers(), dependencyStates, claimPullStates)
+      let result = buildDynamicQueues(issues, claims, now, io.openIssueNumbers(), dependencyStates, claimPullStates,new Set(),outcomeStates)
       const authoredOnMain = new Set()
       if (result.dispatchable.length && io.closedClaimsForWork && io.branchPulls && io.treeFiles && io.mainSha && io.mergeCommitInMain) {
         const main = io.mainSha()
@@ -6335,7 +6490,14 @@ export function main(argv, now = new Date(), io = githubIo) {
             if (completed) authoredOnMain.add(issue)
           }
           if (!fresh.some((issue)=>authoredOnMain.has(issue))) break
-          result = buildDynamicQueues(issues, claims, now, io.openIssueNumbers(), dependencyStates, claimPullStates, authoredOnMain)
+          result = buildDynamicQueues(issues, claims, now, io.openIssueNumbers(), dependencyStates, claimPullStates, authoredOnMain,outcomeStates)
+        }
+      }
+      for (const issue of result.urgentWaitingCapacity ?? []) {
+        const exists=(io.issueComments?.(issue)??[]).flatMap((comment)=>{try{return parseEventComment(comment?.body??'')}catch{return[]}})
+          .some((event)=>event.event_type==='urgent_waiting_capacity'&&event.result==='succeeded')
+        if(!exists&&io.commentIssue){
+          io.commentIssue(issue,formatEventComment(coordinationEvent({eventType:'urgent_waiting_capacity',workIssue:issue,actor:'queue-audit',timestamp:now.toISOString(),service_class:'urgent-application',detail:'all safe author capacity is occupied or object-protected; no active work was preempted'})))
         }
       }
       console.log(JSON.stringify(result,null,2))
@@ -6508,12 +6670,14 @@ export function main(argv, now = new Date(), io = githubIo) {
       for(const problem of malformed)console.error(`MALFORMED ${problem}`)
       return malformed.length || occupied>MAX_AUTHOR_LANES ? 2 : 0
     }
-    if (!o.claim) throw new LaneError('choose --claim, --audit, --queue-audit, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
+    if (!o.claim) throw new LaneError('choose --admit-issue, --claim, --audit, --queue-audit, --outcome-status, --complete-outcome, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
     for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)
     if (!o.objects.length) throw new LaneError('--objects must name every database object exactly')
     o.leaseHours ??= DEFAULT_LEASE_HOURS
     if (!Number.isFinite(o.leaseHours) || o.leaseHours <= 0 || o.leaseHours > 24) throw new LaneError('--lease-hours must be greater than 0 and no more than 24')
-    console.log(JSON.stringify(acquireAuthorLane(o, now, io), null, 2)); return 0
+    const claimed=acquireAuthorLane(o, now, io)
+    if(io.enforceAdmission===true)advanceOutcome({issue:Number(o.admitIssue),state:'dispatched',actor:o.owner,timestamp:now.toISOString(),evidenceUrls:[claimed.claim]},io)
+    console.log(JSON.stringify(claimed, null, 2)); return 0
   } catch (error) { console.error(`REFUSED: ${error.message}`); return 2 }
 }
 

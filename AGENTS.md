@@ -410,12 +410,22 @@ code — but an orchestrator that leaves items standing in it is carrying other 
 The block prints **before** the refill line, not after it, so a queue that has dispatchable work
 cannot hide it — that ordering is deliberate.
 
+Every live claim, reviewer assignment, preview, merge, and production acquisition must also pass
+`--admit-issue <work-issue>`. Admission independently reads the issue and the proposed PR change:
+only actual shared-database structure work proceeds. A sender's label never admits documentation,
+application code or data, CI, reviewer/workflow work, or repository maintenance. Rejection is
+recorded as a typed `rejected_non_structural` event without consuming any lane or shared stage.
+
 ### Queue priority
 
-Among eligible structural issues, work that releases the largest number of other open issues is
-first. The count includes direct and chained `depends_on` relationships. If two issues release the
-same number, the older issue is first. The numeric `priority:` field remains required for scope
-compatibility but does not override blocker impact or age.
+Among eligible structural issues, service class orders urgent application work before standard
+application work and maintenance. Already-started work nearest direct live verification finishes
+before new work; work that releases the largest number of direct and chained blockers follows,
+then older creation time and issue number. An urgent item never preempts a started claim or bypasses
+the eight-author/shared-stage gates. `urgent-application` additionally requires a structured impact
+block proving one of: a live outage, a blocked application release, a security exposure, or an
+owner-declared business deadline. The numeric `priority:` field remains required for compatibility but does
+not override this order.
 
 An issue with **no** `db-work-scope` block at all is `unclassified`: it is not admitted, it is not
 worked, and it already blocks an empty-lane claim. Classify it or send it back.
@@ -701,6 +711,7 @@ rules below are the operative summary.
 
    ```bash
    node scripts/manage-migration-author-lanes.mjs --claim \
+     --admit-issue <work-issue> \
      --task "<issue and outcome>" --owner "<agent/session>" \
      --branch "<branch>" --worktree "<absolute isolated worktree>" \
      --objects "<every exact object written, comma-separated>"
