@@ -43,7 +43,7 @@ import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIE
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
-import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, trustedOutcomeComments } from './orchestrator-flow/outcome-lifecycle.mjs'
+import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -5441,19 +5441,13 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       error.result={reason:error.message,return_to:scope?.applicationReturnTo??'u2giants/shared-db',evidence_required:['readable pull request content containing acknowledged statement-leading schema DDL for the proposed structural change']}
     }
     if (error instanceof AdmissionError && error.result && io.commentIssue) {
-      const comments = io.issueComments?.(Number(number)) ?? []
       const refusal={event_type:'rejected_non_structural',work_issue:Number(number),actor,result:'refused',detail:error.result.reason,return_to:error.result.return_to,evidence_required:error.result.evidence_required}
-      const already = trustedOutcomeComments(comments).flatMap((comment)=>{
-        try { return parseEventComment(comment?.body ?? '') } catch { return [] }
-      }).some((event)=>['event_type','work_issue','actor','result','detail','return_to'].every((key)=>event[key]===refusal[key])&&JSON.stringify(event.evidence_required??[])===JSON.stringify(refusal.evidence_required??[]))
-      if (!already) {
-        const event = coordinationEvent({
-          eventType:refusal.event_type, workIssue:refusal.work_issue, actor:refusal.actor,
-          timestamp:new Date().toISOString(), result:refusal.result, detail:refusal.detail,
-          return_to:refusal.return_to, evidence_required:refusal.evidence_required,
-        })
-        io.commentIssue(Number(number), formatEventComment(event))
-      }
+      const event = coordinationEvent({
+        eventType:refusal.event_type, workIssue:refusal.work_issue, actor:refusal.actor,
+        timestamp:new Date().toISOString(), result:refusal.result, detail:refusal.detail,
+        return_to:refusal.return_to, evidence_required:refusal.evidence_required,
+      })
+      io.commentIssue(Number(number), formatEventComment(event))
     }
     throw error
   }

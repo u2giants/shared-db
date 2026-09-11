@@ -198,12 +198,12 @@ test('forged or stale refusal comments cannot suppress current owner refusal pro
   const make=(overrides,association)=>({author_association:association,body:formatEventComment(coordinationEvent({
     eventType:'rejected_non_structural',workIssue:41,actor:'manage-migration-author-lanes',timestamp:'2026-09-11T00:00:00Z',result:'refused',detail:result.reason,return_to:result.return_to,evidence_required:result.evidence_required,...overrides,
   }))})
-  const comments=[make({},'NONE'),make({return_to:'u2giants/stale-app'},'OWNER')]
+  const comments=[make({},'NONE'),make({return_to:'u2giants/stale-app'},'OWNER'),make({},'OWNER')]
   const io=serializedIo({enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value))})
   const old=console.error;console.error=()=>{}
   try{assert.equal(managerMain(['--admit-issue','41'],new Date(),io),2)}finally{console.error=old}
-  assert.equal(comments.length,3)
-  const current=parseEventComment(comments[2].body)[0]
+  assert.equal(comments.length,4)
+  const current=parseEventComment(comments[3].body)[0]
   assert.equal(current.return_to,result.return_to);assert.deepEqual(current.evidence_required,result.evidence_required)
 })
 
