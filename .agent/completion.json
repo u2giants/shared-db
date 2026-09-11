@@ -1,46 +1,52 @@
 {
   "schema_version": 1,
-  "work_issue": 2766,
+  "work_issue": 2478,
   "outcome": "ready-for-merge",
-  "pr": 2767,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2766/7",
-  "contract_sha256": "c7325f650f6ec0e781929f0a35bc6ea8895a7c421698971675d8bec5345074da",
-  "head_sha": "97c6251d39e651c075c5983a84867c2a888a3ab3",
+  "pr": 2746,
+  "migration_versions": [
+    "20260911152754"
+  ],
+  "contract_ref": "refs/db-contracts/2478/2",
+  "contract_sha256": "e0b45c2dc24aa6310adecd88ade690de5d501a77b215d4dffb43d3255463852f",
+  "head_sha": "326e2947e330a55024a79710e03157727af76e05",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/agents/section-4-anti-collision-rules.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "supabase/migrations/20260911152754_shared_style_group_sku_key.sql",
+    "supabase/tests/style_group_drift_reconciler_contracts.sql",
+    "supabase/tests/style_group_key_for_sku_contracts.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function public.style_group_key_for_sku",
+    "function public.rebuild_style_groups_batch",
+    "function public.reconcile_style_group_drift"
+  ],
   "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
+    },
+    {
+      "command": "local PostgreSQL helper parity contracts",
+      "exit_code": 0,
+      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
     },
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+      "command": "python -m unittest scripts.test_migration_derivation",
       "exit_code": 0,
-      "evidence": "524 tests passed, 0 failed, 0 skipped."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=275"
-    },
-    {
-      "command": "node scripts/check-github-transport-conformance.mjs",
-      "exit_code": 0,
-      "evidence": "212 files scanned, all calls governed."
+      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
     }
   ],
   "assumptions_resolved": [
-    "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
+    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
+    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
+    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
+    "No 6392-row application drift correction and no nightly-path retirement."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Muse REVISE on 5ecafd35 addressed in 451575a5 (stale eight-lane wording, non-mutex zero-wait test). Ready for exact-head review, required CI, and guarded merge."
+  "stop_conditions_hit": []
 }
