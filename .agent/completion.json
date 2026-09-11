@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2770,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2768/7",
-  "contract_sha256": "694ae62a1735242777acf1fb4918717d04264588a670a8db93b0a7567057adca",
-  "head_sha": "fcb906891d2993dce5820c761a8124657ce16c82",
+  "contract_ref": "refs/db-contracts/2768/8",
+  "contract_sha256": "ee6dce1765e1fce2e1e8d094e224674bfbdc48ab24ba0e8cc639b62ae5dc00b3",
+  "head_sha": "b98d25e2e37da7c474aae0c49f1e0fd586f4f1cd",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -17,11 +17,31 @@
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs", "exit_code": 0, "evidence": "40 tests, 40 pass, 0 fail, 0 skipped."},
-    {"command": "python -m unittest scripts.test_production_migration_guard", "exit_code": 0, "evidence": "OK."},
-    {"command": "bash scripts/check-sql.sh", "exit_code": 0, "evidence": "Static checks passed."},
-    {"command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs", "exit_code": 0, "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+    {
+      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
+      "exit_code": 0,
+      "evidence": "40 tests, 40 pass, 0 fail, 0 skipped."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_migration_guard",
+      "exit_code": 0,
+      "evidence": "OK."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static checks passed."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    }
   ],
   "assumptions_resolved": [
     "Run 34281856111 log binding confirmed: rehearsalMode claim, appliedCommit 69226335c20fef57f8a7c15cd7b014a157b61484, previewProjectRef mvpkijzfmfcxhnzqogzs, allowlist [20260908202651].",
