@@ -1,35 +1,41 @@
 {
   "schema_version": 1,
-  "work_issue": 2789,
+  "work_issue": 2769,
   "outcome": "ready-for-merge",
-  "pr": 2790,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2789/2",
-  "contract_sha256": "a0e3ea60de66ae26f74b55bdc64225506ac3bdbdf62b821180c9032fafd33e19",
-  "head_sha": "0f762cdac47f2f91452aa112ed05ef043c3ce266",
+  "pr": 2776,
+  "migration_versions": [
+    "20260911145659"
+  ],
+  "contract_ref": "refs/db-contracts/2769/2",
+  "contract_sha256": "cb815eaa9c2adfa9bf76d6c1098af19287d15abf115d71c6136634e1fe7dc108",
+  "head_sha": "01d2e3a0e1b78bcba212c5aac8ab6a8be0178f64",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/test_production_review_source_pr_preflight.py"
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
+    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function public.queue_nightly_rebuild_style_groups"
+  ],
   "checks": [
     {
-      "command": "python -m unittest scripts/test_production_review_source_pr_preflight.py",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Ran 5 tests, OK. The same test against origin/main 5761bc5e's workflow fails 5/5 (step absent). Full scripts/test_*.py: Ran 943 tests, OK (skipped=8)."
+      "evidence": "Run at c42e3673 (after merging main 25c4ca3b) in C:/repos/shared-db-worktrees/issue-2769: Static checks passed. No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=276 at 0f762cda; one new site (the new step's name line) recorded with a substantive disposition, no existing site changed."
+      "evidence": "git diff --check 25c4ca3b c42e3673 reported no whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "Confirmed: the new step reads only inputs.source_pr and the activation file, and sits after Verify exact main commit and before the first secrets use in the review job; the later test -n checks in both production jobs are unchanged."
+    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
+    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
+    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
+    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
   ],
   "stop_conditions_hit": []
 }
