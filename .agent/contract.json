@@ -1,95 +1,63 @@
 {
   "schema_version": 1,
-  "generation": 14,
-  "work_issue": 2741,
+  "work_issue": 2712,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Reconcile old preview Character alias and provenance shape with final reviewed2355 behavior without rewriting curated rows.",
-  "base_sha": "5af3fafac265067f8ee793de229cd63bee95252b",
-  "dispatcher": "Codex orchestrator #2714",
-  "worker": "codex-2714-2355-forward",
-  "branch": "codex/issue-2426-character-parent",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2426-character-parent",
+  "goal": "Create the governed shared HTS RAG schema hts_rag and four least-privilege NOLOGIN roles for popcre/designflow-backend#94, with mandatory source_environment provenance, RLS, and no PUBLIC or Data API access.",
+  "base_sha": "5eaebe7c09683aef77bdef92aec454af5dddf2cb",
+  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
+  "worker": "Claude sub-agent hts-rag-2712 of marker 2758",
+  "branch": "claude/2712-hts-rag-schema",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/2712-hts-rag-schema",
   "allowed_paths": [
-    "supabase/migrations/20260911152203_character_alias_provenance_forward_repair.sql",
-    "supabase/tests/character_alias_forward_repair_contracts.sql",
+    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
-    "scripts/test_post_batch_app_verification.py"
+    ".agent/completion.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260911152203_character_alias_provenance_forward_repair.sql",
-    "supabase/tests/character_alias_forward_repair_contracts.sql",
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
-    "scripts/test_post_batch_app_verification.py"
+    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql"
   ],
   "db_reads": [
-    "table core.licensor",
-    "table core.property",
-    "table core.franchise"
+    "function app.set_updated_at"
   ],
   "db_writes": [
-    "column core.character_alias.licensor_id",
-    "column core.character_alias.normalized_alias",
-    "column core.character_alias.source_id",
-    "column core.character_alias.source_system",
-    "column core.taxonomy_source_ref.first_seen_at",
-    "column core.taxonomy_source_ref.is_current",
-    "column core.taxonomy_source_ref.last_seen_at",
-    "column core.taxonomy_source_ref.missing_since",
-    "column core.taxonomy_source_ref.source_licensor_id",
-    "function core.guard_character_alias_licensor",
-    "function core.guard_taxonomy_source_ref_identity",
-    "index core.character_alias_character_idx",
-    "index core.character_alias_licensor_idx",
-    "index core.character_alias_licensor_norm_key",
-    "index core.character_alias_licensor_source_key",
-    "index core.taxonomy_source_ref_current_idx",
-    "index core.taxonomy_source_ref_entity_idx",
-    "index core.taxonomy_source_ref_source_licensor_idx",
-    "policy shared_read on core.character_alias",
-    "table core.character_alias",
-    "table core.taxonomy_source_ref",
-    "trigger a_taxonomy_source_ref_identity_guard on core.taxonomy_source_ref",
-    "trigger character_alias_licensor_guard on core.character_alias",
-    "trigger set_updated_at on core.character_alias",
-    "function core.bump_taxonomy_source_ref_last_seen",
-    "trigger b_taxonomy_source_ref_last_seen on core.taxonomy_source_ref",
-    "table core.character",
-    "index core.character_id_licensor_id_key"
+    "schema hts_rag",
+    "role designflow_hts_prod_runtime",
+    "role designflow_hts_alsand_runtime",
+    "role designflow_hts_prod_worker",
+    "role designflow_hts_alsand_worker",
+    "table hts_rag.hts_rag_rulings",
+    "table hts_rag.hts_rag_product_examples",
+    "table hts_rag.hts_rag_precedents",
+    "table hts_rag.hts_rag_precedent_rulings",
+    "table hts_rag.hts_rag_extraction_jobs",
+    "table hts_rag.hts_rag_determinations",
+    "table hts_rag.hts_rag_provider_responses",
+    "table hts_rag.hts_rag_review_events",
+    "table hts_rag.hts_rag_product_family_allowlist",
+    "table hts_rag.hts_rag_debate_runs",
+    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
   ],
   "prohibited_actions": [
-    "No shared DB writes or merges by this worker.",
-    "Never rewrite old migration20260906222338 or licensed/source rows.",
-    "No CASCADE or relaxation of authentication, RLS, integrity or ColdLion breaker."
+    "Do not touch public.hts_rag_*, hts_rag_split, dflow or dflow_prod.",
+    "No PUBLIC, anon, authenticated or service_role grants; do not add hts_rag to Data API exposed schemas.",
+    "No password in committed SQL; roles stay NOLOGIN.",
+    "No direct production DDL; production only through the governed production workflow.",
+    "No admin merge; no Claude review."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
     "git diff --check",
-    "python -m unittest discover -s scripts -p test_*.py -q"
+    "bash scripts/check-sql.sh",
+    "hosted ephemeral migration regression suite"
   ],
   "assumptions": [
-    "Old preview applied67dc237a body; final reviewed2355 bodycb7bf087 differs.",
-    "Only legacy generated is_current=(missing_since IS NULL) may be removed RESTRICT; all independently held rows remain untouched.",
-    "Existing retirement policy retains oldhistory and permits only newforwardversion; CI34573081462 proves standaloneconstruction frompre2355shape withoutoldmigration.",
-    "Generation6 repairs evidence-pair binding only after implementationdc2ece0b; all SQL, policies, tests, claims and source behavior are unchanged.",
-    "Generation7 rebinds evidence after merging origin/main 5eaebe7c as implementation cf1a3c6f; migration SQL, tests, guards and claims unchanged.",
-    "Generation8 rebinds evidence after merging origin/main dae160a0 (#2760) as implementation 2a43f89f; migration SQL, tests, guards and claims unchanged.",
-    "Generation9 rebinds evidence after merging origin/main b68a1900 (#2740) as implementation 7080421c; migration SQL, tests, guards and claims unchanged.",
-    "Generation10 rebinds evidence after merging origin/main 9da98ede (#2748) as implementation a663cf83; migration SQL, tests, guards and claims unchanged.",
-    "Generation11 records the governed claim-version supersession 20260911063554 -> 20260911152203 (refs/db-claim-supersessions/2742-20260911063554) after #2748 landed newer 20260911081204; migration SQL body unchanged, file and test references renamed only.",
-    "Generation12 rebinds evidence after merging origin/main 9b02ad48 (#2767) as implementation b3593908; migration SQL, tests, guards and claims unchanged.",
-    "Generation13 rebinds evidence after merging origin/main 5761bc5e (#2764, #2761) as implementation 75d9680d; migration SQL, tests, guards and claims unchanged.",
-    "Generation14 rebinds evidence after merging origin/main 11d0e2b4 (#2790, #2786) as implementation c8755e1a; migration SQL, tests, guards and claims unchanged."
+    "Production qsllyeztdwjgirsysgai holds no hts_rag schema and no designflow_hts roles (verified read-only 2026-09-11).",
+    "Migrations 20260907121706, 20260908202651 and 20260909121403 are not applied on production, so this migration is self-contained."
   ],
   "stop_conditions": [
-    "Unexpected legacy column definition or dependent consumer.",
-    "Object ownership collision.",
-    "Either upgrade path loses data or fails existing2355 behavioral contracts."
+    "Stop if a login password would be required through a non-governed path.",
+    "Stop if any grant to PUBLIC or a Data API role would be required."
   ]
 }
