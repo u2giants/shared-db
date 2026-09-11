@@ -2063,9 +2063,18 @@ class ApplyLaneTests(unittest.TestCase):
         for required_input in ("target", "mode", "production_allowlist", "preview_allowlist", "claim_pr", "claim_head_sha", "commit_sha", "confirmation"):
             self.assertRegex(header, rf"(?m)^      {re.escape(required_input)}:$")
         self.assertIn("permissions:\n  contents: read", header)
+        self.assertIn("issues: write", header)
         self.assertIn("github.event_name == 'pull_request'", header)
         self.assertIn("|| 'shared-supabase-migrations'", header)
         self.assertIn("cancel-in-progress: false", header)
+
+    def test_admission_workflows_can_reopen_only_the_validated_linked_issue(self) -> None:
+        for workflow in ("guarded-migration-merge.yml", "preview-ledger-orphan-reconciliation.yml"):
+            text = (REPO / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+            header = text.split("\njobs:", 1)[0]
+            self.assertIn("issues: write", header, workflow)
+            self.assertIn("--admit-issue", text, workflow)
+        self.assertIn("--resolve-admitted-issue-for-pr", WORKFLOW_TEXT)
 
     def test_phase_2_preserves_required_job_graph_and_deliberately_first_checks(self) -> None:
         self.assertIn("needs: validate", _job("preview"))

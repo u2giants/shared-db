@@ -124,6 +124,13 @@ test('workflow resolver and PR-backed acquire preserve the same bounded legacy a
   ]){const io={...base};mutate(io);assert.throws(()=>resolveAdmittedIssueForPr(7,serializedIo(io)),/legacy admission|exactly one structural|exactly match/)}
 })
 
+test('standalone PR-backed admission preserves bounded legacy parity',()=>{
+  const body=['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n')
+  const make=(createdAt)=>serializedIo({getIssue:()=>issue(body),closingIssuesForPr:()=>[{number:41,state:'open'}],getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);',...(createdAt?{getIssue:()=>({...issue(body),createdAt})}:{})})
+  const oldLog=console.log,oldError=console.error;console.log=()=>{};console.error=()=>{}
+  try{assert.equal(managerMain(['--admit-issue','41','--pr','7'],new Date(),make()),0);assert.equal(managerMain(['--admit-issue','41','--pr','7'],new Date(),make('2026-09-11T18:00:00Z')),2)}finally{console.log=oldLog;console.error=oldError}
+})
+
 test('an issue created after the legacy cutover cannot skip the admission fields by naming a PR',()=>{
   const body=['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n')
   const base={closingIssuesForPr:()=>[{number:41,state:'open'}],getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);'}

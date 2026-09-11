@@ -6593,7 +6593,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.authorizeRepositoryMaintenanceStatus){console.log(JSON.stringify(authorizeRepositoryMaintenanceStatus(o,io),null,2));return 0}
     if(o.resolveAdmittedIssueForPr){console.log(JSON.stringify(resolveAdmittedIssueForPr(o.resolveAdmittedIssueForPr,io),null,2));return 0}
     const admissionOnly=hasAdmission&&selectedPrimary.length===0
-    if(admissionOnly){console.log(JSON.stringify(admitIssueSerialized(o.admitIssue,io,{pr:o.pr??null}),null,2));return 0}
+    if(admissionOnly){console.log(JSON.stringify(admitIssueSerialized(o.admitIssue,io,{pr:o.pr??null,allowLegacy:o.pr!==undefined&&o.pr!==null}),null,2));return 0}
     if(o.outcomeStatus){console.log(JSON.stringify(outcomeHistory(io.issueComments(o.outcomeStatus),Number(o.outcomeStatus)),null,2));return 0}
     if(o.advanceOutcome){
       if(!o.issue)throw new LaneError('--advance-outcome requires --issue <n>')

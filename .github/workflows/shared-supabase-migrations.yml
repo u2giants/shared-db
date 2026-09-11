@@ -100,6 +100,7 @@ on:
 
 permissions:
   contents: read
+  issues: write # PR-backed admission may reopen a validated merge-closed issue
 
 concurrency:
   # Pull requests get a PER-REF group so PR validations run in parallel and can never

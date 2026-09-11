@@ -17,7 +17,7 @@ on:
 permissions:
   contents: write
   actions: read
-  issues: read
+  issues: write # admission may reopen the validated merge-closed source issue
   pull-requests: read
 
 concurrency:
