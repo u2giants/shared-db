@@ -1,52 +1,63 @@
 {
   "schema_version": 1,
-  "work_issue": 2664,
-  "generation": 4,
+  "work_issue": 2712,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "One authenticated invoker-safe OrderList Find position lookup preserving full filtered/sorted-grid semantics.",
-  "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
-  "dispatcher": "Codex orchestrator marker2714",
-  "worker": "Codex issue2664 worker",
-  "branch": "codex/issue-2664-orderlist-find",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2664-orderlist-find",
+  "goal": "Create the governed shared HTS RAG schema hts_rag and four least-privilege NOLOGIN roles for popcre/designflow-backend#94, with mandatory source_environment provenance, RLS, and no PUBLIC or Data API access.",
+  "base_sha": "5eaebe7c09683aef77bdef92aec454af5dddf2cb",
+  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
+  "worker": "Claude sub-agent hts-rag-2712 of marker 2758",
+  "branch": "claude/2712-hts-rag-schema",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/2712-hts-rag-schema",
   "allowed_paths": [
+    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production-verification-sidecars/20260911081204.json",
-    "scripts/production_business_risk_gate.py"
+    ".agent/completion.json"
   ],
   "file_writes": [
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production-verification-sidecars/20260911081204.json",
-    "scripts/production_business_risk_gate.py"
+    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql"
   ],
-  "db_reads": ["view api.dam_order_list"],
+  "db_reads": [
+    "function app.set_updated_at"
+  ],
   "db_writes": [
-    "function public.find_dam_order_list_row"
+    "schema hts_rag",
+    "role designflow_hts_prod_runtime",
+    "role designflow_hts_alsand_runtime",
+    "role designflow_hts_prod_worker",
+    "role designflow_hts_alsand_worker",
+    "table hts_rag.hts_rag_rulings",
+    "table hts_rag.hts_rag_product_examples",
+    "table hts_rag.hts_rag_precedents",
+    "table hts_rag.hts_rag_precedent_rulings",
+    "table hts_rag.hts_rag_extraction_jobs",
+    "table hts_rag.hts_rag_determinations",
+    "table hts_rag.hts_rag_provider_responses",
+    "table hts_rag.hts_rag_review_events",
+    "table hts_rag.hts_rag_product_family_allowlist",
+    "table hts_rag.hts_rag_debate_runs",
+    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
   ],
   "prohibited_actions": [
-    "No shared database writes, application changes, paid review or merge in this preparation."
+    "Do not touch public.hts_rag_*, hts_rag_split, dflow or dflow_prod.",
+    "No PUBLIC, anon, authenticated or service_role grants; do not add hts_rag to Data API exposed schemas.",
+    "No password in committed SQL; roles stay NOLOGIN.",
+    "No direct production DDL; production only through the governed production workflow.",
+    "No admin merge; no Claude review."
   ],
   "required_checks": [
+    "git diff --check",
     "bash scripts/check-sql.sh",
-    "python scripts/test_order_list_find_position.py"
+    "hosted ephemeral migration regression suite"
   ],
   "assumptions": [
-    "Claim2747 reserves20260911081204 and exact function.",
-    "Live PopDAM helpers define normalized filters and sorts; duplicate2665 shares this contract.",
-    "Implementation committed and local synthetic contracts passed; draft2748 is held for parent priority work.",
-    "CI requires a hash-bound disposition for the runtime dynamic SELECT; it creates no additional durable catalog object and retains normal function/grant verification."
+    "Production qsllyeztdwjgirsysgai holds no hts_rag schema and no designflow_hts roles (verified read-only 2026-09-11).",
+    "Migrations 20260907121706, 20260908202651 and 20260909121403 are not applied on production, so this migration is self-contained."
   ],
   "stop_conditions": [
-    "Object collision or missing material application contract.",
-    "Any authorization/filter/sort/search parity failure."
+    "Stop if a login password would be required through a non-governed path.",
+    "Stop if any grant to PUBLIC or a Data API role would be required."
   ]
 }
