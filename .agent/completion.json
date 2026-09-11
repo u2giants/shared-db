@@ -1,39 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2769,
+  "work_issue": 2664,
   "outcome": "ready-for-merge",
-  "pr": 2776,
+  "pr": 2748,
   "migration_versions": [
-    "20260911145659"
+    "20260911081204"
   ],
-  "contract_ref": "refs/db-contracts/2769/1",
-  "contract_sha256": "a2439b7aec0caa3852426bf6d1f6fe956b478e65f43575963be09e153c1409de",
-  "head_sha": "dccca07b6b7164cc3eba61aed1f91b9213a11db1",
+  "contract_ref": "refs/db-contracts/2664/4",
+  "contract_sha256": "5b1b3b0d1a96eb5e8f13624ec6041622df51c2c58f5185340b6f404fbe3f85cd",
+  "head_sha": "e0a412e36812b291323394976d87845b6343e96a",
   "files_changed": [
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
+    "supabase/tests/dam_order_list_find_position.sql",
+    "scripts/test_order_list_find_position.py",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production-verification-sidecars/20260911081204.json"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "view api.dam_order_list"
+  ],
   "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
+    "function public.find_dam_order_list_row"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Run at dccca07b in C:/repos/shared-db-worktrees/issue-2769: 'Static checks passed.' No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
+      "evidence": "Static guards passed; live-ledger check not configured. No shared database writes."
     },
     {
-      "command": "git diff --check",
+      "command": "python scripts/test_order_list_find_position.py",
       "exit_code": 0,
-      "evidence": "git diff --check b68a1900 dccca07b reported no whitespace errors."
+      "evidence": "TEST_DATABASE_URL pointed to loopback127.0.0.1:55486; fresh uniquely-created database was removed afterward.14 expected-position cases,4 independent ranking parity cases, wildcard/null/JS-trim/RLS/auth/injection contracts passed;0 skipped."
+    },
+    {
+      "evidence": "49 sidecars validated; runtime dynamic SELECT marker96 explicitly covered as no additional durable catalog target.",
+      "command": "python scripts/check_production_verification_sidecars.py --repo . --scan-version 20260911081204",
+      "exit_code": 0
+    },
+    {
+      "evidence": "137 tests passed;0 skipped.",
+      "command": "python -m unittest scripts.test_production_business_risk_gate",
+      "exit_code": 0
     }
   ],
   "assumptions_resolved": [
-    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
-    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
-    "Disclosure: this contract was published after the implementation commit dccca07b, because the Agent work contract check flagged its absence; its content describes the work as claimed in #2774."
+    "PopDAM main562dc999ac0039e017fd6b0fd0e32c6172ac6893 helpers define9 search fields, normalized filters and ascending-boolean sort, defaultorder_date descending/null-last/id ascending.",
+    "Duplicate2665 closed as duplicate, not delivered;2664 is canonical underclaim2747.",
+    "Draft preparation only: independent paid review, shared-preview plan/runtime proof and merge remain held for parent priority2734 and2703.",
+    "No application code or data writes, no shared database writes, no timeout changes.",
+    "Actual CI failure repaired with hash-bound runtime SELECT disposition and pinned producer sidecar; SQL bytes unchanged."
   ],
   "stop_conditions_hit": []
 }
