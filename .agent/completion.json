@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2684,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2326/15",
-  "contract_sha256": "705a7ebb5b0db9829c48cc551111043c60974e9efde493802d5232a480759250",
-  "head_sha": "e091a629a7731bcb3854cd37cd0a7ba3e8677edb",
+  "contract_ref": "refs/db-contracts/2326/16",
+  "contract_sha256": "d2705a28bedcf589ba6247526da4ba0718e33ec60bed703e5b8bc7cbcc8a8d84",
+  "head_sha": "130a55ac980843477952354e5481dfaa95b53e6b",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -27,7 +27,7 @@
       "evidence": "Contract is valid."
     },
     {
-      "command": "git diff --check 5532d2bd401e67af39f0e60c6b08bcd1ebb0723f..HEAD",
+      "command": "git diff --check ef06ca5aec77ad4eccf0e3b40accc2c2faca2cd6..HEAD",
       "exit_code": 0,
       "evidence": "No output; exit code 0."
     }
