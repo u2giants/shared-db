@@ -51,8 +51,8 @@ test('the envelope itself is validated', () => {
   assert.throws(() => validateCompletionRecord(merged({ outcome: 'done' })), /outcome must be one of/)
 })
 
-test('only merged and owner-ruling-recorded count as success', () => {
-  assert.deepEqual([...SUCCESS_OUTCOMES], ['merged', 'owner-ruling-recorded'])
+test('merged, live-verified, and owner-ruling-recorded count as success', () => {
+  assert.deepEqual([...SUCCESS_OUTCOMES], ['merged', 'live_verified', 'owner-ruling-recorded'])
   for (const outcome of SUCCESS_OUTCOMES) assert.equal(isSuccessful({ outcome }), true)
   for (const outcome of UNSUCCESSFUL_OUTCOMES) assert.equal(isSuccessful({ outcome }), false)
   assert.equal(isSuccessful(null), false)
