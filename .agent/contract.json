@@ -1,46 +1,48 @@
 {
-    "schema_version": 1,
-    "generation": 2,
-    "work_issue": 2723,
-    "work_type": "repo-maintenance",
-    "route": "repo-session",
-    "goal": "Recover authentic original preview application proof when archived GitHub display logs lose step names, preserving immutable run, artifact, ledger and migration-content checks.",
-    "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
-    "dispatcher": "codex orchestrator marker2714",
-    "worker": "codex finish_2507 maintenance child",
-    "branch": "codex/preview-artifact-proof-2466",
-    "worktree": "C:\\repos\\shared-db-worktrees\\preview-artifact-proof-2466",
-    "allowed_paths": [
-        "scripts/manage-migration-author-lanes.mjs",
-        "scripts/manage-migration-author-lanes.test.mjs",
-        "scripts/verify_preview_apply_artifact.py",
-        "scripts/test_verify_preview_apply_artifact.py",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "file_writes": [
-        "scripts/manage-migration-author-lanes.mjs",
-        "scripts/manage-migration-author-lanes.test.mjs",
-        "scripts/verify_preview_apply_artifact.py",
-        "scripts/test_verify_preview_apply_artifact.py"
-    ],
-    "db_reads": [],
-    "db_writes": [],
-    "prohibited_actions": [
-        "No database writes, replay, merges or weakening of provenance checks.",
-        "No changes to excluded issues2705 or2709."
-    ],
-    "required_checks": [
-        "node --test scripts/manage-migration-author-lanes.test.mjs",
-        "python scripts/test_verify_preview_apply_artifact.py",
-        "git diff --check"
-    ],
-    "assumptions": [
-        "Prospective recovery contract: initial local draft and regression tests predate publication; no retrospective publication claim.",
-        "Actual original2466 artifact must validate read-only; malformed named proof must still refuse."
-    ],
-    "stop_conditions": [
-        "Stop if original ZIP digest or migration bytes do not match.",
-        "Stop if any existing refusal regresses."
-    ]
+  "schema_version": 1,
+  "work_issue": 2664,
+  "generation": 1,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "One authenticated invoker-safe OrderList Find position lookup preserving full filtered/sorted-grid semantics.",
+  "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
+  "dispatcher": "Codex orchestrator marker2714",
+  "worker": "Codex issue2664 worker",
+  "branch": "codex/issue-2664-orderlist-find",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2664-orderlist-find",
+  "allowed_paths": [
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
+    "supabase/tests/dam_order_list_find_position.sql",
+    "scripts/test_order_list_find_position.py"
+  ],
+  "file_writes": [
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
+    "supabase/tests/dam_order_list_find_position.sql",
+    "scripts/test_order_list_find_position.py"
+  ],
+  "db_reads": [
+    "view api.dam_order_list"
+  ],
+  "db_writes": [
+    "function public.find_dam_order_list_row"
+  ],
+  "prohibited_actions": [
+    "No shared database writes, application changes, paid review or merge in this preparation."
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "python scripts/test_order_list_find_position.py"
+  ],
+  "assumptions": [
+    "Claim2747 reserves20260911081204 and exact function.",
+    "Live PopDAM helpers define normalized filters and sorts; duplicate2665 shares this contract."
+  ],
+  "stop_conditions": [
+    "Object collision or missing material application contract.",
+    "Any authorization/filter/sort/search parity failure."
+  ]
 }
