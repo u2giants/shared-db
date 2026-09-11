@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2766/2",
   "contract_sha256": "d7df20ffbe5d7d5eeea2dfb3183fb1f0619596b8ab9782698e2c4082e88fdf21",
-  "head_sha": "68e3d69960ab30f8a20d974b0eb362db797ae72f",
+  "head_sha": "451575a558f8d566f7776a64ad3a8b77b8cfd0f2",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -42,5 +42,5 @@
     "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Ready for exact-head review, required CI, and guarded merge."
+  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Muse REVISE on 5ecafd35 addressed in 451575a5 (stale eight-lane wording, non-mutex zero-wait test). Ready for exact-head review, required CI, and guarded merge."
 }
