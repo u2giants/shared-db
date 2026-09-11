@@ -8,6 +8,8 @@
   "contract_sha256": "7526a02f7ca7e9d27a4f6cb29cc0f780fb7b6c6de3add7dbec5feffd038c61b3",
   "head_sha": "3bc425d230bd1e4d17e0b00a771d42bb1fda1836",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/business-rule-library.yml",
     ".github/workflows/documents-only-merge-authorization.yml",
     ".github/workflows/guarded-migration-merge.yml",
