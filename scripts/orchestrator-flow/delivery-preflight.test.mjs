@@ -22,11 +22,11 @@ test('composition invokes every existing gate once and registers exact-head evid
   assert.deepEqual(calls,DELIVERY_CHECKS)
   const identity={policy_version:1,migrations:[],focused_files:[],verification_files:[],claims:{writes:[],reads:[]},global_invalidators:[],migration_order_digest:'0'.repeat(64)}
   const bundle={schema_version:1,bundle_id:sha256(canonicalJson(identity)),identity,metadata:{issue:2728,pr:2800,claim:1,base_main_sha:'b'.repeat(40),integration_sha:'a'.repeat(40),review:null,ci:null}}
-  const registered=registerDeliveryPreflight(bundle,result)
+  const registered=registerDeliveryPreflight(bundle,result,registry(value))
   assert.equal(registered.metadata.delivery_preflight.input_digest,result.input_digest)
   assert.equal(validateEvidenceBundle(registered),registered)
   bundle.metadata.integration_sha='b'.repeat(40)
-  assert.throws(()=>registerDeliveryPreflight(bundle,result),/exact head/)
+  assert.throws(()=>registerDeliveryPreflight(bundle,result,registry(value)),/exact head/)
 })
 
 test('composition refuses before work when any gate adapter is absent',()=>{
@@ -67,11 +67,11 @@ test('changed head, evidence, or status invalidates reuse', () => {
 test('matching outer ids cannot conceal tampered preflight input',()=>{
   const source=input(),result=run(source),tampered=structuredClone(result)
   tampered.input.pr=999
-  assert.throws(()=>validateDeliveryPreflight(tampered),/canonical input/)
+  assert.throws(()=>validateDeliveryPreflight(tampered,registry(source)),/canonical input/)
   assert.equal(reuseDeliveryPreflight(tampered,tampered.input,registry(source)),null)
   const identity={policy_version:1,migrations:[],focused_files:[],verification_files:[],claims:{writes:[],reads:[]},global_invalidators:[],migration_order_digest:'0'.repeat(64)}
   const bundle={schema_version:1,bundle_id:sha256(canonicalJson(identity)),identity,metadata:{issue:2728,pr:999,claim:1,base_main_sha:'b'.repeat(40),integration_sha:'a'.repeat(40),review:null,ci:null}}
-  assert.throws(()=>registerDeliveryPreflight(bundle,tampered),/canonical input/)
+  assert.throws(()=>registerDeliveryPreflight(bundle,tampered,registry(source)),/canonical input/)
 })
 
 test('unknown checks and evidence-free success fail closed', () => {
@@ -86,3 +86,5 @@ test('unknown checks and evidence-free success fail closed', () => {
 test('composition stops immediately after the first blocker',()=>{const value=input(),calls=[];const adapters=Object.fromEntries(DELIVERY_CHECKS.map((name,index)=>[name,()=>{calls.push(name);return index===0?{status:'BLOCKED',evidence_id:'blocked'}:value.checks[name]}]));Object.assign(adapters,registry(value));assert.throws(()=>composeDeliveryPreflight({issue:value.issue,pr:value.pr,head_sha:value.head_sha},adapters),/blocked by route/);assert.deepEqual(calls,['route'])})
 
 test('fabricated sidecar or producer registrations fail authoritative readback',()=>{for(const name of ['sidecars','producers']){const value=input();value.checks[name].producer_id='fabricated';assert.throws(()=>runDeliveryPreflight(value,registry(input())),/authoritative registry readback/)}})
+
+test('recomputed caller-controlled registry claims cannot validate or register',()=>{const value=input(),record=run(value),fabricated=structuredClone(record);for(const name of ['sidecars','producers']){const check=fabricated.input.checks[name],registration={evidence_id:check.evidence_id,kind:name,issue:fabricated.input.issue,pr:fabricated.input.pr,head_sha:fabricated.input.head_sha,producer_id:'fabricated-producer',artifact_digest:'f'.repeat(64)};check.producer_id=registration.producer_id;check.artifact_digest=registration.artifact_digest;check.registry_digest=sha256(canonicalJson(registration))}const digest=sha256(canonicalJson(fabricated.input));fabricated.preflight_id=digest;fabricated.input_digest=digest;const identity={policy_version:1,migrations:[],focused_files:[],verification_files:[],claims:{writes:[],reads:[]},global_invalidators:[],migration_order_digest:'0'.repeat(64)},bundle={schema_version:1,bundle_id:sha256(canonicalJson(identity)),identity,metadata:{issue:value.issue,pr:value.pr,claim:1,base_main_sha:'b'.repeat(40),integration_sha:value.head_sha,review:null,ci:null}};assert.throws(()=>validateDeliveryPreflight(fabricated),/trusted sidecar and producer registry reader/);assert.throws(()=>validateDeliveryPreflight(fabricated,registry(value)),/authoritative registry readback/);assert.throws(()=>registerDeliveryPreflight(bundle,fabricated,registry(value)),/authoritative registry readback/)})
