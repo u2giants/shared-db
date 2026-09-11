@@ -1,61 +1,21 @@
 {
   "schema_version": 1,
-  "generation": 5,
+  "generation": 6,
   "work_issue": 2697,
   "work_type": "repo-maintenance",
   "route": "repo-session",
-  "goal": "Make --reclaim-silent-reviewer able to complete by DERIVING its GitHub request count by measurement, the way the assignment and replacement counts in docs/verification/reviewer-assignment-api-budget-2026-08-28.md were derived, rather than by widening REVIEW_OPERATION_REQUEST_LIMIT to fit an observed refusal. Instrument the reclaim path on a wire-attempt fixture, record the measurement in a new dated file under docs/verification/, set that path's own ceiling from the measurement with the derivation cited beside the constant, remove any redundant request the measurement exposes instead of paying for it, gate mutex acquisition on the measured section reserve, and make the refusal name the operation whose budget it is and the derived ceiling for that operation.",
-  "base_sha": "71dca7b3deae7eea2ab0c2e47a320e1291dc0580",
-  "dispatcher": "Codex successor orchestrator #2714",
+  "goal": "Measure and enforce the silent reviewer reclaim request budget without weakening its safety proofs.",
+  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
+  "dispatcher": "Codex direct session",
   "worker": "Codex PR2700 continuation",
   "branch": "claude/fix-2697-reclaim-budget",
   "worktree": "C:/repos/shared-db-worktrees/continue-2700",
-  "allowed_paths": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "file_writes": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
+  "allowed_paths": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md", "docs/verification/reviewer-assignment-api-budget-2026-08-28.md", ".agent/contract.json", ".agent/completion.json"],
+  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md", "docs/verification/reviewer-assignment-api-budget-2026-08-28.md", ".agent/contract.json", ".agent/completion.json"],
   "db_reads": [],
   "db_writes": [],
-  "prohibited_actions": [
-    "Do not widen REVIEW_OPERATION_REQUEST_LIMIT to make the refusal go away; a number raised to fit an observed failure is exactly what issue #2075 forbids",
-    "No migration is authored or applied; this is repository maintenance and touches no database object",
-    "No merge of this pull request by the worker, and never gh pr merge --admin",
-    "Do not weaken, skip, edit or disable any workflow, guard script or required check",
-    "Do not drop the reclaim's in-mutex re-proof of the lease, the PR head, the durable verdict or the activity fingerprint in order to fit a budget",
-    "No licensed or private licensor data in any file, commit message or issue comment; this repository is public",
-    "No database, preview, production or live reclaim; parent alone serializes merge. Governed reviewer assignment and execution are authorized."
-  ],
-  "required_checks": [
-    "node --test scripts/manage-migration-author-lanes.test.mjs",
-    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
-    "git diff --check"
-  ],
-  "assumptions": [
-    "The reclaim path's request count was genuinely never derived: the comment beside REVIEW_OPERATION_REQUEST_LIMIT enumerates slot-2 assignment (23), slot-2 replacement (20), first replacement pre-mutex (9) and post-mutex (11), and no silent-reclaim figure appears in it or in the 2026-08-28 derivation document.",
-    "The measurement can be taken without touching shared state: the existing wire-attempt fixtures count real runGitHubCommand attempts against an in-memory io, which is how the existing figures were derived.",
-    "A ceiling derived for one operation may differ from another operation's ceiling. What issue #2075 forbids is raising a number to fit a failure, not an operation carrying its own written, measured budget.",
-    "The reclaim legitimately costs more than an assignment because it re-proves the lease, the PR state, the activity fingerprint and the durable verdict a second time inside the mutex; that re-proof is the safety property and cannot be traded for budget.",
-    "consumeReviewWireRequest holds back cleanupReserve while the mutex is held (2 with atomicReviewMutexRelease, 8 without), so the derivation must fit the locked non-cleanup section inside limit minus that reserve.",
-    "This pull request touches no database object, so db_reads and db_writes are empty and no migration version, claim or sidecar is involved.",
-    "Successor measurement includes current assignment-specific lease keys and legacy fallback under parallel mode; each resolution retains its own chosen-ref snapshot and re-proves it inside the mutex."
-  ],
-  "stop_conditions": [
-    "The measurement shows the existing 25-request ceiling is genuinely right for this path, in which case the redundancy is fixed instead and no ceiling changes",
-    "A required check proves a real defect in the derivation or the redundancy removal",
-    "Clearing any check would require weakening a guard, a workflow or a required check",
-    "Fitting the budget would require dropping any part of the reclaim's in-mutex re-proof",
-    "The pull request base moves so that the reported files_changed no longer matches Git"
-  ]
+  "prohibited_actions": ["Do not widen the shared review-operation request limit", "Do not remove the in-mutex safety re-proof", "Do not author or apply a database migration", "Do not weaken or bypass a required check"],
+  "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "git diff --check"],
+  "assumptions": ["The operation-specific ceiling is derived from wire-attempt fixtures", "Current and legacy lease-key routes retain their in-mutex safety proof", "This repository-maintenance change touches no database object"],
+  "stop_conditions": ["A required check proves a defect", "Completion would require weakening a safety guard", "The pull request base moves again before merge"]
 }

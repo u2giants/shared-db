@@ -75,7 +75,7 @@ The reclaim deletes a live lease on the strength of *absence* — no verdict, no
 ## What is now enforced
 
 ```js
-export const REVIEW_SILENT_RECLAIM_REQUEST_LIMIT = 28, REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE = 14
+export const REVIEW_SILENT_RECLAIM_REQUEST_LIMIT = 30, REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE = 15
 ```
 
 - The ceiling equals the measured total exactly — no undeclared headroom, asserted by the fixture.

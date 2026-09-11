@@ -4,40 +4,17 @@
   "outcome": "ready-for-merge",
   "pr": 2700,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2697/5",
-  "contract_sha256": "0e3cfeff5add41ecf7a14623e48e07fe4717bb7f4052702741e67291040f34a7",
-  "head_sha": "1c1577f7543ebddeaec270dfe1b880f539c0cf6d",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
-    "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
-  ],
+  "contract_ref": "refs/db-contracts/2697/6",
+  "contract_sha256": "PENDING",
+  "head_sha": "PENDING",
+  "files_changed": ["docs/verification/reviewer-assignment-api-budget-2026-08-28.md", "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
-      "exit_code": 0,
-      "evidence": "509 pass, 0 fail, 0 skipped; current keys measured28 and legacy parallel fallback30, pre/held15 each."
-    },
-    {
-      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
-      "exit_code": 0,
-      "evidence": "Contract is valid; generation5 published and read back."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
-    }
+    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "509 pass, 0 fail, 0 skipped; current keys measured 28 and legacy fallback 30."},
+    {"command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Contract generation 6 is valid and published."},
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
-  "assumptions_resolved": [
-    "Fresh main includes assignment-specific lease resolution. Removed duplicate selected-ref read using one snapshot per resolution; in-mutex proof remains fresh.",
-    "Measured current keys28 and legacy parallel fallback30; dedicated ceiling30/reserve15. Shared ceiling25 unchanged.",
-    "All main tests retained; old PR ancestry retained in merge commit."
-  ],
+  "assumptions_resolved": ["The operation has its own measured ceiling of 30 and mutex reserve of 15.", "The shared ceiling of 25 remains unchanged.", "The redundant request was removed without removing the in-mutex proof."],
   "stop_conditions_hit": []
 }

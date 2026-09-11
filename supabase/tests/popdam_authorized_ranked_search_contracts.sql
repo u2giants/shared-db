@@ -55,11 +55,12 @@ begin
   -- property- or customer-leading arm from passing while the DAM property and
   -- customer libraries silently return nothing.
   v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
-  if v_arms <> 6 then
-    raise exception 'effective identity predicates must keep seven UNION arms, found % UNION ALLs', v_arms;
+  if v_arms <> 7 then
+    raise exception 'effective predicates must keep eight UNION arms, found % UNION ALLs', v_arms;
   end if;
   foreach v_pin in array array[
-    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null union all',
+    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null union all',
+    'select distinct e.asset_id from public.asset_effective_tags e where nullif(p_filters ->> ''tagfilter'', '''') is not null and e.tag = p_filters ->> ''tagfilter''',
     'where nullif(p_filters ->> ''licensorid'', '''') is not null and a.style_group_id is null and a.licensor_id = (p_filters ->> ''licensorid'')::uuid',
     'from public.style_groups sg join public.assets a on a.style_group_id = sg.id where nullif(p_filters ->> ''licensorid'', '''') is not null and sg.licensor_id = (p_filters ->> ''licensorid'')::uuid',
     'and nullif(p_filters ->> ''propertyid'', '''') is not null and a.style_group_id is null and a.property_id = (p_filters ->> ''propertyid'')::uuid',
