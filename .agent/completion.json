@@ -1,59 +1,51 @@
 {
   "schema_version": 1,
-  "work_issue": 2662,
+  "work_issue": 2744,
   "outcome": "ready-for-merge",
-  "pr": 2764,
+  "pr": 2793,
   "migration_versions": [
-    "20260911124746"
+    "20260911170526"
   ],
-  "contract_ref": "refs/db-contracts/2662/6",
-  "contract_sha256": "d147d233f14733d214884880d2bbe10fac7dcc0703b00ba75a080a43ec6dcde4",
-  "head_sha": "439cc01bc1f07a5b5a2fa8fb4073e663c364ef23",
+  "contract_ref": "refs/db-contracts/2744/1",
+  "contract_sha256": "fc5697c5574d3afdb9e34fa1d47fb218a800f4b4479dd845a75b14686b10ba76",
+  "head_sha": "d2aa81072ca0fb983bd922359bf8851e42f83e57",
   "files_changed": [
-    "supabase/migrations/20260911124746_crm_definer_views_caller_gate.sql",
-    "supabase/tests/crm_definer_views_caller_gate_contracts.sql"
+    "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
   "db_reads": [
-    "table core.customer",
-    "table crm.ingested_domain",
-    "table plm.customer_import",
-    "table app.app_access",
-    "table app.profile",
-    "view api.crm_contact_list",
-    "table core.contact",
-    "table public.sku_files_used",
-    "table public.style_guide_files",
-    "table public.style_groups"
+    "function api.db_data_admin_scraped_properties",
+    "table plm.dcp_asset",
+    "table plm.lucasfilm_dcp_asset",
+    "table plm.dcp_style_guide",
+    "table plm.lucasfilm_dcp_style_guide",
+    "table plm.dcp_asset_property_observation",
+    "table plm.lucasfilm_dcp_asset_property_observation"
   ],
   "db_writes": [
-    "view api.crm_customer_list",
-    "view api.crm_account_list",
-    "view api.crm_ingested_domain_list",
-    "view api.crm_contact_segment_list",
-    "view api.crm_contact_segment_counts",
-    "view public.sg_archive_usage"
+    "function api.db_data_admin_scraped_properties"
   ],
   "checks": [
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on 9b02ad48..439cc01b."
+      "evidence": "No whitespace errors on 5761bc5e..d2aa8107."
     },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed on 439cc01b."
+      "evidence": "Static checks passed on d2aa8107; scripts/test_migration_derivation.py 44 tests OK after adding derived-from 20260911061539."
     },
     {
       "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on commit a4848fde (run 34617412771, job 103322678124), whose supabase files are byte-identical to implementation commit 439cc01b; it applied every migration, including the base-table policy and contact-gate assertions, and ran supabase/tests/crm_definer_views_caller_gate_contracts.sql with non-zero contact and archive fixtures as the authenticated role."
+      "evidence": "Runs on this PR head in GitHub Actions job \"supabase/tests against an ephemeral database\"; the first attempt on f40699f5 stopped before any test with the CI INFRASTRUCTURE psql-install stall and is re-run on this head."
     }
   ],
   "assumptions_resolved": [
-    "App consumer search across popcrm-web, popdam3, poppim-web, dflow_plm and edge functions found only popcrm-web authenticated browser reads of the changed views; no service-role consumer.",
-    "Read-only preview baseline: CRM callers with and without a role read 862/862/96 customer/account/domain rows; a DAM-only caller also read 862/862/96, which is the leak closed here."
+    "Production plm.dcp_asset, plm.lucasfilm_dcp_asset, plm.dcp_style_guide and plm.lucasfilm_dcp_style_guide all have PRIMARY KEY (id), so resolving style guides from page assets yields the same set.",
+    "Production body md5 b63154a297ae649811cde7569657a146 equals 20260911061539; read-only parity on production: default page md5 530e12902785646a59c03b9c915d496c (1,067,395 bytes), Bambi and Cars 2 identical between current and new body."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Implementation 439cc01b on main 9b02ad48 (supabase files identical to a4848fde) addresses the REVISE on 4a262c06 (refs/db-review-verdicts/2662-2764-4a262c06b52ea83e9912e4a8edf8db4464aec7ca): base-table grant and open-policy guard for sg_archive_usage, definer and gate guard on api.crm_contact_list, OR rejection on gated view text, non-vacuous contact and archive fixtures. Contract generation 6 declares the added reads. Diff check, static SQL checks and the hosted ephemeral suite all exit 0."
+  "evidence_note": "Implementation d2aa8107 on main 5761bc5e. Read-only production EXPLAIN ANALYZE: execution 24.9s to 4.7s, planning 1.26s to 42ms, no temp spill; default page 3.7-6.0s versus 12.4-33.7s. No work_mem, statement_timeout, role or global setting changed."
 }
