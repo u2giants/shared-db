@@ -13,6 +13,34 @@ function assertions(value,label='required assertions'){
   return normalized
 }
 
+function exactPair(pair,{digest,record}){
+  return pair?.digest===digest&&canonicalJson(pair.record)===canonicalJson(record)&&pair.acknowledgement?.reroute_id===digest&&pair.acknowledgement?.replacement_id===record.replacement_id&&pair.acknowledgement?.status==='created'
+}
+
+export function createDurableStartRerouteAdapter(durable){
+  for(const name of ['withMutex','readPair','compareCreatePair','readLive','createAccepted','readAccepted'])if(typeof durable?.[name]!=='function')throw new StartRerouteError(`durable reroute adapter requires ${name}`)
+  return {
+    compareCreateRerouteAndReplacement(request){
+      return durable.withMutex(()=>{
+        const existing=durable.readPair(request.ref)
+        if(existing){
+          if(!exactPair(existing,request))throw new StartRerouteError(`a different ${request.record.kind} replacement already owns this original attempt`)
+          return {...existing.acknowledgement,status:'existing'}
+        }
+        request.validateLive(durable.readLive(request.record.kind,request.record.original_id))
+        const pair={digest:request.digest,record:request.record,acknowledgement:{status:'created',reroute_id:request.digest,replacement_id:request.record.replacement_id}}
+        if(durable.compareCreatePair(request.ref,null,pair))return pair.acknowledgement
+        const winner=durable.readPair(request.ref)
+        if(!exactPair(winner,request))throw new StartRerouteError(`a different ${request.record.kind} replacement won the atomic reservation`)
+        return {...winner.acknowledgement,status:'existing'}
+      })
+    },
+    readReroute(ref){const pair=durable.readPair(ref);return pair?{digest:pair.digest,record:pair.record}:null},
+    createAccepted:(...args)=>durable.createAccepted?.(...args),
+    readAccepted:(...args)=>durable.readAccepted?.(...args),
+  }
+}
+
 export function reviewerStartDecision(assignment,{now,provider_state,lifecycle=[]}){
   if(!assignment?.id||!SHA.test(String(assignment.head_sha??'')))throw new StartRerouteError('exact assignment and head are required')
   const events=lifecycle.filter((e)=>e.assignment_id===assignment.id),started=events.find((e)=>['provider_launched','provider_contacted','review_started'].includes(e.type))
