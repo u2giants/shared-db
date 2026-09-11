@@ -10,9 +10,11 @@
   "contract_sha256": "6c6b2c409ce2beac5af5ce4fbb150180af214442604f4c1298e9063eb41a3cb2",
   "head_sha": "5fff9483cd00113688b9a88029925910db535df4",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql",
     "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql",
     "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
   ],
   "db_reads": [
