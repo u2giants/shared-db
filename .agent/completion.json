@@ -5,8 +5,8 @@
   "pr": 2780,
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2781/3",
-  "contract_sha256": "961567c382dcbc67fcb10da0b868cfbb734425a1d8c60dec871ec1e684bfb470",
-  "head_sha": "922c4c531d34d4e38a88f0407110cf4323b35944",
+  "contract_sha256": "d48107e78231fdda23b20d5f719f20d095a3fd7ebefdcead0c1b8a2a3f83acbe",
+  "head_sha": "0e83160b63692077374f6a019d68b99e5c6341a1",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -30,27 +30,27 @@
     {
       "command": "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 29, pass 29, fail 0, skipped 0 at 922c4c53 (merge of origin/main 2662aa1a): merge-only refresh ok, migration edit refused, .agent-only change ok, independent main move ok, overlapping file, version collision and conflict refused."
+      "evidence": "tests 29, pass 29, fail 0, skipped 0 at 0e83160b (merge of origin/main 9b02ad48): merge-only refresh ok, migration edit refused, .agent-only change ok, independent main move ok, overlapping file, version collision and conflict refused."
     },
     {
       "command": "node --test scripts/check-exact-head-approval.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 50, pass 50, fail 0, skipped 0 at 922c4c53 (merge of origin/main 2662aa1a), including approval carried across an equivalent refresh and refused when the diff changed."
+      "evidence": "tests 50, pass 50, fail 0, skipped 0 at 0e83160b (merge of origin/main 9b02ad48), including approval carried across an equivalent refresh and refused when the diff changed."
     },
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 517, pass 517, fail 0, skipped 0 at 922c4c53 (merge of origin/main 2662aa1a), including durable approval carried to an equivalent later head and refused otherwise."
+      "evidence": "tests 519, pass 519, fail 0, skipped 0 at 0e83160b (merge of origin/main 9b02ad48), including durable approval carried to an equivalent later head and refused otherwise."
     },
     {
       "command": "python -m pytest scripts/test_production_business_risk_gate.py",
       "exit_code": 0,
-      "evidence": "138 passed, 0 failed, 142 subtests passed at 922c4c53 (merge of origin/main 2662aa1a); the new unrelated-sidecar test passes."
+      "evidence": "138 passed, 0 failed, 142 subtests passed at 0e83160b (merge of origin/main 9b02ad48); the new unrelated-sidecar test passes."
     },
     {
       "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 6, pass 6, fail 0, skipped 0 at 922c4c53 (merge of origin/main 2662aa1a); the invalidator inventory now covers the manager import closure including scripts/lib/pr-content-equivalence.mjs."
+      "evidence": "tests 6, pass 6, fail 0, skipped 0 at 0e83160b (merge of origin/main 9b02ad48); the invalidator inventory now covers the manager import closure including scripts/lib/pr-content-equivalence.mjs."
     }
   ],
   "assumptions_resolved": [

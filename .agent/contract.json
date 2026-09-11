@@ -5,7 +5,7 @@
   "work_type": "tooling",
   "route": "shared-db-orchestrator",
   "goal": "Keep reviewer approvals, guarded-merge freshness and production preview proofs valid across main refreshes that leave the pull request's own change untouched, while still refusing any overlap, conflict, version collision or change of the pull request's own diff.",
-  "base_sha": "2662aa1a114821e9f8917b3ec3fdfe3fdc10b636",
+  "base_sha": "9b02ad489d09427fc0556248c0a85b7cc78807ff",
   "dispatcher": "Claude shared-db orchestrator marker2758",
   "worker": "Claude approval-carry-forward worker",
   "branch": "claude/approval-carry-over-main-refresh",
