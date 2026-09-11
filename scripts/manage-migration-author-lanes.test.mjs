@@ -489,7 +489,7 @@ test('legacy claims count toward the author-lane cap and always protect objects'
   // Asserted against the constant, not a literal, so the cap can move without
   // this test quietly checking the wrong number -- but the constant itself is
   // pinned, so a change to it is a deliberate edit here.
-  assert.equal(MAX_AUTHOR_LANES, 8)
+  assert.equal(MAX_AUTHOR_LANES, 24)
   const full = Array.from({length:MAX_AUTHOR_LANES},(_,i)=>legacy(i+1,`table core.t${i}`))
   assert.doesNotThrow(() => assertLaneAvailable(full.slice(0,MAX_AUTHOR_LANES-1), ['table core.d'], NOW))
   assert.throws(() => assertLaneAvailable(full, ['table core.d'], NOW), new RegExp(`all ${MAX_AUTHOR_LANES}`))

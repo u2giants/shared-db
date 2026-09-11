@@ -44,7 +44,8 @@ import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './hi
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
-// eight on 2026-08-28 (owner instructions).
+// eight on 2026-08-28, and from eight to twenty-four on 2026-09-11 (owner
+// instructions relayed on marker #2758: ignore concurrency limits).
 //
 // WHAT THE NUMBER DOES AND DOES NOT DO. It is a throughput dial, not a safety
 // dial. Collision safety comes from four mechanisms that do not read this
@@ -62,7 +63,7 @@ export const REPO = 'u2giants/shared-db'
 // leaving five; the cap is unaffected -- it bounds authors, not reviewers. Ref writes are ~6/hour per lane, so eight lanes
 // stay far inside GitHub's limits and the rate-limit caveat recorded in
 // plan_multi_agent_database_coordination_hardening.md is satisfied at this cap.
-export const MAX_AUTHOR_LANES = 8
+export const MAX_AUTHOR_LANES = 24
 export const AUTHOR_CAPACITY_STATES = Object.freeze(['active', 'relinquished', 'expired-unconfirmed'])
 export const DEFAULT_LEASE_HOURS = 12
 export const MUTEX_STALE_AFTER_MS = 2 * 60 * 1000
