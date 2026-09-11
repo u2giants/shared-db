@@ -1,52 +1,54 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
+  "work_issue": 2744,
   "outcome": "ready-for-merge",
-  "pr": 2746,
+  "pr": 2793,
   "migration_versions": [
-    "20260911212849"
+    "20260911170526"
   ],
-  "contract_ref": "refs/db-contracts/2478/4",
-  "contract_sha256": "433e32594d69874c2cae511acec319c749d96af1334a8fbae6581a8f792f7d84",
-  "head_sha": "1c65b304e07b2637147cdba18b2ed4205b4bb851",
+  "contract_ref": "refs/db-contracts/2744/6",
+  "contract_sha256": "af4910f98daa536a790080e6ba2603abc17586745ce4f7059b08907873583148",
+  "head_sha": "8cd2e015bb4fa3fc96c175df965daf2a427184d8",
   "files_changed": [
-    "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "function api.db_data_admin_scraped_properties",
+    "table plm.dcp_asset",
+    "table plm.lucasfilm_dcp_asset",
+    "table plm.dcp_style_guide",
+    "table plm.lucasfilm_dcp_style_guide",
+    "table plm.dcp_asset_property_observation",
+    "table plm.lucasfilm_dcp_asset_property_observation"
+  ],
   "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
+    "function api.db_data_admin_scraped_properties"
   ],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
-    },
-    {
-      "command": "local PostgreSQL helper parity contracts",
-      "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
-    },
-    {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors on 25c4ca3b..db2b97e0."
     },
     {
-      "command": "python -m unittest scripts.test_migration_derivation",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
+      "evidence": "Static checks passed; scripts/test_migration_derivation.py 44 tests OK with derived-from 20260911061539 on db2b97e0."
+    },
+    {
+      "command": "hosted ephemeral migration regression suite",
+      "exit_code": 0,
+      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on 34b872e6 (run 34630156916, job 103364730068), whose supabase files are identical to implementation db2b97e0; it applied every migration and ran scraped_properties_page_asset_context_contracts.sql, db_data_admin_scraped_properties.sql, _opa_groups.sql and _source_purpose.sql."
     }
   ],
   "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
+    "Production plm.dcp_asset, plm.lucasfilm_dcp_asset, plm.dcp_style_guide and plm.lucasfilm_dcp_style_guide all have PRIMARY KEY (id), so resolving style guides from page assets yields the same set.",
+    "Production body md5 b63154a297ae649811cde7569657a146 equals 20260911061539; read-only parity on production: default page md5 530e12902785646a59c03b9c915d496c (1,067,395 bytes), Bambi and Cars 2 identical between current and new body."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Implementation db2b97e0 contains main 25c4ca3b. Read-only production EXPLAIN ANALYZE: execution 24.9s to 4.7s, planning 1.26s to 42ms, no temp spill; default page 3.7-6.0s versus 12.4-33.7s; output md5 identical. No work_mem, statement_timeout, role or global setting changed. Contract generation 2 adds the OPA groups test path."
 }
