@@ -2170,37 +2170,49 @@ export function recordReviewVerdict(options,io=githubIo){
   // Prefer the assignment-keyed lease introduced by #2694.  The legacy
   // one-provider ref remains valid only for reviews created before this
   // cutover, so an in-flight old review can still finish without being moved.
+  // Prefer the assignment-keyed lease introduced by #2694.  The legacy
+  // one-provider ref remains valid only for reviews created before this
+  // cutover, so an in-flight old review can still finish without being moved.
   const parallelActiveRef=reviewLeaseRefForAssignment({...assignment,slot},Boolean(io.requiresExactReviewHeadSha))
   const parallelLeaseSha=io.readRef(parallelActiveRef)
   const legacyActiveRef=reviewActiveRef(assignment.reviewer)
   const holdsParallel=parallelLeaseSha===assignmentSha
-  const activeRef=holdsParallel?parallelActiveRef:legacyActiveRef
   const legacyLeaseSha=holdsParallel?null:io.readRef(legacyActiveRef)
+  const holdsLegacy=!holdsParallel&&legacyLeaseSha===assignmentSha
   const activeLeaseSha=holdsParallel?parallelLeaseSha:legacyLeaseSha
-  if(activeLeaseSha!==assignmentSha){
-    // #2694 review (slot 2, medium finding 8). The cause used to be built from
-    // the LEGACY ref's contents unconditionally. Post-cutover the lease that
-    // actually stands for this reviewer lives under the v2 name, so when the v2
-    // ref held a different assignment and no legacy ref existed at all, the
-    // refusal said "holds no active lease at all" -- the exact wrong-cause
-    // report issue #2311 was opened to end. Report whichever ref actually holds
-    // something, and name that ref.
-    const causeRef=parallelLeaseSha?parallelActiveRef:legacyActiveRef
-    const causeSha=parallelLeaseSha??legacyLeaseSha
-    throw new LaneError(`reviewer does not hold the exact active lease; late or conflicting verdict refused${reviewActiveLeaseCause(assignment.reviewer,causeSha,{issue,pr,headSha},io,causeRef)}`)
-  }
+  // The ref this verdict hands its lease back through. When NEITHER name holds
+  // the lease any more -- the idempotent re-run below, whose first run already
+  // released it -- the v2 name is the one this assignment's lease occupies, so
+  // that is what is reported and what the (no-op) release is attempted against.
+  // Falling back to the LEGACY provider-keyed name here would aim a release at a
+  // ref a live SIBLING job for the same provider may be holding.
+  const activeRef=holdsParallel||!holdsLegacy?parallelActiveRef:legacyActiveRef
   // Every successful exit goes through here, so a recorded verdict ALWAYS hands
   // its lease back -- including the idempotent re-run over a standing artifact,
   // which is what repairs a release that failed on an earlier attempt.
+  // `releaseRecordedVerdictLease` is compare-and-delete: a ref that does not
+  // hold THIS assignment SHA is left exactly as it is.
   const finish=(validated)=>({...validated,lease_ref:activeRef,lease_released:releaseRecordedVerdictLease(activeRef,assignmentSha,io)})
   const live=io.getPr(pr)
   if(String(live?.state??'').toLowerCase()!=='open'||String(live?.head?.sha??'').toLowerCase()!==headSha)throw new LaneError('review target is no longer the exact open PR head')
-  try{assertFindingsRefForPr(findingsRef,pr)}catch(error){throw new LaneError(error.message)}
-  const findingsBody=io.readFindings(findingsRef)
-  if(!String(findingsBody??'').trim())throw new LaneError('durable reviewer findings are unreadable or empty')
-  const record={verdict,head_sha:headSha,issue,pr,slot,reviewer:assignment.reviewer,assignment_sha:assignmentSha,findings_digest:findingsDigest(findingsBody),findings_ref:findingsRef}
   const ref=verdictRef({issue,pr,headSha,slot,replacementSequence})
   const existing=io.readRef(ref)
+  // #2710. IDEMPOTENCY OUTLIVES THE LEASE, SO THE STANDING ARTIFACT IS READ
+  // FIRST. A verdict releases its own lease on the way out (see
+  // `releaseRecordedVerdictLease`), and `run-governed-review.mjs` re-runs the
+  // whole recording with no existing-verdict pre-check. With the lease gate
+  // ahead of this read, the SECOND identical run of a review that had already
+  // succeeded was refused as a "late or conflicting verdict" for a verdict whose
+  // durable artifact was sitting right there -- the release made the operation
+  // non-idempotent. The artifact is the durable record; the lease is only the
+  // concurrency token that produced it, so an existing artifact answers first.
+  //
+  // This does NOT weaken the late-or-conflicting refusal. The artifact carries
+  // its own `assignment_sha`, and `validateVerdictArtifact` below refuses it
+  // unless that SHA is exactly the assignment this request resolved (and the
+  // reviewer, ref tuple, parentage and findings digest all agree). A verdict
+  // from a different or superseded assignment is still refused here, and a
+  // request with NO standing artifact still falls through to the lease gate.
   if(existing){
     // #2464. An artifact that ALREADY EXISTS is validated against ITS OWN
     // findings comment, never against the comment this round just posted. The
@@ -2217,6 +2229,22 @@ export function recordReviewVerdict(options,io=githubIo){
     if(validated.verdict!==verdict)throw new LaneError('a different create-only verdict already exists')
     return finish(validated)
   }
+  if(activeLeaseSha!==assignmentSha){
+    // #2694 review (slot 2, medium finding 8). The cause used to be built from
+    // the LEGACY ref's contents unconditionally. Post-cutover the lease that
+    // actually stands for this reviewer lives under the v2 name, so when the v2
+    // ref held a different assignment and no legacy ref existed at all, the
+    // refusal said "holds no active lease at all" -- the exact wrong-cause
+    // report issue #2311 was opened to end. Report whichever ref actually holds
+    // something, and name that ref.
+    const causeRef=parallelLeaseSha?parallelActiveRef:legacyActiveRef
+    const causeSha=parallelLeaseSha??legacyLeaseSha
+    throw new LaneError(`reviewer does not hold the exact active lease; late or conflicting verdict refused${reviewActiveLeaseCause(assignment.reviewer,causeSha,{issue,pr,headSha},io,causeRef)}`)
+  }
+  try{assertFindingsRefForPr(findingsRef,pr)}catch(error){throw new LaneError(error.message)}
+  const findingsBody=io.readFindings(findingsRef)
+  if(!String(findingsBody??'').trim())throw new LaneError('durable reviewer findings are unreadable or empty')
+  const record={verdict,head_sha:headSha,issue,pr,slot,reviewer:assignment.reviewer,assignment_sha:assignmentSha,findings_digest:findingsDigest(findingsBody),findings_ref:findingsRef}
   const sha=io.makeReviewVerdictCommit(formatVerdictMessage(record),assignmentSha)
   try{if(!io.createRef(ref,sha))throw new Error('create returned false')}catch(error){
     // #2464 (muse-spark, PR #2468). A FAILED create does not mean nothing was

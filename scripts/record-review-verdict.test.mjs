@@ -10,7 +10,13 @@ function ioFixture(who=reviewer){
   let seq=12
   return {refs,commits,readRef:(ref)=>refs.get(ref)??null,getCommit:(sha)=>commits.get(sha),getPr:()=>({state:'open',head:{sha:headSha}}),readFindings:(url)=>url===findingsRef?findings:null,
     makeReviewVerdictCommit(message,parent){const sha=(seq++).toString(16).padStart(40,'0');commits.set(sha,{message,parents:[{sha:parent}]});return sha},
-    createRef(ref,sha){if(refs.has(ref))return false;refs.set(ref,sha);return true}}
+    createRef(ref,sha){if(refs.has(ref))return false;refs.set(ref,sha);return true},
+    // #2710. THE PRODUCTION IO DELETES. Without this method the lease release a
+    // recorded verdict performs silently no-opped here, so the idempotency test
+    // below re-ran against a lease that had never actually been handed back and
+    // proved nothing about the real shape. `githubIo` has `deleteRef`, so the
+    // fixture must too.
+    deleteRef(ref){return refs.delete(ref)}}
 }
 test('recording is create-only, bound to the assignment parent, and idempotent',()=>{
   const io=ioFixture(),request={issue,pr,headSha,verdict:'APPROVE',findingsRef}

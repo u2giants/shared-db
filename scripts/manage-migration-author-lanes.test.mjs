@@ -2125,6 +2125,43 @@ test('release frees a terminally failed lease when every reviewer slot is full',
   assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/already released/,'release evidence is create-only and retry-safe')
 })
 
+// #2694 round 2, and the regression the round-1 code did NOT have. The
+// already-released retry used to answer "is a lease still present?" by reading
+// ONE ref name and testing it for non-emptiness. Under the one-provider ref name
+// that question cannot tell THIS job's lease from a completely unrelated SIBLING
+// job the same provider is running: the moment grok-4.6 picked up any other
+// work, an honest retry of a release that had already succeeded was answered
+// with "reconciliation requires manual audit" -- a false corruption alarm that
+// sends an operator hand-editing refs a live job is using. The retry now PROVES
+// a candidate ref holds this exact assignment tuple before treating it as this
+// job's outstanding lease.
+//
+// RED/GREEN: replace `leaseRefHoldsAssignment(...)` in the already-released
+// branch of `releaseFailedReviewer` with the round-1 `io.readRef(ref)!==null`
+// and this test fails on the manual-audit refusal instead.
+test('a release retry does not mistake a live sibling job for the outstanding lease of this job (#2694)',()=>{
+  const io=failedReviewIo()
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  const released=releaseFailedReviewer(replacementRequest,io)
+  assert.equal(released.reviewer,'grok-4.6')
+  const leaseRef=reviewActiveRef('grok-4.6')
+  assert.equal(io.refs.get(leaseRef)??null,null,'the released job hands its own lease back')
+  // The SAME provider now holds a lease for a DIFFERENT job. Nothing about this
+  // job changed: its release evidence is still immutable and still complete.
+  const siblingSha=io.makeOwnerCommit('db-coordination reviewer-cursor sequence=7 reviewer=grok-4.6 issue=4242 pr=4343 head=cafe000000000000000000000000000000000000 slot=1')
+  io.refs.set(leaseRef,siblingSha)
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/already released/,'the sibling lease must not be read as the outstanding lease of this job')
+  assert.equal(io.refs.get(leaseRef),siblingSha,'the lease of the sibling job is left exactly as it was')
+  // POSITIVE CONTROL: when the ref really does hold THIS job's lease again, the
+  // manual-audit refusal still fires, so the check above is not simply disabled.
+  const ownSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=grok-4.6 issue=${failedReview.issue} pr=${failedReview.pr} head=${failedReview.headSha} slot=1`)
+  io.refs.set(leaseRef,ownSha)
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/reconciliation requires manual audit/)
+})
+
 test('terminal release resolves the historical unsuffixed first replacement record',()=>{
   const io=failedReviewIo(),reviewer='glm-5.3',sequence=2,base=`${REVIEW_REPLACEMENT_REF_PREFIX}/${failedReview.issue}-${failedReview.pr}-${failedReview.headSha}`
   const sha=io.makeOwnerCommit(`db-coordination reviewer-failure-replacement sequence=${sequence} reviewer=${reviewer} issue=${failedReview.issue} pr=${failedReview.pr} head=${failedReview.headSha} failed-sequence=1 prior-sequence=1 failure-ref=self failed-reviewer=grok-4.6 code=provider_unavailable verdict=none artifact=none`)
