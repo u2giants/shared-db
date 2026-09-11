@@ -1,18 +1,20 @@
 {
   "schema_version": 1,
-  "work_issue": 2766,
+  "work_issue": 2775,
   "outcome": "ready-for-merge",
-  "pr": 2767,
+  "pr": 2777,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2766/4",
-  "contract_sha256": "a96e23951e428dac5b67e408a9a379749d4d7ec73e31e351c05596cc53fbfd07",
-  "head_sha": "d9ded06b779df6847c934f6d3c23a27bb42229cd",
+  "contract_ref": "refs/db-contracts/2775/1",
+  "contract_sha256": "dfd0d4af04f62b352230a526c17c486da1a6f76ad78a635023eefee13d63a9f7",
+  "head_sha": "42e5d72e71b0be6061a16f96597e444f58690d70",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
+    "AGENTS.md",
     "docs/agents/section-4-anti-collision-rules.md",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/orchestrator-flow/capacity-state.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -39,8 +41,8 @@
     }
   ],
   "assumptions_resolved": [
-    "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
+    "Owner ruling on marker 2758 removes the lane cap outright; no replacement number was introduced."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Muse REVISE on 5ecafd35 addressed in 451575a5 (stale eight-lane wording, non-mutex zero-wait test). Ready for exact-head review, required CI, and guarded merge."
+  "evidence_note": "Stacked on #2767 (b729dd3b). MAX_AUTHOR_LANES and all capacity refusals deleted; collision locks and version reservations unchanged. Ready for exact-head review, required CI, and guarded merge after #2767 lands."
 }
