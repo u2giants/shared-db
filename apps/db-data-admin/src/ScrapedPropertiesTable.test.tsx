@@ -89,6 +89,26 @@ describe('ScrapedPropertiesTable', () => {
     await waitFor(() => expect(rpc).toHaveBeenLastCalledWith('db_data_admin_scraped_source_inventory', expect.objectContaining({ p_entity_kind: 'character' })))
   })
 
+  it('does not let a slow prior tab replace the selected tab', async () => {
+    let resolveProperties!: (value: unknown) => void
+    let resolveCharacters!: (value: unknown) => void
+    const propertyResponse = new Promise(resolve => { resolveProperties = resolve })
+    const characterResponse = new Promise(resolve => { resolveCharacters = resolve })
+    const rpc = vi.fn((_name: string, args: { p_entity_kind: ScrapedInventoryKind }) => (
+      args.p_entity_kind === 'property' ? propertyResponse : characterResponse
+    ))
+    render(<ScrapedPropertiesTable client={{ rpc } as unknown as ApiClient} />)
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(1))
+    fireEvent.click(screen.getByRole('button', { name: 'Characters' }))
+    await waitFor(() => expect(rpc).toHaveBeenCalledTimes(2))
+    resolveCharacters({ data: { rows: [row('character', 'Disney', 'Creative', 'character')], next_cursor: null }, error: null })
+    await waitFor(() => expect(screen.getByText('1 of 1 scraped characters')).toBeInTheDocument())
+    expect(screen.getByRole('heading', { name: 'Disney' })).toBeInTheDocument()
+    resolveProperties({ data: { rows: [row('property', 'Marvel')], next_cursor: null }, error: null })
+    await waitFor(() => expect(screen.queryByRole('heading', { name: 'Marvel' })).not.toBeInTheDocument())
+    expect(screen.getByText('1 of 1 scraped characters')).toBeInTheDocument()
+  })
+
   it('shows a scoped access denial', async () => {
     const client = { rpc: async () => ({ data: null, error: new Error('licensing manager access required') }) } as unknown as ApiClient
     render(<ScrapedPropertiesTable client={client} />)

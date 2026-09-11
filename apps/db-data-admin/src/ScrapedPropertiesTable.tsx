@@ -1,6 +1,6 @@
 import { RevoGrid, Template, type ColumnRegular } from '@revolist/react-datagrid'
 import { RefreshCw, Search } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { FilterHeader } from './FilterHeader'
 import {
   groupScrapedInventory,
@@ -70,15 +70,24 @@ export function ScrapedPropertiesTable({ client }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [denied, setDenied] = useState(false)
   const [search, setSearch] = useState('')
+  const requestId = useRef(0)
 
   const load = useCallback(async () => {
+    const currentRequest = ++requestId.current
     setLoading(true); setError(null); setDenied(false)
-    try { setRows(await loadScrapedInventory(client, entityKind)) }
+    setRows([])
+    try {
+      const nextRows = await loadScrapedInventory(client, entityKind)
+      if (requestId.current === currentRequest) setRows(nextRows)
+    }
     catch (cause) {
+      if (requestId.current !== currentRequest) return
       const message = cause instanceof Error ? cause.message : (cause && typeof cause === 'object' && 'message' in cause ? String(cause.message) : '')
       if (/permission|licensing|access/i.test(message)) setDenied(true)
       else setError(message || 'Scraped source inventory could not be loaded.')
-    } finally { setLoading(false) }
+    } finally {
+      if (requestId.current === currentRequest) setLoading(false)
+    }
   }, [client, entityKind])
 
   // eslint-disable-next-line react-hooks/set-state-in-effect
@@ -101,7 +110,7 @@ export function ScrapedPropertiesTable({ client }: Props) {
 
   return <section className="workspace scraped-properties">
     <nav className="subtabs" aria-label="Scraped data type">
-      {inventoryTabs.map(item => <button key={item.kind} className={entityKind === item.kind ? 'active' : ''} onClick={() => { setSearch(''); setEntityKind(item.kind) }}>{item.label}</button>)}
+      {inventoryTabs.map(item => <button key={item.kind} className={entityKind === item.kind ? 'active' : ''} onClick={() => { setSearch(''); setRows([]); setEntityKind(item.kind) }}>{item.label}</button>)}
     </nav>
     <div className="controls">
       <label className="search"><Search aria-hidden="true" /><span className="sr-only">Search scraped {tab.itemLabel}</span><input placeholder={`Search scraped ${tab.itemLabel}`} value={search} onChange={event => setSearch(event.target.value)} /></label>
@@ -112,8 +121,8 @@ export function ScrapedPropertiesTable({ client }: Props) {
     <div aria-busy={loading}>
       {groups.map(group => <section key={group.key} className="scraped-property-group" aria-labelledby={`scraped-${entityKind}-${group.key}`}>
         <h2 id={`scraped-${entityKind}-${group.key}`}>{group.name}</h2>
-        <InventorySection id={`scraped-${entityKind}-${group.key}-creative`} title="Creative" rows={group.creative} columns={columns} itemLabel={tab.itemLabel} />
-        <InventorySection id={`scraped-${entityKind}-${group.key}-submissions`} title="Submissions" rows={group.submissions} columns={columns} itemLabel={tab.itemLabel} />
+        <InventorySection key={`${entityKind}-${group.key}-creative`} id={`scraped-${entityKind}-${group.key}-creative`} title="Creative" rows={group.creative} columns={columns} itemLabel={tab.itemLabel} />
+        <InventorySection key={`${entityKind}-${group.key}-submissions`} id={`scraped-${entityKind}-${group.key}-submissions`} title="Submissions" rows={group.submissions} columns={columns} itemLabel={tab.itemLabel} />
       </section>)}
       {loading && <div className="grid-loading">Loading…</div>}
       {!loading && !error && groups.length === 0 && <p className="empty-inventory">No scraped {tab.itemLabel} match this search.</p>}

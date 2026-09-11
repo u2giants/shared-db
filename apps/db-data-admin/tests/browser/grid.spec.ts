@@ -354,6 +354,17 @@ test('renders raw scrape inventory with two scoped sections per Licensor', async
     element as HTMLElement & { source: unknown[] }
   ).source.length)).toBe(0)
   await expect(page.locator('#scraped-property-marvel-creative').locator('..').getByRole('gridcell', { name: 'Lilo test fixture' })).toBeVisible()
+
+  await disneyCreative.getByRole('combobox', { name: 'Filter Property' }).fill('')
+  await disneyCreative.getByRole('button', { name: 'Set filter Property' }).click()
+  const propertyOptions = page.getByRole('dialog', { name: 'Set filter options for Property' })
+  await expect(propertyOptions.getByText('Frozen', { exact: true })).toBeVisible()
+  await expect(propertyOptions.getByText('Lilo test fixture', { exact: true })).toHaveCount(0)
+  await propertyOptions.getByRole('button', { name: 'Clear' }).click()
+  await expect.poll(() => disneyCreative.locator('revo-grid').evaluate(element => (
+    element as HTMLElement & { source: unknown[] }
+  ).source.length)).toBe(0)
+  await expect(page.locator('#scraped-property-marvel-creative').locator('..').getByRole('gridcell', { name: 'Lilo test fixture' })).toBeVisible()
   await page.screenshot({ path: '../../docs/verification/db-data-admin-scraped-properties.png', fullPage: true })
 })
 
