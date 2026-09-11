@@ -1,41 +1,52 @@
 {
   "schema_version": 1,
-  "work_issue": 2769,
+  "work_issue": 2768,
   "outcome": "ready-for-merge",
-  "pr": 2776,
-  "migration_versions": [
-    "20260911145659"
-  ],
-  "contract_ref": "refs/db-contracts/2769/2",
-  "contract_sha256": "cb815eaa9c2adfa9bf76d6c1098af19287d15abf115d71c6136634e1fe7dc108",
-  "head_sha": "ffb1e799bf50720ad2e7366ba9148c3bb35edecf",
+  "pr": 2770,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2768/8",
+  "contract_sha256": "ee6dce1765e1fce2e1e8d094e224674bfbdc48ab24ba0e8cc639b62ae5dc00b3",
+  "head_sha": "b98d25e2e37da7c474aae0c49f1e0fd586f4f1cd",
   "files_changed": [
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/test_production_migration_guard.py"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
-  ],
+  "db_writes": [],
   "checks": [
+    {
+      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
+      "exit_code": 0,
+      "evidence": "40 tests, 40 pass, 0 fail, 0 skipped."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_migration_guard",
+      "exit_code": 0,
+      "evidence": "OK."
+    },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Run at c42e3673 (after merging main f15f0f0e) in C:/repos/shared-db-worktrees/issue-2769: Static checks passed. No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
+      "evidence": "Static checks passed."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check f15f0f0e c42e3673 reported no whitespace errors."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
-    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
-    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
-    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
+    "Run 34281856111 log binding confirmed: rehearsalMode claim, appliedCommit 69226335c20fef57f8a7c15cd7b014a157b61484, previewProjectRef mvpkijzfmfcxhnzqogzs, allowlist [20260908202651].",
+    "git rev-parse shows blob 578c06da0161d7d19d7a254d03f6f4404d4c35b0 at 69226335, d669c43e, and main."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Registry-only change; ready for exact-head governed review, CI, and guarded merge."
 }
