@@ -1,33 +1,63 @@
 {
   "schema_version": 1,
-  "work_issue": 2759,
+  "work_issue": 2712,
   "outcome": "ready-for-merge",
-  "pr": 2760,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2759/1",
-  "contract_sha256": "915f615a7aa3e69b1c1067a6d806983bb20cf73c253357d278aa608d11d5df18",
-  "head_sha": "443f8254cbdd138c65befcc3cdc90a6262e4e5d5",
-  "files_changed": [
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+  "pr": 2765,
+  "migration_versions": [
+    "20260911124845"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2712/1",
+  "contract_sha256": "4606f577186f7a3a3d21b9fed8f4311f595e33e6f9014d828e2b83d0bbd41067",
+  "head_sha": "70adaa861f672ab86a46297193e65dcc089d1ddc",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql"
+  ],
+  "db_reads": [
+    "function app.set_updated_at"
+  ],
+  "db_writes": [
+    "schema hts_rag",
+    "role designflow_hts_prod_runtime",
+    "role designflow_hts_alsand_runtime",
+    "role designflow_hts_prod_worker",
+    "role designflow_hts_alsand_worker",
+    "table hts_rag.hts_rag_rulings",
+    "table hts_rag.hts_rag_product_examples",
+    "table hts_rag.hts_rag_precedents",
+    "table hts_rag.hts_rag_precedent_rulings",
+    "table hts_rag.hts_rag_extraction_jobs",
+    "table hts_rag.hts_rag_determinations",
+    "table hts_rag.hts_rag_provider_responses",
+    "table hts_rag.hts_rag_review_events",
+    "table hts_rag.hts_rag_product_family_allowlist",
+    "table hts_rag.hts_rag_debate_runs",
+    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
+  ],
   "checks": [
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors between base 5eaebe7c and implementation head 443f8254."
+      "evidence": "No whitespace errors at implementation head 70adaa861f672ab86a46297193e65dcc089d1ddc."
     },
     {
-      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "48 tests passed, 0 failed, 0 skipped at 443f8254."
+      "evidence": "SQL migration guards job passed on PR 2765 (run 34603204304 and at the implementation head)."
+    },
+    {
+      "command": "hosted ephemeral migration regression suite",
+      "exit_code": 0,
+      "evidence": "Database Contract Tests run 34609342984 passed at implementation head 70adaa861f672ab86a46297193e65dcc089d1ddc; migration 20260911124845 replayed from empty and hts_rag_shared_schema_contract.sql passed: worker provenance, bounded updates, no delete/truncate, immutable promotion gate, runtime visibility limited to qualified operative precedents, anon/authenticated/service_role denied."
     }
   ],
   "assumptions_resolved": [
-    "The exemption is filtered against the mirror, so a required context of the same name would still be enforced."
+    "Production qsllyeztdwjgirsysgai verified read-only on 2026-09-11: no hts_rag schema and no designflow_hts roles exist.",
+    "The migration is self-contained and does not depend on unapplied public.hts_rag_* migrations; public.hts_rag_* is untouched.",
+    "All four roles are NOLOGIN; no password is committed. Granting login credentials to the application is a separate governed follow-up."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
+  "evidence_note": "Implementation is tested. Independent governed review, guarded merge, preview apply, production apply and live verification remain pending and are not asserted by this record."
 }
