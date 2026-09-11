@@ -5,6 +5,28 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2744 / #2798. Preview applied these exact bytes in claim-mode run
+  // 34636342626, dispatched at and applied from PR #2793 head commit
+  // 1eae69db6ed5c938a109fde0c9040849ec30bffe before the PR merged. The migration
+  // blob 15317e82ef011de07d076224cd20638e52e6622c is unchanged on the PR head.
+  // This pin exists only so the applied-migration-edit guard can tell "the exact
+  // applied bytes" from "an edit to an applied version". Production producer
+  // provenance is deliberately NOT registered: `sourcePr`/`sourceMergeCommit` are
+  // omitted, so `validateHistoricalProductionProvenance` refuses this version until
+  // a later change registers the real merge commit. No production eligibility is
+  // granted or changed here.
+  '20260911170526': Object.freeze({
+    filename: 'supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql',
+    name: 'scraped_properties_page_asset_context',
+    previewProject: 'mvpkijzfmfcxhnzqogzs',
+    previewApplyRun: '34636342626',
+    previewDispatchCommit: '1eae69db6ed5c938a109fde0c9040849ec30bffe',
+    previewAppliedCommit: '1eae69db6ed5c938a109fde0c9040849ec30bffe',
+    statementBytes: 58609,
+    statementSha256: '455cd87dd1076eb33ece81361609f772154d1f651d5a95f993d077c294373dd3',
+    fileSha256: 'e14fe1cd1670d4ea277c1e76bbeb8cae864765dff2f293b3ac0a95bd7042219f',
+    objects: Object.freeze(['function api.db_data_admin_scraped_properties']),
+  }),
   // #2535 / #2768. Preview applied these exact bytes in claim-mode run
   // 34281856111, dispatched at and applied from PR #2584 head commit
   // 69226335c20fef57f8a7c15cd7b014a157b61484 before the PR merged as
