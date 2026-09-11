@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "f938f36f4db10519c82392f9ca5805b7409ec27b",
+  "base_sha": "72c299b86ac68555fc66276302fb901df8bb8c6e",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
@@ -78,12 +78,13 @@
     "Generation 32 merges current main e11a5989 after #2780 while preserving its approval carry-over behavior; only the .agent evidence pair conflicted and every substantive file auto-merged.",
     "Generation 34 closes the exact-head governed review finding by requiring authoritative admission identity at every workflow stage caller and refusing re-admission of a completed live outcome.",
     "Generation 35 corrects the implementation commit identity after generation 34 recorded an invalid expanded SHA; no implementation bytes changed.",
-    "Generation 36 integrates current main f938f36f after PR 2776; only the repository evidence pair conflicted and the implementation remained unchanged."
+    "Generation 36 integrates current main f938f36f after PR 2776; only the repository evidence pair conflicted and the implementation remained unchanged.",
+    "Generation 37 integrates current main 72c299b8 after PR 2765; only the repository evidence pair conflicted and the implementation remained unchanged."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 36
+  "generation": 37
 }
