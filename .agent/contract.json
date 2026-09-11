@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 33,
+  "generation": 34,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
@@ -13,9 +13,9 @@
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911205753_popsg_search_v2_production_performance.sql",
+    "supabase/migrations/20260911213429_popsg_search_v2_production_performance.sql",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911205753.json",
+    "scripts/production-verification-sidecars/20260911213429.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
@@ -25,9 +25,9 @@
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911205753_popsg_search_v2_production_performance.sql",
+    "supabase/migrations/20260911213429_popsg_search_v2_production_performance.sql",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911205753.json",
+    "scripts/production-verification-sidecars/20260911213429.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
@@ -77,7 +77,8 @@
     "Generation 30 rebases the contract on main 9a62bd23 with no scope change.",
     "Generation 31 rebases on main f13a77dc (#2771) and records the lane-tool supersession of migration 20260911170219 to 20260911205753 past main's newer 20260911170650; SQL bytes unchanged, benchmark and catalog test repointed at implementation head e900bd6d.",
     "Generation 32 rebases the contract on main f938f36f with no scope change.",
-    "Generation 33 rebases the contract on main 72c299b8 with no scope change."
+    "Generation 33 rebases the contract on main 72c299b8 with no scope change.",
+    "Generation 34 rebases on main 72c299b8 and records the lane-tool supersession of migration 20260911205753 to 20260911213429 past main's newer 20260911210709; SQL bytes unchanged, benchmark and catalog binding test repointed, no scope change."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
