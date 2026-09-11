@@ -1,0 +1,38 @@
+name: Prepack Exclusion
+
+# Issue #2611. The owner's prepack exclusion existed only as prose and was never
+# implemented. This keeps it implemented: if the filter is dropped or weakened,
+# a known assortment head would reappear in a missing-attribution population and
+# this check goes red.
+
+on:
+  pull_request:
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/check-prepack-exclusion*'
+      - 'docs/verification/prepack-exclusion-20260911.md'
+      - '.github/workflows/prepack-exclusion.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'supabase/migrations/**'
+      - 'scripts/check-prepack-exclusion*'
+      - 'docs/verification/prepack-exclusion-20260911.md'
+
+# A new push to a pull request supersedes the run for its older head; pushes to
+# main are never cancelled.
+concurrency:
+  group: prepack-exclusion-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    # A stalled step must fail on its own budget instead of blocking merges for hours (#1266).
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: node scripts/check-prepack-exclusion.test.mjs
