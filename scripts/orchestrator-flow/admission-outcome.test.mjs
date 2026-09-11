@@ -8,6 +8,15 @@ import { findCompletionRecord } from '../lib/work-dependencies.mjs'
 
 const issue = (body, number = 41) => ({ number, state: 'open', title: 'structural outcome', body, createdAt: '2026-09-11T00:00:00Z' })
 const ownerComment = (body) => ({body,author_association:'OWNER'})
+const serializedIo = (io = {}) => {
+  const refs=new Map();let sequence=0
+  return {...io,
+    makeOwnerCommit:()=>`admission-${++sequence}`,
+    readRef:(ref)=>refs.get(ref)??io.readRef?.(ref)??null,
+    createRef:(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true},
+    deleteRef:(ref)=>{refs.delete(ref)},
+  }
+}
 const scopeBody = ({ service='standard-application', change='migration', stage='entered', object='table core.example', returnTo='u2giants/example-app', live='authenticated create-and-read succeeds', generated='not-applicable', extra='' } = {}) => [
   '```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator',
   `service_class: ${service}`, `change_type: ${change}`, `application_return_to: ${returnTo}`,
@@ -105,7 +114,7 @@ test('legacy in-flight structural PRs remain executable but cannot enter as new 
 
 test('a refused actual change publishes one typed refusal with return and reopening evidence', () => {
   const body=scopeBody({change:'application-code'}),comments=[]
-  const io={enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value))}
+  const io=serializedIo({enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value))})
   const old=console.error;console.error=()=>{}
   try { assert.equal(managerMain(['--admit-issue','41'],new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
   const event=parseEventComment(comments[0].body)[0]
@@ -115,12 +124,12 @@ test('a refused actual change publishes one typed refusal with return and reopen
 
 test('a data-only migration PR publishes a typed refusal instead of trusting its filename', () => {
   const comments=[]
-  const io={
+  const io=serializedIo({
     enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value)),
     closingIssuesForPr:()=>[{number:41,state:'open'}],
     getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_data.sql',status:'added'}],
     getFileAt:()=>'insert into core.example values (1);',
-  }
+  })
   const old=console.error;console.error=()=>{}
   try { assert.equal(managerMain(['--admit-issue','41','--pr','7'],new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
   const event=parseEventComment(comments[0].body)[0]
@@ -130,7 +139,7 @@ test('a data-only migration PR publishes a typed refusal instead of trusting its
 
 test('repository-maintenance admission refusal cannot consume a lane or shared stage', () => {
   const body=scopeBody({change:'repository-maintenance'}),calls={claim:0,stage:0}
-  const io={enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>[],commentIssue:()=>{},createIssue:()=>calls.claim++,createRef:()=>calls.stage++}
+  const io=serializedIo({enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>[],commentIssue:()=>{},createIssue:()=>calls.claim++,createRef:()=>calls.stage++})
   const old=console.error;console.error=()=>{}
   try { assert.equal(managerMain(['--admit-issue','41'],new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
   assert.deepEqual(calls,{claim:0,stage:0})
@@ -145,7 +154,7 @@ test('legacy issues remain protected if already claimed but are never offered as
 
 test('an admitted issue cannot authorize a claim for different objects',()=>{
   const comments=[];let claims=0
-  const io={enforceAdmission:true,getIssue:()=>issue(scopeBody({object:'table core.authorized'})),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body)),createClaim:()=>{claims++}}
+  const io=serializedIo({enforceAdmission:true,getIssue:()=>issue(scopeBody({object:'table core.authorized'})),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body)),createClaim:()=>{claims++}})
   const old=console.error;let message='';console.error=(value)=>{message=String(value)}
   try{
     assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.unrelated'],new Date('2026-09-11T00:00:00Z'),io),2)
@@ -155,10 +164,10 @@ test('an admitted issue cannot authorize a claim for different objects',()=>{
 
 test('source PR resolves exactly one linked open issue and independently admits its files', () => {
   const comments=[]
-  const io={
+  const io=serializedIo({
     closingIssuesForPr:()=>[{number:41,state:'open'}],getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body)),
     getPr:()=>({head:{sha:'a'.repeat(40)}}),getFileAt:()=> 'create table core.example(id bigint);',getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],
-  }
+  })
   assert.deepEqual(resolveAdmittedIssueForPr(7,io),{issue:41,pr:7,admission:'admitted'})
   io.closingIssuesForPr=()=>[{number:41,state:'open'},{number:42,state:'open'}]
   assert.throws(()=>resolveAdmittedIssueForPr(7,io),/exactly one structural work issue/)
@@ -241,6 +250,29 @@ test('admission and dispatch can share the command clock without invalidating cl
   comments.push(ownerComment(formatEventComment(outcomeEvent({issue:41,state:'dispatched',actor:'test',timestamp}))))
   const history=outcomeHistory(comments,41)
   assert.equal(history.valid,true);assert.equal(history.state,'dispatched')
+})
+
+test('initial admission events are serialized under the author mutex',()=>{
+  const comments=[],refs=new Map(),labels=[]
+  const io={
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,
+    makeOwnerCommit:()=> 'mutex-owner',
+    readRef:(ref)=>refs.get(ref)??null,
+    createRef:(ref,sha)=>{labels.push(`lock:${ref}`);if(refs.has(ref))return false;refs.set(ref,sha);return true},
+    deleteRef:(ref)=>{labels.push(`unlock:${ref}`);refs.delete(ref)},
+    commentIssue:(_n,body)=>{assert.equal(refs.size,1,'admission comment must be written only while the mutex is held');labels.push('comment');comments.push(ownerComment(body))},
+  }
+  const old=console.log;console.log=()=>{}
+  try{assert.equal(managerMain(['--admit-issue','41'],new Date('2026-09-11T00:00:00Z'),io),0)}finally{console.log=old}
+  assert.deepEqual(labels.map((row)=>row.split(':')[0]),['lock','comment','comment','unlock'])
+  assert.equal(outcomeHistory(comments,41).state,'classified')
+})
+
+test('outcome status ignores trusted lifecycle events for a different issue',()=>{
+  const comments=[...eventComments('classified',41),...eventComments('live_verified',42)]
+  let printed='';const old=console.log;console.log=(value)=>{printed=String(value)}
+  try{assert.equal(managerMain(['--outcome-status','41'],new Date(),{issueComments:()=>comments}),0)}finally{console.log=old}
+  assert.equal(JSON.parse(printed).state,'classified')
 })
 
 test('completion refuses lifecycle events belonging to another issue',()=>{

@@ -2271,7 +2271,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:admission|author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -5458,12 +5458,24 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
   }
 }
 
+function admitIssueSerialized(number, io = githubIo, options = {}) {
+  const requestId = options.requestId ?? randomUUID()
+  const ownerSha = io.makeOwnerCommit(`db-coordination admission ${requestId}`)
+  acquireMutex(ownerSha, io, options.mutexAttempts ?? 100)
+  try {
+    requireOwnedRef(MUTEX_REF, ownerSha, io)
+    return admitIssue(number, io, options)
+  } finally {
+    if (io.readRef(MUTEX_REF) === ownerSha) releaseOwnedRef(MUTEX_REF, ownerSha, io)
+  }
+}
+
 export function resolveAdmittedIssueForPr(pr, io = githubIo) {
   if (!Number.isInteger(Number(pr)) || Number(pr) < 1) throw new LaneError('--resolve-admitted-issue-for-pr requires a pull request number')
   const linked = io.closingIssuesForPr(Number(pr))
   if (!Array.isArray(linked)) throw new LaneError('pull request closing-issue linkage is unreadable')
   if (linked.length !== 1) throw new LaneError(`pull request must close exactly one structural work issue; found ${linked.length}`)
-  const result = admitIssue(Number(linked[0].number), io, { pr:Number(pr), allowLegacy:false })
+  const result = admitIssueSerialized(Number(linked[0].number), io, { pr:Number(pr), allowLegacy:false })
   return { issue:Number(linked[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
 }
 
@@ -5476,7 +5488,7 @@ function requireAdmission(options, io, { pr = null, timestamp } = {}) {
     throw new LaneError(`--admit-issue #${options.admitIssue} does not match --issue #${options.issue}`)
   }
   if(pr===null&&options.acquireExclusive)throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
-  const admitted=admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null, timestamp })
+  const admitted=admitIssueSerialized(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null, timestamp })
   if(options.claim){
     const requested=validateClaimObjects(options.objects??[]).sort()
     const authorized=[...(admitted.writes??[])].sort()
@@ -6468,8 +6480,8 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.authorizeRepositoryMaintenanceStatus){console.log(JSON.stringify(authorizeRepositoryMaintenanceStatus(o,io),null,2));return 0}
     if(o.resolveAdmittedIssueForPr){console.log(JSON.stringify(resolveAdmittedIssueForPr(o.resolveAdmittedIssueForPr,io),null,2));return 0}
     const admissionOnly=o.admitIssue&&!o.claim&&!o.assignReviewer&&!o.acquireExclusive&&!o.replaceFailedReviewer&&!o.completeOutcome&&!o.outcomeStatus&&!o.advanceOutcome
-    if(admissionOnly){console.log(JSON.stringify(admitIssue(o.admitIssue,io,{pr:o.pr??null}),null,2));return 0}
-    if(o.outcomeStatus){console.log(JSON.stringify(outcomeHistory(io.issueComments(o.outcomeStatus)),null,2));return 0}
+    if(admissionOnly){console.log(JSON.stringify(admitIssueSerialized(o.admitIssue,io,{pr:o.pr??null}),null,2));return 0}
+    if(o.outcomeStatus){console.log(JSON.stringify(outcomeHistory(io.issueComments(o.outcomeStatus),Number(o.outcomeStatus)),null,2));return 0}
     if(o.advanceOutcome){
       if(!o.issue)throw new LaneError('--advance-outcome requires --issue <n>')
       if(!o.evidence)throw new LaneError('--advance-outcome requires --evidence <durable URL>')
@@ -6536,7 +6548,7 @@ export function main(argv, now = new Date(), io = githubIo) {
         let scope=null
         try{scope=parseQueueScope(issue.body)}catch{continue}
         if(scope?.workType!=='structural'||scope.route!=='shared-db-orchestrator')continue
-        const history=outcomeHistory(io.issueComments(issue.number))
+        const history=outcomeHistory(io.issueComments(issue.number),Number(issue.number))
         if(!history.valid)throw new LaneError(`issue #${issue.number} has invalid authoritative outcome history: ${history.problems.join('; ')}`)
         outcomeStates.set(Number(issue.number),history.state??'entered')
       }
