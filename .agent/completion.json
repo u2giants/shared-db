@@ -1,20 +1,42 @@
 {
   "schema_version": 1,
-  "work_issue": 2705,
+  "work_issue": 2723,
   "outcome": "ready-for-merge",
-  "pr": 2717,
+  "pr": 2725,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2705/1",
-  "contract_sha256": "594687b1ad6fda9d9c52348a3070de5cad94ef5b754ada95ac7f088bee68b04f",
-  "head_sha": "8a84f7dfd9e5964c029f567394ace10bc4811012",
-  "files_changed": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "contract_ref": "refs/db-contracts/2723/2",
+  "contract_sha256": "ceb50dd6bbdfb70e359c05ae2b8446461cde49f99033e3e7c452357eda63d936",
+  "head_sha": "3386ff8869180e39f2d92ee9889a045f8d256894",
+  "files_changed": [
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/verify_preview_apply_artifact.py",
+    "scripts/test_verify_preview_apply_artifact.py",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/run-governed-review.test.mjs", "exit_code": 0, "evidence": "562 pass, 0 fail, 0 skipped."},
-    {"command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Contract generation 1 is valid and published."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+    {
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "exit_code": 0,
+      "evidence": "514 passed, 0 failed, 0 skipped; combined manager and governed-review suite also passed 563 tests."
+    },
+    {
+      "command": "python scripts/test_verify_preview_apply_artifact.py",
+      "exit_code": 0,
+      "evidence": "4 test groups pass, including altered digest, run, preview target, ledger additions/removals, duplicate ZIP names, historical recovery rejection and changed migration bytes."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    }
   ],
-  "assumptions_resolved": ["Quarantined and otherwise unusable providers are removed before allocation.", "Fresh assignment and failed-reviewer replacement use the same filtered pool.", "Malformed or missing preflight output refuses without advancing the reviewer sequence."],
+  "assumptions_resolved": [
+    "Read-only real2466 proof passed: original run34388774773 artifact10118828990 SHA2561cb18ecb1b7f91ab1d318bcc2434b6345c5166bdfcd3f762a39c212846f0937e; exact ledger addition20260909132734 and migration content checked at ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05.",
+    "One independent review, CI and parent merge remain required."
+  ],
   "stop_conditions_hit": []
 }
