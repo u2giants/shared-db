@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/20",
-  "contract_sha256": "fac66c683249ea8cb8e3683374c4664319dd5aa1367a1bdca4906fb155aa27de",
-  "head_sha": "5d7ef98c9e85439aba93e43f6f9608901ec68b5a",
+  "contract_ref": "refs/db-contracts/2727/21",
+  "contract_sha256": "5493ef9794c288347586e6c04a6475950a6bd9cc9efbf9334edac46576f36c2e",
+  "head_sha": "978536713c9ba52b2c69457ecd27fefa0cf47bb3",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -34,7 +34,7 @@
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "702 tests passed; zero failed, skipped, cancelled, or todo (including concurrent completion serialization and forged or stale refusal suppression); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
+      "evidence": "703 tests passed; zero failed, skipped, cancelled, or todo (including reviewer and shared-stage admission revalidation under the author mutex); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
