@@ -325,3 +325,50 @@ test('pins the issue 2744 preview restoration without granting production eligib
     /not an approved exact historical restoration/,
   )
 })
+
+test('pins the issue 2797 preview restoration without granting production eligibility',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260911221304']
+  assert.equal(row.filename,'supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql')
+  assert.equal(row.name,'db_data_admin_scraped_source_inventory')
+  assert.equal(row.previewProject,'mvpkijzfmfcxhnzqogzs')
+  assert.equal(row.previewApplyRun,'34655606553')
+  assert.equal(row.previewDispatchCommit,'916b8005f4588ece389f1f137faf651bd78ef0a2')
+  assert.equal(row.previewAppliedCommit,'916b8005f4588ece389f1f137faf651bd78ef0a2')
+  assert.equal(row.fileSha256,'ecc847f602358edb27829cc49faba86b58e3788b6cf98c702eaccf8b8527904d')
+  assert.equal(row.statementBytes,55149)
+  assert.equal(row.statementSha256,'a9171a6023e724b677655db8d89e572f4394ad8c1b4db41d37a52438b492d20e')
+  assert.equal(Object.isFrozen(row),true)
+  assert.equal(Object.isFrozen(row.objects),true)
+  assert.deepEqual(row.objects,['function api.db_data_admin_scraped_source_inventory'])
+  // Production producer provenance is deliberately unregistered for this version.
+  assert.equal(row.sourcePr,undefined)
+  assert.equal(row.sourceMergeCommit,undefined)
+  // The migration file lands with PR #2808, so bind the pin to the applied commit's
+  // bytes when that object is available, and to the tree once the file is there.
+  const sources=[]
+  if(existsSync(row.filename))sources.push(readFileSync(row.filename,'utf8'))
+  try{sources.push(execFileSync('git',['show',`${row.previewAppliedCommit}:${row.filename}`],{encoding:'utf8',stdio:['ignore','pipe','ignore'],maxBuffer:1<<24}))}catch{}
+  for(const raw of sources){
+    assert.equal(validateHistoricalRestorationFile(row.filename,raw),row)
+    assert.throws(
+      ()=>validateHistoricalRestorationFile(row.filename,raw+'-- changed'+String.fromCharCode(10)),
+      /historical restoration file hash mismatch for 20260911221304/,
+    )
+    assert.throws(
+      ()=>validateHistoricalProductionProvenance(row.filename,raw,{
+        version:'20260911221304',
+        previewApplyRun:'34655606553',
+        previewDispatchCommit:'916b8005f4588ece389f1f137faf651bd78ef0a2',
+        previewAppliedCommit:'916b8005f4588ece389f1f137faf651bd78ef0a2',
+        sourcePr:2808,
+        sourceMergeCommit:'0'.repeat(40),
+        artifactFileSha256:row.fileSha256,
+      }),
+      /not registered for production producer provenance/,
+    )
+  }
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260911221304_wrong.sql','select 1;'+String.fromCharCode(10)),
+    /not an approved exact historical restoration/,
+  )
+})
