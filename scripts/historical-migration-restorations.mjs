@@ -5,6 +5,43 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2535 / #2768. Preview applied these exact bytes in claim-mode run
+  // 34281856111, dispatched at and applied from PR #2584 head commit
+  // 69226335c20fef57f8a7c15cd7b014a157b61484 before the PR merged as
+  // d669c43eda033919091c532605ee1cf1f2e786e4. The migration blob on main is
+  // identical to the applied blob. This pin binds only that immutable apply and
+  // those exact bytes; it does not mark the migration preview-only or otherwise
+  // change its production eligibility.
+  '20260908202651': Object.freeze({
+    filename: 'supabase/migrations/20260908202651_hts_rag_dual_model_debate_audit.sql',
+    name: 'hts_rag_dual_model_debate_audit',
+    previewProject: 'mvpkijzfmfcxhnzqogzs',
+    previewApplyRun: '34281856111',
+    previewDispatchCommit: '69226335c20fef57f8a7c15cd7b014a157b61484',
+    previewAppliedCommit: '69226335c20fef57f8a7c15cd7b014a157b61484',
+    sourcePr: 2584,
+    sourceMergeCommit: 'd669c43eda033919091c532605ee1cf1f2e786e4',
+    statementBytes: 12526,
+    statementSha256: '409eec6e8dbd7ebe6499351bcb504f23130ffc4a089b983d3bb27e1619cf8441',
+    fileSha256: '0f0bd894725486ba6fb80990c09e00e8048e3e433242746e79e4883d4a14b74a',
+    objects: Object.freeze([
+      'table public.hts_rag_debate_runs',
+      'column public.hts_rag_precedents.promotion_basis',
+      'column public.hts_rag_precedents.promotion_policy_version',
+      'column public.hts_rag_precedents.promotion_source_determination_id',
+      'column public.hts_rag_precedents.promotion_debate_run_id',
+      'column public.hts_rag_precedents.promotion_gate_result',
+      'function public.enforce_hts_rag_precedent_promotion_gate_immutable',
+      'trigger hts_rag_precedents_promotion_gate_immutable on public.hts_rag_precedents',
+      'trigger set_updated_at on public.hts_rag_debate_runs',
+      'index public.hts_rag_debate_runs_claim_idx',
+      'index public.hts_rag_debate_runs_source_determination_idx',
+      'index public.hts_rag_debate_runs_precedent_idx',
+      'policy hts_rag_debate_runs_backend_read on public.hts_rag_debate_runs',
+      'policy hts_rag_debate_runs_backend_insert on public.hts_rag_debate_runs',
+      'policy hts_rag_debate_runs_backend_update on public.hts_rag_debate_runs',
+    ]),
+  }),
   // #2622. The protected version and exact migration bytes were authored on
   // PR #2651 before 20260909202801 reached main. This entry permits only those
   // exact bytes to survive the backdated-version guard; it does not mark the
