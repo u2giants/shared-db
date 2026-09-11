@@ -120,7 +120,8 @@ export function resolveReviewSource(options,{git=spawnSync,github=spawnGitHub}={
     return String(result.stdout??'').trim()
   }
   const remote=local(['remote','get-url','origin']).replace(/\\/g,'/').replace(/\.git\/?$/i,'').replace(/\/$/,'').toLowerCase()
-  if(![`https://github.com/${REPO}`,`git@github.com:${REPO}`,`ssh://git@github.com/${REPO}`].map((x)=>x.toLowerCase()).includes(remote))throw new Error('review worktree origin is not the pull request repository')
+    .replace(/^git@([^:]+):/,'ssh://$1/').replace(/^ssh:\/\/git@/,'ssh://')
+  if(![`https://github.com/${REPO}`,`ssh://github.com/${REPO}`].map((x)=>x.toLowerCase()).includes(remote))throw new Error('review worktree origin is not the pull request repository')
   if(local(['rev-parse','--verify','HEAD^{commit}']).toLowerCase()!==head)throw new Error('local review head differs from the assigned review head')
   if(local(['status','--porcelain']))throw new Error('review source worktree is dirty')
   local(['cat-file','-e',`${target}^{commit}`])

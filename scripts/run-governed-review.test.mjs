@@ -41,6 +41,12 @@ function sourceIo(overrides={}){
 test('source resolver binds live non-main PR target to local merge-base',()=>{
   assert.deepEqual(resolveReviewSource(options,sourceIo()),fixtureSource(options))
 })
+
+test('source resolver preserves Git SSH transports and refuses other users or hosts',()=>{
+  const host='github.com',user='git'
+  for(const remote of [`${user}@${host}:u2giants/shared-db.git`,`ssh://${user}@${host}/u2giants/shared-db.git`])assert.deepEqual(resolveReviewSource(options,sourceIo({stdout:{remote}})),fixtureSource(options))
+  for(const remote of [`other@${host}:u2giants/shared-db.git`,`ssh://other@${host}/u2giants/shared-db.git`,`${user}@elsewhere:u2giants/shared-db.git`])assert.throws(()=>resolveReviewSource(options,sourceIo({stdout:{remote}})),/repository/)
+})
 test('DeepSeek receives the exact governed terminal head without changing advisory mode',()=>{
   const head=options.headSha
   assert.deepEqual(wrapperVerdictContractArgs('ai-deepseek-agent',['send','review this','--review'],head),['send','--governed-verdict',head,'review this','--review'])
