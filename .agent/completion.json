@@ -1,41 +1,46 @@
 {
   "schema_version": 1,
-  "work_issue": 2769,
+  "work_issue": 2766,
   "outcome": "ready-for-merge",
-  "pr": 2776,
-  "migration_versions": [
-    "20260911145659"
-  ],
-  "contract_ref": "refs/db-contracts/2769/2",
-  "contract_sha256": "cb815eaa9c2adfa9bf76d6c1098af19287d15abf115d71c6136634e1fe7dc108",
-  "head_sha": "77646e31337d36296a5f0e39ae6a11ebe7352ab0",
+  "pr": 2767,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2766/7",
+  "contract_sha256": "c7325f650f6ec0e781929f0a35bc6ea8895a7c421698971675d8bec5345074da",
+  "head_sha": "97c6251d39e651c075c5983a84867c2a888a3ab3",
   "files_changed": [
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/agents/section-4-anti-collision-rules.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
-  ],
+  "db_writes": [],
   "checks": [
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Run at 77646e31 (after merging main 9da98ede) in C:/repos/shared-db-worktrees/issue-2769: 'Static checks passed.' No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
-    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 9da98ede 77646e31 reported no whitespace errors."
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+      "exit_code": 0,
+      "evidence": "524 tests passed, 0 failed, 0 skipped."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=275"
+    },
+    {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "212 files scanned, all calls governed."
     }
   ],
   "assumptions_resolved": [
-    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
-    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
-    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
-    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
+    "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Muse REVISE on 5ecafd35 addressed in 451575a5 (stale eight-lane wording, non-mutex zero-wait test). Ready for exact-head review, required CI, and guarded merge."
 }
