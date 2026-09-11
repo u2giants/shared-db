@@ -54,6 +54,14 @@ const clientOf = (rpc: ReturnType<typeof vi.fn>, names: { licensed_property_id: 
     }) }),
   }) as unknown as ApiClient
 
+const clientWithDeniedOpaView = (rpc: ReturnType<typeof vi.fn>) => ({
+  rpc,
+  from: () => ({ select: () => ({
+    in: async () => ({ data: null, error: { code: '42501' } }),
+    order: () => ({ range: async () => ({ data: null, error: { code: '42501' } }) }),
+  }) }),
+}) as unknown as ApiClient
+
 const queueOnce = (rows: PropertyMatchRow[]) =>
   vi.fn().mockResolvedValueOnce({ data: { rows, next_cursor: null, page_size: 200 }, error: null })
 
@@ -82,6 +90,33 @@ describe('property match queue data', () => {
       { licensed_property_id: 11, property_name: 'Aladdin' },
       { licensed_property_id: 12, property_name: 'Aladdin (2019)' },
     ])
+  })
+
+  it('keeps the full OPA picker for Licensing users when the lower-level view is denied', async () => {
+    const rpc = vi.fn().mockResolvedValueOnce({
+      data: {
+        rows: [
+          { source_system: 'disney_opa', source_id: '12', display_label: 'Aladdin (2019)' },
+          { source_system: 'disney_dcpvault', source_id: 'ignored', display_label: 'Creative row' },
+          { source_system: 'lucasfilm_opa', source_id: '11', display_label: 'A New Hope' },
+        ],
+        next_cursor: null,
+      },
+      error: null,
+    })
+    await expect(loadOpaPropertyOptions(clientWithDeniedOpaView(rpc))).resolves.toEqual([
+      { licensed_property_id: 11, property_name: 'A New Hope' },
+      { licensed_property_id: 12, property_name: 'Aladdin (2019)' },
+    ])
+    expect(rpc).toHaveBeenCalledWith('db_data_admin_scraped_properties', {
+      p_search: null, p_cursor: null, p_page_size: 1000,
+    })
+  })
+
+  it('reports safe request stages when both OPA reads fail', async () => {
+    const rpc = vi.fn().mockResolvedValue({ data: null, error: { code: '42501' } })
+    await expect(loadOpaPropertyOptions(clientWithDeniedOpaView(rpc)))
+      .rejects.toThrow('Property options could not be loaded (42501; fallback 42501).')
   })
 
   it('orders candidates by the ordinal the database recorded', () => {
