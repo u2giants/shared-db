@@ -1,67 +1,42 @@
 {
   "schema_version": 1,
-  "work_issue": 2507,
+  "work_issue": 2723,
   "outcome": "ready-for-merge",
-  "pr": 2638,
-  "migration_versions": [
-    "20260911042655"
-  ],
-  "contract_ref": "refs/db-contracts/2507/4",
-  "contract_sha256": "9693f1a86f76e36ea03ad5e3430b2c9dbc237faacf2a176c2eee7de89b4029fc",
-  "head_sha": "2f58f03ad6a814ee88ededb46462cc34f0da9300",
-  "evidence_note": "Guarded supersession is a byte-identical SQL rename after live absence proof on both targets. Only two evidence files follow implementation head. Historical hosted tests remain historical proof; fresh head CI is required.",
+  "pr": 2725,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2723/2",
+  "contract_sha256": "ceb50dd6bbdfb70e359c05ae2b8446461cde49f99033e3e7c452357eda63d936",
+  "head_sha": "3386ff8869180e39f2d92ee9889a045f8d256894",
   "files_changed": [
-    ".agent/completion.json",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/verify_preview_apply_artifact.py",
+    "scripts/test_verify_preview_apply_artifact.py",
     ".agent/contract.json",
-    "supabase/migrations/20260911042655_popsg_pdf_terminal_outcomes.sql",
-    "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
+    ".agent/completion.json"
   ],
-  "db_reads": [
-    "table public.style_guide_files",
-    "function public.claim_style_guide_pdf_text"
-  ],
-  "db_writes": [
-    "table public.style_guide_pdf_text",
-    "function public.complete_style_guide_pdf_text_v2",
-    "table public.style_guide_search_documents"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "Static SQL checks passed after the sanctioned migration re-reservation; the new version sorts after current main and no prohibited verification read or EOL dependency was introduced. Live-ledger checks were not configured and are not claimed."
+      "evidence": "514 passed, 0 failed, 0 skipped; combined manager and governed-review suite also passed 563 tests."
     },
     {
-      "command": "supabase test db supabase/tests/popsg_pdf_terminal_outcome_contracts.sql",
+      "command": "python scripts/test_verify_preview_apply_artifact.py",
       "exit_code": 0,
-      "evidence": "Hosted ephemeral PostgreSQL run 34377089006 executed the focused file at implementation head 53bf9596: all 6 issue #2507 assertions passed and rolled back; the complete database-contract job passed in 5m16s. The local invocation could not connect because this host has no Docker runtime, so the isolated hosted result is the retained runtime proof."
-    },
-    {
-      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
-      "exit_code": 0,
-      "evidence": "Generation-2 recovery contract is valid and immutable ref refs/db-contracts/2507/2 read back at 6e7f7a13 with canonical hash 98a098d7."
+      "evidence": "4 test groups pass, including altered digest, run, preview target, ledger additions/removals, duplicate ZIP names, historical recovery rejection and changed migration bytes."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors against exact current-main merge base fe5fa74db889652768029116e636f8cbe69b955e."
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "exit_code": 0,
-      "evidence": "Claim #2578 verified for issue #2507 at reserved version 20260909162929."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "exit_code": 0,
-      "evidence": "Status OK; the new migration has no catalog-only verification markers requiring a production sidecar."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "The branch was reconciled once to exact current main fe5fa74db889652768029116e636f8cbe69b955e before verification.",
-    "The atomic recovery expanded claim #2578 to both new columns and renewed it through 2026-09-10T04:24:50.384Z.",
-    "The atomic supersession retained permanent reservation 20260908134917 and added reserved version 20260909162929 without changing SQL behavior.",
-    "The hosted isolated contract run proves extracted, failed, skipped, stale-content, spent-claim, role-grant, and single-document refresh behavior without touching preview or production."
+    "Read-only real2466 proof passed: original run34388774773 artifact10118828990 SHA2561cb18ecb1b7f91ab1d318bcc2434b6345c5166bdfcd3f762a39c212846f0937e; exact ledger addition20260909132734 and migration content checked at ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05.",
+    "One independent review, CI and parent merge remain required."
   ],
   "stop_conditions_hit": []
 }
