@@ -31,7 +31,7 @@
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs",
       "exit_code": 0,
-      "evidence": "604 tests passed; zero failed, skipped, cancelled, or todo."
+      "evidence": "606 tests passed; zero failed, skipped, cancelled, or todo."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",

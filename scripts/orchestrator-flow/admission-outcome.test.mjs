@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange } from './admission.mjs'
 import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
 import { formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
-import { buildDynamicQueues, claimBody, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
+import { admitIssue, buildDynamicQueues, claimBody, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
 import { findCompletionRecord } from '../lib/work-dependencies.mjs'
 
 const issue = (body, number = 41) => ({ number, state: 'open', title: 'structural outcome', body, createdAt: '2026-09-11T00:00:00Z' })
@@ -84,6 +84,20 @@ test('manager requires explicit admission before claim, reviewer, and shared-sta
   const old=console.error;const messages=[];console.error=(m)=>messages.push(String(m))
   try { for (const args of calls) assert.equal(managerMain(args,new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
   assert.equal(messages.filter((m)=>m.includes('--admit-issue')).length,3)
+})
+
+test('production admission requires the source PR so actual SQL is rechecked',()=>{
+  const io={enforceAdmission:true}
+  const old=console.error;let message='';console.error=(value)=>{message=String(value)}
+  try{assert.equal(managerMain(['--acquire-production','--admit-issue','41','--owner','test'],new Date(),io),2)}finally{console.error=old}
+  assert.match(message,/--pr <source pull request>/)
+})
+
+test('legacy in-flight structural PRs remain executable but cannot enter as new claims',()=>{
+  const legacy=issue(['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n'))
+  const io={getIssue:()=>legacy,getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);'}
+  assert.equal(admitIssue(41,io,{pr:7,allowLegacy:true}).legacy,true)
+  assert.throws(()=>admitIssue(41,io),/change_type/)
 })
 
 test('a refused actual change publishes one typed refusal with return and reopening evidence', () => {
