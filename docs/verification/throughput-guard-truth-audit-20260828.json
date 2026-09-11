@@ -1945,9 +1945,16 @@
       "line_sha256": "59b3cbf2519d9937a18c077956f4328dd978a7a28681bc93c44e6a4845d7ea69",
       "disposition": "enriched",
       "reason": "The comment documents a fail-closed classifier rule: a missing or truncated patch is rejected, not treated as evidence that an instruction change is safe."
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:854",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:fc5dbd3411165633fff781b72e2e50b072c8134f5ea05a3a39f2ae78125cbc07:1",
+      "line_sha256": "fc5dbd3411165633fff781b72e2e50b072c8134f5ea05a3a39f2ae78125cbc07",
+      "disposition": "enriched",
+      "reason": "The queue explicitly excludes an issue missing the required admission fields, so it cannot advertise work that the claim gate must refuse."
     }
   ],
-  "call_site_count": 276,
-  "call_site_sha256": "9d40ad735e4c0bdacc671e71b388049ffd4c1400f8aab9f326f2b2dd069e01df",
+  "call_site_count": 277,
+  "call_site_sha256": "855966e514ad4cf485db21ffea7e476b6b88ece0303c105566bdb30781407d82",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

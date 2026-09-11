@@ -851,10 +851,9 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
       if (waiting.length) { skipped.push({ issue:issue.number, reason:`depends-on-open:${waiting.join(',')}` }); continue }
     }
     const createdAt = Date.parse(issue.createdAt ?? issue.created_at ?? '')
-    if (scope.changeType !== null) {
-      try { evaluateAdmission(issue, scope, parseImpactBlock(issue.body)) }
-      catch (error) { malformed.push({ issue: issue.number, reason: error.message }); continue }
-    }
+    if(scope.changeType===null){skipped.push({issue:issue.number,reason:'missing-required-admission-fields'});continue}
+    try { evaluateAdmission(issue, scope, parseImpactBlock(issue.body)) }
+    catch (error) { malformed.push({ issue: issue.number, reason: error.message }); continue }
     const authoritativeOutcome=outcomeStates.get(Number(issue.number)) ?? 'entered'
     candidates.push({ issue:issue.number, title:issue.title, createdAt:Number.isFinite(createdAt)?createdAt:Number(issue.number), ...scope, outcomeStage:authoritativeOutcome })
   }
@@ -5421,7 +5420,13 @@ function requireAdmission(options, io, { pr = null } = {}) {
     throw new LaneError(`--admit-issue #${options.admitIssue} does not match --issue #${options.issue}`)
   }
   if(pr===null&&options.acquireExclusive)throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
-  return admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null })
+  const admitted=admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null })
+  if(options.claim){
+    const requested=validateClaimObjects(options.objects??[]).sort()
+    const authorized=[...(admitted.writes??[])].sort()
+    if(requested.length!==authorized.length||requested.some((value,index)=>value!==authorized[index]))throw new LaneError(`--claim objects must exactly match admitted issue #${options.admitIssue} writes`)
+  }
+  return admitted
 }
 
 export function acquireAuthorLane(options, now = new Date(), io = githubIo) {

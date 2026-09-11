@@ -134,6 +134,23 @@ test('repository-maintenance admission refusal cannot consume a lane or shared s
   assert.deepEqual(calls,{claim:0,stage:0})
 })
 
+test('legacy issues remain protected if already claimed but are never offered as new dispatches',()=>{
+  const legacy=issue(['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n'))
+  const result=buildDynamicQueues([legacy],[])
+  assert.deepEqual(result.dispatchable,[])
+  assert.equal(result.skipped.find((row)=>row.issue===41)?.reason,'missing-required-admission-fields')
+})
+
+test('an admitted issue cannot authorize a claim for different objects',()=>{
+  const comments=[];let claims=0
+  const io={enforceAdmission:true,getIssue:()=>issue(scopeBody({object:'table core.authorized'})),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body}),createClaim:()=>{claims++}}
+  const old=console.error;let message='';console.error=(value)=>{message=String(value)}
+  try{
+    assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.unrelated'],new Date('2026-09-11T00:00:00Z'),io),2)
+  }finally{console.error=old}
+  assert.match(message,/must exactly match admitted issue/);assert.equal(claims,0)
+})
+
 test('source PR resolves exactly one linked open issue and independently admits its files', () => {
   const comments=[]
   const io={

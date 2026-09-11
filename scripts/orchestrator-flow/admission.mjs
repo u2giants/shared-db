@@ -104,6 +104,8 @@ export function evaluateAdmission(issue, scope, impact = null) {
     application_return_to: scope.applicationReturnTo,
     live_assertion: scope.liveAssertion,
     generated_types: scope.generatedTypes,
+    writes: [...scope.writes],
+    reads: [...(scope.reads ?? [])],
     impact,
     digest: admissionDigest({ issue, scope, impact }),
   }

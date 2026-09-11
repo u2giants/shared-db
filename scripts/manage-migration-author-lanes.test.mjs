@@ -224,10 +224,10 @@ test('a re-drawn assignment without its own APPROVE still leaves the slot red',(
   assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 has no durable APPROVE for its latest exact-head assignment/)
 })
 
-const scope = (status, workType, route, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstatus: ${status}\nwork_type: ${workType}\nroute: ${route}\npriority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
+const scope = (status, workType, route, priority, objects=[], depends='') => `\`\`\`db-work-scope\nstatus: ${status}\nwork_type: ${workType}\nroute: ${route}\n${workType==='structural'?'service_class: standard-application\nchange_type: migration\napplication_return_to: u2giants/example-app\nlive_assertion: authenticated create-and-read succeeds\ngenerated_types: not-applicable\n':''}priority: ${priority}\ndepends_on: ${depends}\nobjects:\n${objects.map((x)=>`  - ${x}`).join('\n')}\n\`\`\``
 
 test('queue scope keeps status, work type, and route separate',()=>{
-  assert.deepEqual(parseQueueScope(scope('ready','structural','shared-db-orchestrator',9,['table core.a'],'#12, 13')), {status:'ready',workType:'structural',route:'shared-db-orchestrator',priority:9,dependencies:[12,13],returnTo:null,writes:['table core.a'],reads:[],legacyObjects:['table core.a'],objects:['table core.a'],serviceClass:'standard-application',changeType:null,applicationReturnTo:null,liveAssertion:null,generatedTypes:null,outcomeStage:'entered'})
+  assert.deepEqual(parseQueueScope(scope('ready','structural','shared-db-orchestrator',9,['table core.a'],'#12, 13')), {status:'ready',workType:'structural',route:'shared-db-orchestrator',priority:9,dependencies:[12,13],returnTo:null,writes:['table core.a'],reads:[],legacyObjects:['table core.a'],objects:['table core.a'],serviceClass:'standard-application',changeType:'migration',applicationReturnTo:'u2giants/example-app',liveAssertion:'authenticated create-and-read succeeds',generatedTypes:'not-applicable',outcomeStage:'entered'})
   assert.throws(()=>parseQueueScope(scope('ready','structural','shared-db-orchestrator',1)),/must list at least one write/)
   assert.throws(()=>parseQueueScope(scope('waiting','structural','shared-db-orchestrator',1,['table core.a'])),/status must be/)
   assert.throws(()=>parseQueueScope(scope('ready','source-data','shared-db-orchestrator',1)),/not valid/)
@@ -4036,7 +4036,7 @@ test('missing or empty read/write sets are treated as empty rather than throwing
 
 // --- READ/WRITE SCOPE PARSING ----------------------------------------------
 
-const scopeWith = (body) => ['```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator', 'priority: 5', 'depends_on:', body, '```'].join('\n')
+const scopeWith = (body) => ['```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator', 'service_class: standard-application', 'change_type: migration', 'application_return_to: u2giants/example-app', 'live_assertion: authenticated create-and-read succeeds', 'generated_types: not-applicable', 'priority: 5', 'depends_on:', body, '```'].join('\n')
 const repoScopeWith = (body) => ['```db-work-scope', 'status: ready', 'work_type: repo-maintenance', 'route: repo-maintenance', 'priority: 5', 'depends_on:', body, '```'].join('\n')
 
 test('a scope may declare writes and reads separately', () => {
@@ -4137,7 +4137,7 @@ test('the queue lets two readers of one table run in parallel but serialises a w
 
 // --- DEPENDENCY PROOF IN THE QUEUE (Step 3, issue #1366) --------------------
 
-const depScope = (deps) => ['```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator', 'priority: 5', 'depends_on: ' + deps, 'writes:', '  - table core.a', '```'].join('\n')
+const depScope = (deps) => ['```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator', 'service_class: standard-application', 'change_type: migration', 'application_return_to: u2giants/example-app', 'live_assertion: authenticated create-and-read succeeds', 'generated_types: not-applicable', 'priority: 5', 'depends_on: ' + deps, 'writes:', '  - table core.a', '```'].join('\n')
 const completionComment = (record) => ({ body: '```db-work-completion\n' + JSON.stringify(record) + '\n```' })
 const mergedRecord = (issue) => ({ schema_version: 1, work_issue: issue, outcome: 'merged', pr: 1, merge_sha: 'abc1234', migration_versions: [] })
 
