@@ -1,5 +1,5 @@
 import test from 'node:test';import assert from 'node:assert/strict'
-import { readyRecord,persistInitialReady,preparePreviewDispatch,terminalizeReady,repairPreviewReady,reconcileFlow,ReconcileError } from './reconcile.mjs'
+import { readyRecord,persistInitialReady,preparePreviewDispatch,terminalizeReady,repairPreviewReady,reconcileFlow,ReconcileError,MODE_SEQUENCE } from './reconcile.mjs'
 import { githubIo, main as managerMain } from '../manage-migration-author-lanes.mjs'
 const h='a'.repeat(40),b='b'.repeat(64),base={issue:7,pr:8,head_sha:h,bundle_id:b,route:'ordinary_preview_apply',route_context:'',manifest:{target:'preview',preview_allowlist:'v',claim_pr:'8',claim_head_sha:h}}
 function fake(){const refs=new Map(),eventLog=[],state={current:base,ready:[]};return{state,refs,eventLog,resolveMarker:()=>({live:true,task:'t',calling_task:'t'}),actor:()=> 't',now:()=>new Date(0).toISOString(),appendEvent:e=>eventLog.push(e),createRef:(r,d,record)=>refs.has(r)?false:(refs.set(r,{digest:d,record}),true),readRef:r=>refs.get(r),listReady:()=>state.ready,selectCurrent:()=>state.current,withMutex:f=>f(),events:()=>eventLog}}
@@ -21,4 +21,36 @@ test('every historical rebind manifest is complete and dispatchable',()=>{
   for(const key of ['commit_sha','historical_preview_source_pr','historical_preview_original_run_map'])assert.throws(()=>readyRecord({...input,manifest:{...manifest,[key]:''}}),ReconcileError)
   assert.throws(()=>readyRecord({...input,manifest:{...manifest,historical_preview_original_run_map:'20260828232208:33308168016'}}),/not dispatchable/)
   assert.notEqual(readyRecord({...input,manifest:{...manifest,historical_preview_original_run_map:'20260828232207:33308168017'}}).ready_id,complete.ready_id)
+})
+
+// ISSUE #2796. The stored instruction carried no mode, the workflow's `mode`
+// input defaults to dry-run, so dispatching it verbatim produced a green run that
+// applied nothing (run 34633793571, artifact preview-migration-dry-run-120fb612...).
+test('every stored instruction names the modes its route must be dispatched with',()=>{
+  const ordinary=readyRecord(base)
+  assert.deepEqual(ordinary.mode_sequence,['dry-run','apply'])
+  const merged=readyRecord({...base,route:'merged_rehearsal',route_context:'f'.repeat(40),manifest:{target:'preview',preview_allowlist:'v',commit_sha:'f'.repeat(40),merged_preview_source_pr:'8'}})
+  assert.deepEqual(merged.mode_sequence,['dry-run','apply'])
+  // APPLY-ONLY. AGENTS.md 4: "Historical recovery is apply-only; historical
+  // dry-run proves nothing" -- at mode=dry-run that lane runs neither the
+  // recovery proof nor a bounded dry-run and still exits 0.
+  const historical=readyRecord({...base,route:'historical_rebind',route_context:h,manifest:{target:'preview',preview_allowlist:'20260828232207',claim_pr:'8',claim_head_sha:h,commit_sha:h,historical_preview_source_pr:'8',historical_preview_original_run_map:'20260828232207:33308168016'}})
+  assert.deepEqual(historical.mode_sequence,['apply'])
+  assert.ok(!historical.mode_sequence.includes('dry-run'),'the historical lane offered a dry-run it can never prove anything with')
+  // Derived from the ROUTE, never from the caller: a candidate cannot smuggle in
+  // a mode sequence its route does not permit.
+  assert.deepEqual(readyRecord({...base,mode_sequence:['dry-run']}).mode_sequence,['dry-run','apply'])
+  assert.deepEqual(Object.keys(MODE_SEQUENCE).sort(),['historical_rebind','merged_rehearsal','ordinary_preview_apply'])
+})
+
+test('the dispatch mode is a per-run phase, never part of ready identity',()=>{
+  // Phase 2: "`mode` is a per-run phase, not part of ready identity or
+  // frozen-manifest equality." Folding it into the manifest would change every
+  // manifest_digest and ready_id in existence and freeze a phase into immutable
+  // identity -- and would make the REQUIRED ordinary/merged dry-run undispatchable
+  // from the stored instruction.
+  const one=readyRecord(base)
+  assert.equal('mode' in one.manifest,false)
+  assert.equal(readyRecord({...base,mode_sequence:['apply']}).ready_id,one.ready_id)
+  assert.equal(readyRecord({...base,mode_sequence:['apply']}).manifest_digest,one.manifest_digest)
 })

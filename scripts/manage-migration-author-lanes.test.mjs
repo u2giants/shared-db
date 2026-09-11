@@ -5387,6 +5387,11 @@ test('#2509 emits only the existing no-write historical recovery manifest from i
   })
   assert.equal('merged_preview_source_pr' in candidate.manifest,false)
   assert.equal('production_allowlist' in candidate.manifest,false)
+  // #2796: apply-only, and the instruction says so. The workflow's mode input
+  // defaults to dry-run, and a historical dry-run runs neither the recovery proof
+  // nor a bounded dry-run -- it just succeeds having proved nothing.
+  assert.deepEqual(candidate.mode_sequence,['apply'])
+  assert.equal('mode' in candidate.manifest,false)
 })
 
 test('a merged claim still reaches the post-merge rehearsal route instead of being stranded',()=>{
@@ -5402,6 +5407,10 @@ test('a merged claim still reaches the post-merge rehearsal route instead of bei
   assert.equal(candidate.manifest.commit_sha,mainSha)
   assert.equal(candidate.manifest.merged_preview_source_pr,'1809')
   assert.equal(candidate.manifest.preview_allowlist,version)
+  // #2796: the dry-run is a REQUIRED first phase here, so the instruction names
+  // both phases rather than being silent and dispatching at the dry-run default.
+  assert.deepEqual(candidate.mode_sequence,['dry-run','apply'])
+  assert.equal('mode' in candidate.manifest,false)
   // "merged_preview_source_pr replaces claim_pr ... do not name both" -- naming
   // either claim field alongside it makes the workflow refuse the dispatch outright.
   assert.equal('claim_pr' in candidate.manifest,false)
