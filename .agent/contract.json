@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2772,
-  "generation": 10,
+  "generation": 11,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Let a merged low-risk migration promote to production on exact-head ephemeral database CI evidence instead of a shared-preview apply, keeping preview mandatory for high-risk SQL.",
-  "base_sha": "11d0e2b48fa9f8872e4988619edc1516f675fb1e",
+  "base_sha": "120fb6125907386ce2b93bd9ae0a91de700fb738",
   "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
   "worker": "Claude process-unblocking sub-agent of marker 2758",
   "branch": "claude/production-without-preview",
