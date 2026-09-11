@@ -1,50 +1,50 @@
 {
   "schema_version": 1,
-  "work_issue": 2775,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Remove the migration author lane cap entirely: no capacity refusal anywhere, with exact object collision locks and version reservations unchanged.",
-  "base_sha": "120fb6125907386ce2b93bd9ae0a91de700fb738",
-  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
-  "worker": "Claude sub-agent of marker 2758 (no lane cap)",
-  "branch": "claude/author-lanes-no-cap-2775",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
+  "generation": 2,
+  "work_issue": 2769,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Restrict EXECUTE on public.queue_nightly_rebuild_style_groups() so PUBLIC, anon and authenticated cannot run the #2440 rebuild-queue function; keep service_role and postgres (the cron caller).",
+  "base_sha": "b68a1900a6c287bd16adcbdacc8a3e4a8db543b1",
+  "dispatcher": "Claude orchestrator #2758",
+  "worker": "claude-2758-2769",
+  "branch": "claude/issue-2769-rebuild-queue-grants",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2769",
   "allowed_paths": [
+    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "AGENTS.md",
-    "docs/agents/section-4-anti-collision-rules.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/capacity-state.test.mjs"
+    ".agent/completion.json"
   ],
   "file_writes": [
+    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "AGENTS.md",
-    "docs/agents/section-4-anti-collision-rules.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/capacity-state.test.mjs"
+    ".agent/completion.json"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function public.queue_nightly_rebuild_style_groups"
+  ],
   "prohibited_actions": [
-    "Do not modify a migration or any database state.",
-    "Do not weaken exact object claims, version reservations, the acquisition mutex, or serial stage refs.",
-    "Do not change reviewer leases, exclusions, exact-head binding, or verdict recording."
+    "No direct production DDL; production changes only through the governed promotion workflow.",
+    "No fabricated reviews or verdicts; no deleting locks, audit rows or history.",
+    "Do not touch #2705, #2709, #2290, #2678 or the #2543 residual."
   ],
   "required_checks": [
-    "git diff --check",
-    "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "node scripts/check-github-transport-conformance.mjs"
+    "bash scripts/check-sql.sh",
+    "git diff --check"
   ],
   "assumptions": [
-    "Owner ruling relayed on marker 2758: there must be no limit on migration author lanes, at all, ever."
+    "The only runtime caller is the nightly cron job running as postgres; no app (including popdam3) calls the function as anon or authenticated.",
+    "Revoking authenticated does not change the function body or its signature."
   ],
   "stop_conditions": [
-    "Stop if implementation requires a database or production write."
-  ],
-  "generation": 5
+    "An application caller that runs as anon or authenticated is found.",
+    "Exact object collision with another active claim."
+  ]
 }
