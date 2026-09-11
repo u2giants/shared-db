@@ -46,9 +46,11 @@ export function parseOutcomeEvidence(body = '') {
   return record
 }
 
-export function outcomeHistory(comments = []) {
+export function outcomeHistory(comments = [], issue) {
+  const expectedIssue = issue === undefined ? null : Number(issue)
   const events = comments.flatMap((comment) => parseEventComment(comment?.body ?? ''))
     .filter((event) => OUTCOME_STATES.includes(event.event_type))
+    .filter((event) => expectedIssue === null || Number(event.work_issue) === expectedIssue)
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)
       || (LINEAR.indexOf(a.event_type)<0?LINEAR.length:LINEAR.indexOf(a.event_type))-(LINEAR.indexOf(b.event_type)<0?LINEAR.length:LINEAR.indexOf(b.event_type))
       || a.event_id.localeCompare(b.event_id))
@@ -84,9 +86,9 @@ export function outcomeHistory(comments = []) {
   }
 }
 
-export function assertOutcomeTransition(comments, next) {
+export function assertOutcomeTransition(comments, next, issue) {
   if (!OUTCOME_STATES.includes(next)) throw new OutcomeError(`unknown outcome state ${next}`)
-  const history = outcomeHistory(comments)
+  const history = outcomeHistory(comments, issue)
   if (!history.valid) throw new OutcomeError(`outcome history is invalid: ${history.problems.join('; ')}`)
   if (next === 'blocked') {
     if(history.blocked)throw new OutcomeError('outcome is already blocked')
@@ -104,10 +106,10 @@ export function assertOutcomeTransition(comments, next) {
 
 export function advanceOutcome({issue,state,actor,timestamp=new Date().toISOString(),evidenceUrls=[]},io){
   const comments=io.issueComments(Number(issue))
-  assertOutcomeTransition(comments,state)
+  assertOutcomeTransition(comments,state,issue)
   const event=outcomeEvent({issue,state,actor,timestamp,evidenceUrls})
   io.commentIssue(Number(issue),formatEventComment(event))
-  const readBack=outcomeHistory(io.issueComments(Number(issue)))
+  const readBack=outcomeHistory(io.issueComments(Number(issue)),issue)
   if(!readBack.valid||!readBack.events.some((row)=>row.event_id===event.event_id))throw new OutcomeError(`outcome ${state} event did not read back exactly`)
   return {issue:Number(issue),state,event_id:event.event_id}
 }
@@ -127,7 +129,7 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
   const scope = io.parseScope(work.body ?? '')
   if (!scope || scope.workType !== 'structural' || scope.route !== 'shared-db-orchestrator') throw new OutcomeError('only an admitted structural outcome can complete')
   if (!scope.applicationReturnTo || !scope.liveAssertion) throw new OutcomeError('outcome is missing its application return address or live assertion')
-  const history = outcomeHistory(io.issueComments(Number(issue)))
+  const history = outcomeHistory(io.issueComments(Number(issue)),issue)
   if (!history.valid) throw new OutcomeError(`outcome history is invalid: ${history.problems.join('; ')}`)
   if (!['production_applied','live_verified'].includes(history.state)) throw new OutcomeError(`merge or preview is not completion; outcome is at ${history.state ?? 'none'}, not production_applied`)
   if(String(work.state).toLowerCase()==='closed'&&history.state!=='live_verified')throw new OutcomeError(`outcome issue #${issue} closed before live verification`)
@@ -163,7 +165,7 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
     application_commit_sha:evidence.application_commit_sha, live_evidence:evidence.live_evidence,
   })
   if(history.state==='production_applied'){
-    assertOutcomeTransition(io.issueComments(Number(issue)), 'live_verified')
+    assertOutcomeTransition(io.issueComments(Number(issue)), 'live_verified', issue)
     const event = outcomeEvent({ issue, state: 'live_verified', actor, timestamp, evidenceUrls: [evidenceRef, evidence.live_evidence] })
     io.commentIssue(Number(issue), formatEventComment(event))
   }
@@ -177,7 +179,7 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
     ].join('\n'))
     completionReadBack=findCompletionRecord(io.issueComments(Number(issue)))
   }
-  const readBack = outcomeHistory(io.issueComments(Number(issue)))
+  const readBack = outcomeHistory(io.issueComments(Number(issue)), issue)
   if (!readBack.valid || !readBack.complete || completionReadBack?.outcome!=='live_verified') throw new OutcomeError('live_verified event or completion record did not read back as the authoritative completion')
   if(String(io.getIssue(Number(issue))?.state??'').toLowerCase()==='open')io.updateIssue(Number(issue),{state:'closed'})
   if(String(io.getIssue(Number(issue))?.state??'').toLowerCase()!=='closed')throw new OutcomeError('authoritative outcome was verified but the issue did not close on exact readback')

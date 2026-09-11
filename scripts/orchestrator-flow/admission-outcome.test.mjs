@@ -201,13 +201,19 @@ test('full capacity records urgent waiting without revoking active work', () => 
 })
 
 const linear=OUTCOME_STATES.filter((state)=>!['blocked','yielded'].includes(state))
-const eventComments=(through='production_applied')=>linear.slice(0,linear.indexOf(through)+1).map((state,index)=>({body:formatEventComment(outcomeEvent({issue:41,state,actor:'test',timestamp:new Date(Date.UTC(2026,8,11,0,index)).toISOString()}))}))
+const eventComments=(through='production_applied',issue=41)=>linear.slice(0,linear.indexOf(through)+1).map((state,index)=>({body:formatEventComment(outcomeEvent({issue,state,actor:'test',timestamp:new Date(Date.UTC(2026,8,11,0,index)).toISOString()}))}))
 
 test('outcome lifecycle refuses every skip and merge is not live completion', () => {
   const skipped=[eventComments('entered')[0],eventComments('review_ready').at(-1)]
   assert.equal(outcomeHistory(skipped).valid,false)
   assert.equal(outcomeHistory(eventComments('merged')).complete,false)
   assert.equal(outcomeHistory(eventComments('live_verified')).complete,true)
+})
+
+test('completion refuses lifecycle events belonging to another issue',()=>{
+  const {io}=completionFixture()
+  io.issueComments=()=>eventComments('production_applied',42)
+  assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/not production_applied/)
 })
 
 test('blocked outcomes must yield before advancing and malformed block events invalidate history',()=>{
