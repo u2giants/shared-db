@@ -21,12 +21,15 @@ const minutes=(start,end)=>{const value=(Date.parse(end)-Date.parse(start))/6000
 const SHA=/^[0-9a-f]{40}$/i, DIGEST=/^sha256:[0-9a-f]{64}$/i, EVENT_ID=/^[0-9a-f]{64}$/i
 const EVIDENCE=/^(?:https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:issues|pull|actions\/runs)\/[^\s]+|artifact:[A-Za-z0-9][A-Za-z0-9._:\/-]*)$/
 
-function validateCohort(cohort,outcomes){
+function validateCohort(cohort,outcomes,io){
+  if(typeof io?.readCohortArtifact!=='function')throw new AcceptanceReportError('authoritative cohort artifact reader is required')
   if(!cohort||cohort.schema_version!==1||!EVIDENCE.test(cohort.source_evidence??'')||!Number.isInteger(cohort.artifact_id)||cohort.artifact_id<1||!DIGEST.test(cohort.artifact_digest??'')||!SHA.test(cohort.ledger_head_sha??''))throw new AcceptanceReportError('authoritative cohort proof is incomplete')
   if(!Array.isArray(cohort.ordered_work_issues)||cohort.ordered_work_issues.length!==5||new Set(cohort.ordered_work_issues).size!==5||cohort.ordered_work_issues.some((n)=>!Number.isInteger(n)||n<1))throw new AcceptanceReportError('authoritative cohort must name five unique ordered work issues')
   const identity={schema_version:cohort.schema_version,source_evidence:cohort.source_evidence,artifact_id:cohort.artifact_id,artifact_digest:cohort.artifact_digest,ledger_head_sha:cohort.ledger_head_sha,ordered_work_issues:cohort.ordered_work_issues}
   const expected=`sha256:${sha256(canonicalJson(identity))}`
   if(cohort.cohort_digest!==expected)throw new AcceptanceReportError('authoritative cohort digest does not match its exact identity')
+  const authoritative=io.readCohortArtifact(cohort.source_evidence,cohort.artifact_id)
+  if(!authoritative||canonicalJson(authoritative)!==canonicalJson(identity)||`sha256:${sha256(canonicalJson(authoritative))}`!==cohort.cohort_digest)throw new AcceptanceReportError('authoritative cohort artifact readback does not match the claimed exact identity')
   if(outcomes.some((row,index)=>row.issue!==cohort.ordered_work_issues[index]))throw new AcceptanceReportError('caller outcome order does not match the authoritative consecutive cohort')
   return identity
 }
@@ -41,9 +44,18 @@ function validateSamples(name,value){
 
 function boundDigest(value,keys){return `sha256:${sha256(canonicalJson(Object.fromEntries(keys.map((key)=>[key,value[key]]))))}`}
 
-export function buildFiveOutcomeAcceptanceReport({outcomes,cohort,baseline,refusal_evidence=[]}){
+function validateRefusalLedger(refusalLedger,refusalEvidence,io){
+  if(typeof io?.readRefusalLedger!=='function')throw new AcceptanceReportError('authoritative refusal ledger reader is required')
+  if(!refusalLedger||!EVIDENCE.test(refusalLedger.source_evidence??'')||!Number.isInteger(refusalLedger.artifact_id)||refusalLedger.artifact_id<1||!DIGEST.test(refusalLedger.artifact_digest??'')||!SHA.test(refusalLedger.ledger_head_sha??'')||!Number.isInteger(refusalLedger.count)||refusalLedger.count<1||!DIGEST.test(refusalLedger.set_digest??''))throw new AcceptanceReportError('authoritative refusal ledger identity is incomplete')
+  const authoritative=io.readRefusalLedger(refusalLedger.source_evidence,refusalLedger.artifact_id)
+  if(!authoritative||authoritative.ledger_head_sha!==refusalLedger.ledger_head_sha||authoritative.artifact_digest!==refusalLedger.artifact_digest||!Array.isArray(authoritative.entries))throw new AcceptanceReportError('authoritative refusal ledger readback does not match its identity')
+  if(authoritative.entries.length!==refusalLedger.count||`sha256:${sha256(canonicalJson(authoritative.entries))}`!==refusalLedger.set_digest)throw new AcceptanceReportError('authoritative refusal ledger count or set digest does not match readback')
+  if(canonicalJson(authoritative.entries)!==canonicalJson(refusalEvidence))throw new AcceptanceReportError('refusal evidence is a filtered or changed subset of the authoritative refusal ledger')
+}
+
+export function buildFiveOutcomeAcceptanceReport({outcomes,cohort,baseline,refusal_evidence=[],refusal_ledger},io={}){
   if(!Array.isArray(outcomes)||outcomes.length!==5)throw new AcceptanceReportError('exactly five consecutive outcomes are required')
-  const cohortIdentity=validateCohort(cohort,outcomes),baselineMedian=validateSamples('baseline',baseline)
+  const cohortIdentity=validateCohort(cohort,outcomes,io),baselineMedian=validateSamples('baseline',baseline)
   const rows=outcomes.map((row,index)=>{
     if(row.work_type!=='structural'||!['urgent-application','standard-application'].includes(row.service_class))throw new AcceptanceReportError(`outcome #${row.issue} is not an admitted structural service outcome`)
     if(row.unchanged_poll_count!==0||row.manual_reconstruction_count!==0)throw new AcceptanceReportError(`outcome #${row.issue} used unchanged polling or manual queue reconstruction`)
@@ -67,10 +79,11 @@ export function buildFiveOutcomeAcceptanceReport({outcomes,cohort,baseline,refus
   })
   if(!Array.isArray(refusal_evidence)||!refusal_evidence.length||refusal_evidence.some((row)=>row?.result!=='refused'||!Number.isInteger(row?.work_issue)||row.work_issue<1||!SHA.test(row?.head_sha??'')||!EVENT_ID.test(row?.event_id??'')||!EVIDENCE.test(row?.evidence??'')||!DIGEST.test(row?.evidence_digest??'')))throw new AcceptanceReportError('durable issue/head/digest-bound refusal-preservation evidence is required')
   if(refusal_evidence.some((row)=>row.evidence_digest!==boundDigest(row,['result','work_issue','event_id','head_sha','evidence'])))throw new AcceptanceReportError('refusal evidence digest is not bound to its exact refused issue, event, head, and evidence')
+  validateRefusalLedger(refusal_ledger,refusal_evidence,io)
   const currentSamples=rows.map((row)=>row.request_to_live_minutes),currentMedian=median(currentSamples),improvement=(baselineMedian-currentMedian)/baselineMedian
   if(improvement<0.5)throw new AcceptanceReportError(`median request-to-live improvement is ${(improvement*100).toFixed(1)}%, below 50%`)
   return{schema_version:1,status:'accepted',cohort:{...cohortIdentity,cohort_digest:cohort.cohort_digest},sample:{n:rows.length,issues:cohort.ordered_work_issues},baseline:{n:baseline.n,samples:[...baseline.samples],median_request_to_live_minutes:baselineMedian},current:{n:rows.length,samples:currentSamples,median_request_to_live_minutes:currentMedian,improvement_percent:Number((improvement*100).toFixed(1))},outcomes:rows,refusal_evidence,exceptions:rows.flatMap((row)=>row.exceptions.map((value)=>({issue:row.issue,detail:value})))}
 }
 
-export function main(argv){const index=argv.indexOf('--input');if(index<0||!argv[index+1]){console.error('REFUSED: --input <five-outcome.json> is required');return 2}try{console.log(JSON.stringify(buildFiveOutcomeAcceptanceReport(JSON.parse(readFileSync(argv[index+1],'utf8'))),null,2));return 0}catch(error){console.error(`REFUSED: ${error.message}`);return 2}}
+export function main(argv){const index=argv.indexOf('--input'),cohortIndex=argv.indexOf('--cohort-artifact'),refusalIndex=argv.indexOf('--refusal-ledger');if(index<0||!argv[index+1]||cohortIndex<0||!argv[cohortIndex+1]||refusalIndex<0||!argv[refusalIndex+1]){console.error('REFUSED: --input, --cohort-artifact, and --refusal-ledger files are required');return 2}try{const cohortArtifact=JSON.parse(readFileSync(argv[cohortIndex+1],'utf8')),refusalLedger=JSON.parse(readFileSync(argv[refusalIndex+1],'utf8'));console.log(JSON.stringify(buildFiveOutcomeAcceptanceReport(JSON.parse(readFileSync(argv[index+1],'utf8')),{readCohortArtifact:()=>cohortArtifact,readRefusalLedger:()=>refusalLedger}),null,2));return 0}catch(error){console.error(`REFUSED: ${error.message}`);return 2}}
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))process.exitCode=main(process.argv.slice(2))
