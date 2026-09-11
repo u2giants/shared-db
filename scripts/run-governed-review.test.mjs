@@ -20,7 +20,12 @@ test('all qualified wrappers receive immutable source arguments without rewritin
     }
   }
   for(const args of [['--base','f'.repeat(40)],['--assert-head='+ 'f'.repeat(40)],['--base',source.mergeBase,'--base='+source.mergeBase]])assert.throws(()=>wrapperSourceContractArgs('ai-glm',args,source),/does not match|duplicate/)
-  assert.throws(()=>wrapperSourceContractArgs('ai-deepseek-agent',[],source),/no qualified source/)
+  assert.throws(()=>wrapperSourceContractArgs('unknown-reviewer',[],source),/no qualified source/)
+  for(const wrapper of ['ai-deepseek-agent','C:\\tools\\AI-DEEPSEEK-AGENT.CMD']){
+    assert.deepEqual(wrapperSourceContractArgs(wrapper,['send','review this','--review'],source),['send','review this','--review','--base',source.mergeBase,'--assert-head',source.headSha])
+    assert.throws(()=>wrapperSourceContractArgs(wrapper,['send','advisory'],source),/requires a formal/)
+    assert.throws(()=>wrapperSourceContractArgs(wrapper,['send','advisory','--file','--review'],source),/requires a formal/)
+  }
 })
 
 function sourceIo(overrides={}){

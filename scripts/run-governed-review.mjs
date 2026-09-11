@@ -129,7 +129,7 @@ export function resolveReviewSource(options,{git=spawnSync,github=spawnGitHub}={
   return {repository:REPO,pr:Number(options.pr),baseRef,targetSha:target,headSha:head,mergeBase}
 }
 
-const SOURCE_WRAPPERS=new Set(['ai-claude-review','ai-codex-review','ai-gemini','ai-glm','ai-grok-review','ai-kimi','ai-muse','ai-qwen'])
+const SOURCE_WRAPPERS=new Set(['ai-claude-review','ai-codex-review','ai-deepseek-agent','ai-gemini','ai-glm','ai-grok-review','ai-kimi','ai-muse','ai-qwen'])
 const OPAQUE_VALUE_OPTIONS=new Set(['--prompt','--prompt-file','--decision','--tests','--system','--file','--model','--timeout','--review-kind','--governed-verdict'])
 function canonicalSourcePath(value){
   let path=String(value).replace(/\\/g,'/').replace(/^\/([a-z])\//i,'$1:/').replace(/\/$/,'')
@@ -169,6 +169,14 @@ export function validateSourceReceipt(receipt,source,worktree){
 }
 export function wrapperSourceContractArgs(wrapper,args,source){
   if(!SOURCE_WRAPPERS.has(wrapperBaseName(wrapper)))throw new Error('review wrapper has no qualified source identity contract')
+  if(wrapperBaseName(wrapper)==='ai-deepseek-agent'){
+    let formal=false
+    for(let i=1;i<args.length;i++){
+      if(OPAQUE_VALUE_OPTIONS.has(args[i])){i++;continue}
+      if(args[i]==='--review')formal=true
+    }
+    if(!['send','reply'].includes(args[0])||!formal)throw new Error('governed DeepSeek requires a formal send or reply with --review')
+  }
   const expected={'--base':source.mergeBase,'--assert-head':source.headSha},seen=new Set(),out=[]
   for(let i=0;i<args.length;i++){
     const token=String(args[i]),key=token.split('=')[0]
