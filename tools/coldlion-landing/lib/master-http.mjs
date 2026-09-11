@@ -16,7 +16,9 @@ export async function fetchPagedMaster(endpoint, params, apiKey, options = {}) {
   let expectedTotal = null;
   for (let page = 0; ; page += 1) {
     if (options.requestGate) await options.requestGate();
-    const { payload } = await fetchPage(masterUrl(endpoint, { ...params, page, size }), apiKey, options);
+    const requestParams = { ...params, page, size };
+    const { payload, httpStatus, bodyStatus } = await fetchPage(masterUrl(endpoint, requestParams), apiKey, options);
+    options.onResponse?.({ endpoint, params: requestParams, httpStatus, bodyStatus });
     if (!payload || Array.isArray(payload) || !Array.isArray(payload.content)) throw new Error(`${endpoint} did not return a paged envelope`);
     if (payload.number !== page || payload.numberOfElements !== payload.content.length) throw new Error(`${endpoint} returned inconsistent page ${page}`);
     if (payload.size > size) throw new Error(`${endpoint} returned an impossible page size`);
@@ -30,7 +32,7 @@ export async function fetchPagedMaster(endpoint, params, apiKey, options = {}) {
   return rows;
 }
 
-export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = fetch, requestGate, timeoutMs = REQUEST_TIMEOUT_MS, pauseMs = REQUEST_PAUSE_MS } = {}) {
+export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = fetch, requestGate, onResponse, timeoutMs = REQUEST_TIMEOUT_MS, pauseMs = REQUEST_PAUSE_MS } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     if (requestGate) await requestGate();
@@ -56,6 +58,7 @@ export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = f
         throw error;
       }
       if (!Array.isArray(payload)) throw new Error(`${endpoint} did not return the required plain array`);
+      onResponse?.({ endpoint, params, httpStatus: response.status, bodyStatus: Number.isInteger(payload?.status) ? payload.status : null });
       return payload;
     } catch (error) {
       lastError = error;

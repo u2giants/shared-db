@@ -33,22 +33,23 @@ async function fetchVariants(spec, baseParams, apiKey, options) {
   return rows;
 }
 
-function makeLoad(table, spec, sourceRows, requestedBy, startedAt, finishedAt, companyCode, divisionCodes) {
+function makeLoad(table, spec, sourceRows, requestedBy, startedAt, finishedAt, companyCode, requestEvidence) {
   const id = randomUUID();
   const projected = projectCurrentRows(spec, sourceRows, { runId: id, fetchedAt: finishedAt });
   return {
     table, spec, rows: projected.rows, excluded: projected.excluded,
-    run: { id, endpoint: spec.endpoint, companyCode, requestParams: {
-      companyCode, fullSnapshot: true,
-      ...(spec.active ? { active: ["Y", "N"] } : {}),
-      ...(spec.perDivision ? { divisionCodes } : {}),
-      ...(spec.paged ? { page: "0..last", size: 2000 } : {}),
-    }, httpStatus: 200, bodyStatus: null, requestedBy, startedAt, finishedAt, durationMs: Math.max(0, new Date(finishedAt)-new Date(startedAt)), rowsFetched: sourceRows.length },
+    run: { id, endpoint: spec.endpoint, companyCode, requestParams: { companyCode, fullSnapshot: true, requests: requestEvidence.map(({params})=>params) },
+      httpStatus: requestEvidence.every(({httpStatus})=>httpStatus===requestEvidence[0]?.httpStatus) ? requestEvidence[0]?.httpStatus : null,
+      bodyStatus: requestEvidence.every(({bodyStatus})=>bodyStatus===requestEvidence[0]?.bodyStatus) ? requestEvidence[0]?.bodyStatus : null,
+      requestedBy, startedAt, finishedAt, durationMs: Math.max(0, new Date(finishedAt)-new Date(startedAt)), rowsFetched: sourceRows.length },
   };
 }
 
 export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOptions={} } = {}) {
-  const options = { requestGate: makeGate(fetchOptions.pauseMs ?? 3000), ...fetchOptions };
+  const evidence = new Map();
+  const upstreamResponse = fetchOptions.onResponse;
+  const options = { requestGate: makeGate(fetchOptions.pauseMs ?? 3000), ...fetchOptions,
+    onResponse: (entry)=>{ if (!evidence.has(entry.endpoint)) evidence.set(entry.endpoint,[]); evidence.get(entry.endpoint).push(entry); upstreamResponse?.(entry); } };
   const startedAt = new Date().toISOString();
   const source = {};
   for (const name of ["division","customer","vendor","salesperson"]) {
@@ -68,18 +69,29 @@ export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOp
   const loads = [];
   for (const name of ["division","customer","vendor","salesperson","season","merch_group_header","merch_group_detail","item_header","item_detail"]) {
     const spec = MASTER_SPECS[name] ?? ITEM_SPECS[name];
-    loads.push(makeLoad(name, spec, source[name], "coldlion-landing sync-masters", startedAt, finishedAt, companyCode, divisions));
+    loads.push(makeLoad(name, spec, source[name], "coldlion-landing sync-masters", startedAt, finishedAt, companyCode, evidence.get(spec.endpoint) ?? []));
   }
   const byTable = Object.fromEntries(loads.map((load)=>[load.table,load]));
-  const itemSlots = [
+  const itemSlots = dedupeSlots([
     ...projectItemSlots(source.item_header, { runId: byTable.item_header.run.id, fetchedAt: finishedAt }),
     ...projectItemSlots(source.item_detail, { runId: byTable.item_detail.run.id, fetchedAt: finishedAt, itemPkey: "source" }),
-  ];
+  ]);
   const affectedItemGrains = [
     ...byTable.item_header.rows.map((r)=>({company_code:r.company_code,division_code:r.division_code,item_no:r.item_no,item_pkey:null})),
     ...byTable.item_detail.rows.map((r)=>({company_code:r.company_code,division_code:r.division_code,item_no:r.item_no,item_pkey:r.item_pkey})),
   ];
   return { loads, itemSlots, affectedItemGrains };
+}
+
+export function dedupeSlots(rows) {
+  const byKey=new Map();
+  for (const row of rows) {
+    const key=[row.company_code,row.division_code,row.item_no,row.item_pkey??"",row.slot_no].join("\u001f");
+    const prior=byKey.get(key);
+    if (prior && prior.source_hash!==row.source_hash) throw new Error("conflicting merchandise-group slots for one item grain");
+    byKey.set(key,row);
+  }
+  return [...byKey.values()];
 }
 
 export async function main(argv=process.argv.slice(2), dependencies={}) {
