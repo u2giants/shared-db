@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generation": 5,
+  "generation": 6,
   "work_issue": 2703,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Preserve explicit route/account OPA compliance observations, admit only newest approved complete evidence as current rights, and retain historical source identity and visibility.",
-  "base_sha": "5eaebe7c09683aef77bdef92aec454af5dddf2cb",
+  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
   "dispatcher": "Claude orchestrator #2758",
   "worker": "claude-2758-2703",
   "branch": "codex/issue-2703",
