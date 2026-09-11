@@ -4,22 +4,22 @@
   "outcome": "ready-for-merge",
   "pr": 2726,
   "migration_versions": [
-    "20260911170219"
+    "20260911205753"
   ],
-  "contract_ref": "refs/db-contracts/2506/30",
-  "contract_sha256": "307568db51a1c849276784e85e5cab4913ead08512f11c1e474fe61c760a9259",
-  "head_sha": "c79e36fe0266f7f2c77d4d4993e11a19adc15780",
+  "contract_ref": "refs/db-contracts/2506/31",
+  "contract_sha256": "6f6bc71804a4c97946091ad3bdf7a68ae574d7ee54502f325dd00723a4e08627",
+  "head_sha": "e900bd6da004e1b1ed0f41e7167477a645fbd6e2",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911170219.json",
+    "scripts/production-verification-sidecars/20260911205753.json",
     "scripts/production_business_risk_gate.py",
     "scripts/production_catalog_verification.py",
     "scripts/test_production_catalog_verification.py",
-    "supabase/migrations/20260911170219_popsg_search_v2_production_performance.sql"
+    "supabase/migrations/20260911205753_popsg_search_v2_production_performance.sql"
   ],
   "db_reads": [
     "table public.style_guide_search_documents",

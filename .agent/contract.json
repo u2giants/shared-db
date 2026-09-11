@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 30,
+  "generation": 31,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "9a62bd23342d66fb1697e9f6965221b8dca27103",
+  "base_sha": "f13a77dc8cef0b81e716fb39276bd734af7a07b5",
   "dispatcher": "Claude orchestrator marker2758",
   "worker": "Claude issue2506 refresh worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -13,9 +13,9 @@
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911170219_popsg_search_v2_production_performance.sql",
+    "supabase/migrations/20260911205753_popsg_search_v2_production_performance.sql",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911170219.json",
+    "scripts/production-verification-sidecars/20260911205753.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
@@ -25,9 +25,9 @@
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911170219_popsg_search_v2_production_performance.sql",
+    "supabase/migrations/20260911205753_popsg_search_v2_production_performance.sql",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911170219.json",
+    "scripts/production-verification-sidecars/20260911205753.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
@@ -74,7 +74,8 @@
     "Generation 27 rebases the contract on main 120fb612 (after #2743) with no scope change.",
     "Generation 28 rebases the contract on main f15f0f0e (after #2780) with no scope change.",
     "Generation 29 rebases the contract on main e11a5989 with no scope change.",
-    "Generation 30 rebases the contract on main 9a62bd23 with no scope change."
+    "Generation 30 rebases the contract on main 9a62bd23 with no scope change.",
+    "Generation 31 rebases on main f13a77dc (#2771) and records the lane-tool supersession of migration 20260911170219 to 20260911205753 past main's newer 20260911170650; SQL bytes unchanged, benchmark and catalog test repointed at implementation head e900bd6d."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
