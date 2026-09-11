@@ -1905,7 +1905,7 @@ PREVIEW_PRODUCER_PATHS += (
     "scripts/production-verification-sidecars/20260911081204.json",
     "config/db-data-admin-property-source-coverage.json",
     "scripts/production-verification-sidecars/20260908214749.json",
-    "scripts/production-verification-sidecars/20260911124016.json",
+    "scripts/production-verification-sidecars/20260911170219.json",
     "scripts/production-verification-sidecars/20260909084253.json",
     "scripts/production-verification-sidecars/20260910123636.json",
     "scripts/production-verification-sidecars/20260830013942.json",
