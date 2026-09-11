@@ -1,42 +1,39 @@
 {
   "schema_version": 1,
-  "work_issue": 2723,
+  "work_issue": 2707,
   "outcome": "ready-for-merge",
-  "pr": 2725,
+  "pr": 2749,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2723/2",
-  "contract_sha256": "ceb50dd6bbdfb70e359c05ae2b8446461cde49f99033e3e7c452357eda63d936",
-  "head_sha": "3386ff8869180e39f2d92ee9889a045f8d256894",
+  "contract_ref": "refs/db-contracts/2707/2",
+  "contract_sha256": "68d80ed503743d8ae7f787d545f7a650bcfc8ea57162899d4b0e9f0bb1edbd24",
+  "head_sha": "a419cb667b790fe0e6969c762918ca5d5ea14de4",
   "files_changed": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/verify_preview_apply_artifact.py",
-    "scripts/test_verify_preview_apply_artifact.py",
-    ".agent/contract.json",
-    ".agent/completion.json"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/run-governed-review.mjs",
+    "scripts/run-governed-review.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "command": "node --test scripts/run-governed-review.test.mjs",
       "exit_code": 0,
-      "evidence": "514 passed, 0 failed, 0 skipped; combined manager and governed-review suite also passed 563 tests."
-    },
-    {
-      "command": "python scripts/test_verify_preview_apply_artifact.py",
-      "exit_code": 0,
-      "evidence": "4 test groups pass, including altered digest, run, preview target, ledger additions/removals, duplicate ZIP names, historical recovery rejection and changed migration bytes."
+      "evidence": "60 passed, zero failed, cancelled, skipped or todo, including SSH transport identity."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "277 call sites match; three new local source/caller diagnostics reviewed as non-database claims."
     }
   ],
   "assumptions_resolved": [
-    "Read-only real2466 proof passed: original run34388774773 artifact10118828990 SHA2561cb18ecb1b7f91ab1d318bcc2434b6345c5166bdfcd3f762a39c212846f0937e; exact ledger addition20260909132734 and migration content checked at ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05.",
-    "One independent review, CI and parent merge remain required."
+    "Prospective delivery contract publication follows initial implementation and review; no earlier publication is claimed.",
+    "Final exact-head independent review, required CI and installed live acceptance remain pending."
   ],
   "stop_conditions_hit": []
 }

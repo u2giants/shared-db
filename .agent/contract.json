@@ -1,46 +1,46 @@
 {
-    "schema_version": 1,
-    "generation": 2,
-    "work_issue": 2723,
-    "work_type": "repo-maintenance",
-    "route": "repo-session",
-    "goal": "Recover authentic original preview application proof when archived GitHub display logs lose step names, preserving immutable run, artifact, ledger and migration-content checks.",
-    "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
-    "dispatcher": "codex orchestrator marker2714",
-    "worker": "codex finish_2507 maintenance child",
-    "branch": "codex/preview-artifact-proof-2466",
-    "worktree": "C:\\repos\\shared-db-worktrees\\preview-artifact-proof-2466",
-    "allowed_paths": [
-        "scripts/manage-migration-author-lanes.mjs",
-        "scripts/manage-migration-author-lanes.test.mjs",
-        "scripts/verify_preview_apply_artifact.py",
-        "scripts/test_verify_preview_apply_artifact.py",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "file_writes": [
-        "scripts/manage-migration-author-lanes.mjs",
-        "scripts/manage-migration-author-lanes.test.mjs",
-        "scripts/verify_preview_apply_artifact.py",
-        "scripts/test_verify_preview_apply_artifact.py"
-    ],
-    "db_reads": [],
-    "db_writes": [],
-    "prohibited_actions": [
-        "No database writes, replay, merges or weakening of provenance checks.",
-        "No changes to excluded issues2705 or2709."
-    ],
-    "required_checks": [
-        "node --test scripts/manage-migration-author-lanes.test.mjs",
-        "python scripts/test_verify_preview_apply_artifact.py",
-        "git diff --check"
-    ],
-    "assumptions": [
-        "Prospective recovery contract: initial local draft and regression tests predate publication; no retrospective publication claim.",
-        "Actual original2466 artifact must validate read-only; malformed named proof must still refuse."
-    ],
-    "stop_conditions": [
-        "Stop if original ZIP digest or migration bytes do not match.",
-        "Stop if any existing refusal regresses."
-    ]
+  "schema_version": 1,
+  "generation": 2,
+  "work_issue": 2707,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Complete source and terminal consumer delivery with exact source binding, safe diagnostic normalization and tested SSH transport identity.",
+  "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
+  "dispatcher": "Codex parent159 authorized maintenance programme",
+  "worker": "Codex programme_audit",
+  "branch": "codex/393-governed-source-contract",
+  "worktree": "C:/repos/shared-db-worktrees/393-governed-source-contract",
+  "allowed_paths": [
+    "scripts/run-governed-review.mjs",
+    "scripts/run-governed-review.test.mjs",
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
+  ],
+  "file_writes": [
+    "scripts/run-governed-review.mjs",
+    "scripts/run-governed-review.test.mjs",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
+  ],
+  "db_reads": [],
+  "db_writes": [],
+  "prohibited_actions": [
+    "No database structure or data access.",
+    "No shared-db orchestrator contact or new issues.",
+    "No weakening source identity, review, lease or CI gates."
+  ],
+  "required_checks": [
+    "node --test scripts/run-governed-review.test.mjs",
+    "git diff --check",
+    "node scripts/check-throughput-truth-audit.mjs"
+  ],
+  "assumptions": [
+    "Prospective delivery contract: existing implementation and independent review predate this publication; no retrospective publication claim.",
+    "Wrapper installation remains a separate live acceptance prerequisite.",
+    "Generation2 adds the existing semantic audit after CI identified three new non-database missing-evidence diagnostics."
+  ],
+  "stop_conditions": [
+    "Refuse stale source or review head.",
+    "Stop delivery on failed required checks or loss of existing reviewer capability."
+  ]
 }
