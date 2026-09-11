@@ -763,6 +763,14 @@ rules below are the operative summary.
 2. **Preview database first. Production never receives untested schema.** Apply every migration to
    the preview branch, prove it works, *then* promote to production (`qsllyeztdwjgirsysgai`).
 
+   ⚠️ **Exception, #2758: low-risk SQL may skip the preview apply.** Dispatch the production apply
+   with `ephemeral_check_run_id` (the job ID of the successful `supabase/tests against an ephemeral
+   database` check on the source PR head) instead of `preview_run_id`/`preview_artifact_digest`.
+   The gate refuses unless that job's run positively applied each migration and the merged bytes
+   equal the tested head, and it refuses outright for anything its conservative classifier does
+   not recognise as low-risk (rewrites, long locks, drops, backfills, unknown statements) — those
+   still need preview. Target proof, the lane lock and post-apply verification are unchanged.
+
    ⚠️ **The preview project ref is deliberately NOT written down here.** Preview is rebuilt from
    time to time and its ref changes when it is — `rjyboqwcdzcocqgmsyel` was deleted on 2026-08-18.
    The current ref lives in the repository variable `PREVIEW_PROJECT_REF`, every workflow that

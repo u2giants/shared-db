@@ -1,53 +1,50 @@
 {
-    "schema_version": 1,
-    "generation": 2,
-    "work_issue": 2478,
-    "work_type": "structural",
-    "route": "shared-db-orchestrator",
-    "goal": "Extract one SKU derivation shared by rebuild and read-only drift detector without changing grouping, correction, or drift behavior.",
-    "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
-    "dispatcher": "Codex orchestrator #2714",
-    "worker": "codex-2714-2478",
-    "branch": "codex/issue-2478-shared-sku-key",
-    "worktree": "C:/repos/shared-db-worktrees/issue-2478-shared-sku-key",
-    "allowed_paths": [
-        "supabase/migrations/20260911152754_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "file_writes": [
-        "supabase/migrations/20260911152754_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "db_reads": [],
-    "db_writes": [
-        "function public.style_group_key_for_sku",
-        "function public.rebuild_style_groups_batch",
-        "function public.reconcile_style_group_drift"
-    ],
-    "prohibited_actions": [
-        "No shared database writes by worker.",
-        "No correction of application row drift or change to nightly correction path.",
-        "No paid review, merge or main movement before parent priority window clears.",
-        "No changes to issues2705 or2709."
-    ],
-    "required_checks": [
-        "bash scripts/check-sql.sh",
-        "local PostgreSQL helper parity contracts",
-        "git diff --check"
-    ],
-    "assumptions": [
-        "Parent authorized adapting obsolete inline-token assertion to shared-helper wiring while preserving all existing behavior/security tests.",
-        "Latest consumer definitions derive from migrations20260906035323 and20260907031246."
-    ],
-    "stop_conditions": [
-        "Object overlap or changed source definitions.",
-        "Old/new grouping parity mismatch.",
-        "Consumer behavior or security changes beyond helper delegation."
-    ]
+  "schema_version": 1,
+  "generation": 3,
+  "work_issue": 2769,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Restrict EXECUTE on public.queue_nightly_rebuild_style_groups() so PUBLIC, anon and authenticated cannot run the #2440 rebuild-queue function; keep service_role and postgres (the cron caller).",
+  "base_sha": "b68a1900a6c287bd16adcbdacc8a3e4a8db543b1",
+  "dispatcher": "Claude orchestrator #2758",
+  "worker": "claude-2758-2769",
+  "branch": "claude/issue-2769-rebuild-queue-grants",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2769",
+  "allowed_paths": [
+    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "db_reads": [],
+  "db_writes": [
+    "function public.queue_nightly_rebuild_style_groups"
+  ],
+  "prohibited_actions": [
+    "No direct production DDL; production changes only through the governed promotion workflow.",
+    "No fabricated reviews or verdicts; no deleting locks, audit rows or history.",
+    "Do not touch #2705, #2709, #2290, #2678 or the #2543 residual."
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "git diff --check"
+  ],
+  "assumptions": [
+    "The only runtime caller is the nightly cron job running as postgres; no app (including popdam3) calls the function as anon or authenticated.",
+    "Revoking authenticated does not change the function body or its signature."
+  ],
+  "stop_conditions": [
+    "An application caller that runs as anon or authenticated is found.",
+    "Exact object collision with another active claim."
+  ]
 }

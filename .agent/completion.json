@@ -1,52 +1,41 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
+  "work_issue": 2769,
   "outcome": "ready-for-merge",
-  "pr": 2746,
+  "pr": 2776,
   "migration_versions": [
-    "20260911152754"
+    "20260911203057"
   ],
-  "contract_ref": "refs/db-contracts/2478/2",
-  "contract_sha256": "e0b45c2dc24aa6310adecd88ade690de5d501a77b215d4dffb43d3255463852f",
-  "head_sha": "d3eebc1ffaf95907fc0e95af7edce8fecb4b9a05",
+  "contract_ref": "refs/db-contracts/2769/3",
+  "contract_sha256": "14cfa0bafbc8ec1ecc61f966c7940ff4346aa2cb8ce43d2292a916aebb1e7dd1",
+  "head_sha": "988fdc3dbe53c3bbf94945cb26b27796b52a2fb2",
   "files_changed": [
-    "supabase/migrations/20260911152754_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
+    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
   ],
   "db_reads": [],
   "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
+    "function public.queue_nightly_rebuild_style_groups"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
-    },
-    {
-      "command": "local PostgreSQL helper parity contracts",
-      "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
+      "evidence": "Run at c42e3673 (after merging main f15f0f0e) in C:/repos/shared-db-worktrees/issue-2769: Static checks passed. No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "python -m unittest scripts.test_migration_derivation",
-      "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
+      "evidence": "git diff --check f15f0f0e c42e3673 reported no whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
+    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
+    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
+    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
+    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
   ],
   "stop_conditions_hit": []
 }
