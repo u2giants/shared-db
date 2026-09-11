@@ -39,20 +39,23 @@ export function validatePreviewClassification(value,inspectedFiles,target){
   if(new Set(value.applicable_checks).size!==value.applicable_checks.length)throw new Error('database preview classification has duplicate applicable checks')
   if(canonicalJson(value.invalidated_by)!==canonicalJson(INVALIDATION_CONDITIONS))throw new Error('database preview invalidation conditions are incomplete or changed')
   const seen=new Set(),files=value.files.map((entry)=>{
-    if(!entry||Object.keys(entry).some((key)=>!['path','sha256','impact','reason'].includes(key)))throw new Error('database preview classification file contains an unknown input')
+    if(!entry||Object.keys(entry).some((key)=>!['path','status','mode','blob_sha','sha256','impact','reason'].includes(key)))throw new Error('database preview classification file contains an unknown input')
     const normalized=String(entry?.path??'').replaceAll('\\','/')
     if(!normalized||normalized.startsWith('/')||normalized.split('/').includes('..')||seen.has(normalized))throw new Error('database preview classification has an unsafe or duplicate inspected path')
     seen.add(normalized)
     if(!/^[0-9a-f]{64}$/.test(String(entry?.sha256??'')))throw new Error(`database preview classification has an invalid file digest for ${normalized}`)
+    const hasGitIdentity=entry.status!==undefined||entry.mode!==undefined||entry.blob_sha!==undefined
+    if((value.decision===NO_DATABASE_PREVIEW||hasGitIdentity)&&(!['added','modified','removed','renamed','copied','changed','unchanged'].includes(entry?.status)||!/^100(?:644|755)$/.test(String(entry?.mode??''))||!/^[0-9a-f]{40}$/.test(String(entry?.blob_sha??''))))throw new Error(`database preview classification has invalid Git identity for ${normalized}`)
     if(!NO_PREVIEW_IMPACTS.has(entry?.impact)&&!PREVIEW_REQUIRED_IMPACTS.has(entry?.impact))throw new Error(`database preview classification has unknown impact for ${normalized}`)
     if(typeof entry?.reason!=='string'||!entry.reason.trim())throw new Error(`database preview classification has no impact reason for ${normalized}`)
-    return {path:normalized,sha256:entry.sha256,impact:entry.impact,reason:entry.reason.trim()}
+    return {path:normalized,...(hasGitIdentity?{status:entry.status,mode:entry.mode,blob_sha:entry.blob_sha}:{}),sha256:entry.sha256,impact:entry.impact,reason:entry.reason.trim()}
   }).sort((a,b)=>a.path.localeCompare(b.path))
   const checks=[...new Set(value.applicable_checks.map((check)=>check.trim()))].sort()
   if(!Array.isArray(inspectedFiles)||!inspectedFiles.length)throw new Error('exact inspected file set is required independently of the preview decision')
-  const authoritative=inspectedFiles.map((entry)=>({path:String(entry?.path??'').replaceAll('\\','/'),sha256:String(entry?.sha256??'')})).sort((a,b)=>a.path.localeCompare(b.path))
-  if(authoritative.some((entry)=>!entry.path||!/^[0-9a-f]{64}$/.test(entry.sha256))||new Set(authoritative.map((entry)=>entry.path)).size!==authoritative.length)throw new Error('exact inspected file set is malformed')
-  if(canonicalJson(authoritative)!==canonicalJson(files.map(({path,sha256})=>({path,sha256}))))throw new Error('database preview classification does not cover the exact inspected file set and bytes')
+  const authoritative=inspectedFiles.map((entry)=>{const hasGitIdentity=entry?.status!==undefined||entry?.mode!==undefined||entry?.blob_sha!==undefined;return{path:String(entry?.path??'').replaceAll('\\','/'),...(hasGitIdentity?{status:entry.status,mode:entry.mode,blob_sha:entry.blob_sha}:{}),sha256:String(entry?.sha256??'')}}).sort((a,b)=>a.path.localeCompare(b.path))
+  const malformed=authoritative.some((entry)=>!entry.path||!/^[0-9a-f]{64}$/.test(entry.sha256)||(value.decision===NO_DATABASE_PREVIEW&&(!['added','modified','removed','renamed','copied','changed','unchanged'].includes(entry.status)||!/^100(?:644|755)$/.test(String(entry.mode??''))||!/^[0-9a-f]{40}$/.test(String(entry.blob_sha??'')))))
+  if(malformed||new Set(authoritative.map((entry)=>entry.path)).size!==authoritative.length)throw new Error('exact inspected file set is malformed')
+  if(canonicalJson(authoritative)!==canonicalJson(files.map(({path,status,mode,blob_sha,sha256})=>({path,...(status!==undefined?{status,mode,blob_sha}:{}),sha256}))))throw new Error('database preview classification does not cover the exact inspected Git objects and bytes')
   const inspectedDigest=sha256(canonicalJson({classifier_version:PREVIEW_CLASSIFIER_VERSION,repository:value.repository,issue:value.issue,pr:value.pr,base_sha:value.base_sha,head_sha:value.head_sha,files,applicable_checks:checks}))
   if(value.inspected_digest!==inspectedDigest)throw new Error('database preview classification digest does not match its exact inspected inputs')
   const required=files.filter((file)=>PREVIEW_REQUIRED_IMPACTS.has(file.impact))

@@ -1553,6 +1553,13 @@ export const githubIo = {
   branchPulls(branch) { return ghPaginated(`repos/${REPO}/pulls?state=all&head=${REPO.split('/')[0]}:${encodeURIComponent(branch)}&per_page=100`) },
   getPr(number) { return ghJson(['api', `repos/${REPO}/pulls/${number}`]) },
   getPrFiles(number) { return ghPaginated(`repos/${REPO}/pulls/${number}/files?per_page=100`) },
+  databasePreviewFileSnapshot(pr,baseSha,headSha){
+    const readTree=(ref)=>{const body=ghJson(['api',`repos/${REPO}/git/trees/${ref}?recursive=1`]);if(body?.truncated===true||!Array.isArray(body?.tree))throw new LaneError(`live Git tree is incomplete for ${ref}`);return new Map(body.tree.filter((row)=>row?.type==='blob').map((row)=>[row.path,{blob_sha:row.sha,mode:row.mode}]))}
+    const base=readTree(baseSha),head=readTree(headSha),files=this.getPrFiles(pr)
+    if(!Array.isArray(files)||!files.length)throw new LaneError('live pull request changed-file set is empty or unreadable')
+    const seen=new Set()
+    return files.map((file)=>{const path=String(file?.filename??'').replaceAll('\\','/'),status=String(file?.status??''),tree=status==='removed'?base:head,entry=tree.get(path);if(!path||seen.has(path)||!['added','modified','removed','renamed','copied','changed','unchanged'].includes(status)||!entry?.blob_sha||!/^100(?:644|755)$/.test(String(entry.mode??'')))throw new LaneError(`live Git identity is unavailable for changed file ${path||'(missing path)'}`);seen.add(path);const content=this.getFileAt(path,status==='removed'?baseSha:headSha),databaseSignal=/(?:\b(?:create|alter|drop|grant|revoke|insert|update|delete)\b[\s\S]{0,40}\b(?:table|view|function|policy|role|schema|into|from)\b|\bsupabase\b|\bpsql\b|\bapply_migration\b|\bdb\s+push\b)/i.test(content),databasePath=/(?:^|\/)(?:supabase|migrations?|policies)(?:\/|$)|\.sql$/i.test(path),safeDocumentation=/^(?:docs\/.*\.(?:md|txt)|HANDOFF\.d\/.*\.md|plan_[^/]*\.md|README\.md)$/i.test(path),impact=status==='removed'||databaseSignal||databasePath?(databaseSignal||databasePath?'database-behavior':'ambiguous'):safeDocumentation&&entry.mode==='100644'?'documentation':'ambiguous';return{path,status,mode:entry.mode,blob_sha:entry.blob_sha,sha256:sha256(content),impact}}).sort((a,b)=>a.path.localeCompare(b.path))
+  },
   comparePullRequestFiles(baseSha,headSha) {
     const comparison=ghJson(['api',`repos/${REPO}/compare/${baseSha}...${headSha}`])
     if(comparison?.base_commit?.sha!==baseSha||!Array.isArray(comparison?.files))throw new LaneError('exact base-to-head comparison is unreadable')
@@ -1895,14 +1902,13 @@ function livePreviewLedger(){
 export function deriveLiveNoDatabasePreview(issue,io){
   const evidence=io.databasePreviewClassification?.(issue)
   if(evidence===null||evidence===undefined)return null
-  const route=selectPreviewRoute({...evidence,issue:Number(issue)})
-  if(route.status==='UNVERIFIABLE')throw new LaneError(`database preview classification is unverifiable: ${route.reason}`)
-  if(route.route!== 'NO_DATABASE_PREVIEW')return null
-  return {issue:Number(issue),pr:evidence.pr,base_sha:evidence.base_sha,head_sha:evidence.head_sha,bundle_id:evidence.bundle_id,route:'no_database_preview',route_context:'',decision_id:route.decision_id,reason:route.reason,next_action:'return-to-natural-owner',applicable_checks:route.classification.applicable_checks}
+  const admission=databasePreviewAdmission({preparePreviewDispatch:Number(issue),issue:Number(issue),pr:evidence.pr},io)
+  if(admission.decision!=='NO_DATABASE_PREVIEW')return null
+  return {...admission,route:'no_database_preview',route_context:''}
 }
 
 export function databasePreviewAdmission(options,io){
-  const guarded=Boolean(options.claim||options.assignReviewer||options.acquireExclusive||options.preparePreviewDispatch||options.repairPreviewReady)
+  const guarded=Boolean(options.claim||options.assignReviewer||options.acquireExclusive||options.preparePreviewDispatch||options.repairPreviewReady||options.reconcileFlow)
   if(!guarded)return {guarded:false,decision:'NOT_APPLICABLE'}
   if(io.databasePreviewClassificationEvidence===undefined||io.databasePreviewClassificationEvidence===null)return {guarded:true,decision:'DATABASE_PREVIEW_REQUIRED',reason:'no no-database-preview evidence was supplied; structural admission remains required'}
   const issue=Number(options.issue??options.preparePreviewDispatch)
@@ -1913,8 +1919,17 @@ export function databasePreviewAdmission(options,io){
   let live
   try{live=io.getPr(evidence.pr)}catch(error){throw new LaneError(`live pull request identity is unreadable: ${error.message}`)}
   if(!live||live.number!==evidence.pr||live.state!=='open'||live.base?.repo?.full_name!==REPO||live.base?.sha!==evidence.base_sha||live.head?.sha!==evidence.head_sha)throw new LaneError('database preview evidence does not match the authenticated live pull request repository, base, and head')
+  let inspectedFiles
+  try{inspectedFiles=io.databasePreviewFileSnapshot(evidence.pr,evidence.base_sha,evidence.head_sha)}catch(error){throw new LaneError(`authenticated live changed-file evidence is unreadable: ${error.message}`)}
+  let finalLive
+  try{finalLive=io.getPr(evidence.pr)}catch(error){throw new LaneError(`final live pull request identity is unreadable: ${error.message}`)}
+  if(!finalLive||finalLive.number!==evidence.pr||finalLive.state!=='open'||finalLive.base?.repo?.full_name!==REPO||finalLive.base?.sha!==evidence.base_sha||finalLive.head?.sha!==evidence.head_sha)throw new LaneError('pull request moved while authenticated changed-file evidence was read')
+  const liveBundleId=sha256(canonicalJson({repository:REPO,pr:evidence.pr,base_sha:evidence.base_sha,head_sha:evidence.head_sha,files:inspectedFiles}))
+  if(evidence.bundle_id!==liveBundleId)throw new LaneError('database preview bundle identity does not match authenticated live Git files')
+  const claimedImpacts=new Map((evidence.database_preview?.files??[]).map((file)=>[file.path,file.impact]))
+  if(inspectedFiles.some((file)=>claimedImpacts.get(file.path)!==file.impact))throw new LaneError('database preview impact classification does not match authenticated live file content')
   let classification
-  try{classification=validatePreviewClassification(evidence.database_preview,evidence.inspected_files,{repository:REPO,issue,pr:evidence.pr,base_sha:evidence.base_sha,head_sha:evidence.head_sha})}
+  try{classification=validatePreviewClassification(evidence.database_preview,inspectedFiles,{repository:REPO,issue,pr:evidence.pr,base_sha:evidence.base_sha,head_sha:evidence.head_sha})}
   catch(error){throw new LaneError(`database preview classification is unverifiable: ${error.message}`)}
   if(classification.decision==='NO_DATABASE_PREVIEW')return {guarded:true,decision:classification.decision,reason:'exact inspected inputs prove no database preview is applicable',next_action:'return-to-natural-owner',issue,pr:evidence.pr,base_sha:evidence.base_sha,head_sha:evidence.head_sha,bundle_id:evidence.bundle_id,classification_digest:classification.inspected_digest,applicable_checks:classification.applicable_checks}
   return {guarded:true,decision:'DATABASE_PREVIEW_REQUIRED',reason:classification.reason_code}
