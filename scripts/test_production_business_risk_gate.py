@@ -1049,6 +1049,14 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             with self.assertRaisesRegex(RiskGateError, "absent where exact main has it present"):
                 prove_preview_producer_matches_main(ref, exact_main(main), main, absent_at_ref(later))
 
+    def test_migration_objects_reads_quoted_identifiers(self):
+        """#2758 review: a quoted name outside [a-z0-9_$] must still count as an overlap."""
+        from production_business_risk_gate import migration_objects
+        found = migration_objects('alter table "Sales-Data"."Order ""Line""" add x int; create table catalog.widget ();')
+        self.assertIn('sales-data.order "line"', found)
+        self.assertIn("catalog.widget", found)
+        self.assertEqual(migration_objects('select 1 from pg_catalog."pg class";'), set())
+
     def test_the_tree_read_receives_transport_retries(self):
         """The tree read now carries the producer pin for a whole promotion.
 

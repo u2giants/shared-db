@@ -432,6 +432,18 @@ test('POSITIVE CONTROL #2758: a refusal at an equivalent prior head is never car
   assert.throws(() => evaluateApprovalWithRefresh(input, { contentPreservingRefresh: () => ({ ok: true }) }), /carries a durable reviewer refusal/)
 })
 
+test('POSITIVE CONTROL #2758: a head with an assignment of its own is never carried past', () => {
+  const input = refreshedInput()
+  input.assignments.push({ ...input.assignments[0], headSha: REFRESHED_HEAD, ref: `${input.assignments[0].ref}-new` })
+  assert.throws(() => evaluateApprovalWithRefresh(input, { contentPreservingRefresh: () => ({ ok: true }) }), /reviewer records of its own/)
+})
+
+test('POSITIVE CONTROL #2758: a head with a return of its own is never carried past', () => {
+  const input = refreshedInput()
+  input.returns = [{ ...input.priorHeads[0].returns[0], headSha: REFRESHED_HEAD }]
+  assert.throws(() => evaluateApprovalWithRefresh(input, { contentPreservingRefresh: () => ({ ok: true }) }), /reviewer records of its own/)
+})
+
 // The ref name only SELECTS the record; the commit is what is trusted, and it is
 // checked back against the name it is stored under. A return record filed under a
 // name that does not describe it decides which slot is charged, so a disagreement

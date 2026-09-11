@@ -404,6 +404,13 @@ export function evaluateApprovalWithRefresh(input, { contentPreservingRefresh })
   if (!Array.isArray(input?.verdicts) || typeof contentPreservingRefresh !== 'function') throw exactError
   if (input.verdicts.some((row) => !isValidatedVerdictArtifact(row))) throw exactError
   if (durableRefusalsAt(input.verdicts, input.pr, input.headSha).length) throw exactError
+  // A head with reviewer records of its own -- an assignment, a replacement, a
+  // return or any verdict -- is judged on those records alone. Carrying a prior
+  // head's sign-off past them would bypass a slot returned or newly drawn at this
+  // head (muse review of PR #2780).
+  const head = String(input.headSha).toLowerCase()
+  const ownAssignments = (input.assignments ?? []).filter((row) => String(row.headSha ?? '').toLowerCase() === head)
+  if (ownAssignments.length || (input.returns ?? []).length || input.verdicts.length) throw new ApprovalCheckError(`${exactError.message}; an APPROVE cannot be carried forward because this head has reviewer records of its own (assignment, return or verdict), so it is judged on those alone`)
   const equivalent = []
   for (const prior of input.priorHeads ?? []) {
     if (!Array.isArray(prior?.verdicts) || prior.verdicts.some((row) => !isValidatedVerdictArtifact(row))) continue

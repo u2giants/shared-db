@@ -3540,6 +3540,11 @@ export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
   try{return assertExactDurableReviewApproval(issue,pr,head,io)}catch(exactError){
     if(!(exactError instanceof LaneError)||typeof io.contentPreservingRefresh!=='function')throw exactError
     if(/durable reviewer refusal/.test(exactError.message))throw exactError
+    // A head with reviewer records of its own (assignment, replacement, return or
+    // verdict) is judged on those alone: carrying a prior head's sign-off past
+    // them would bypass a slot returned or newly drawn here (muse review, #2780).
+    const own=[REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_RETURN_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX].flatMap((p)=>io.listRefs(`${p}/${Number(issue)}-${Number(pr)}-${head}`)??[])
+    if(own.length)throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because this head has reviewer records of its own (assignment, return or verdict), so it is judged on those alone`)
     const prefix=(p)=>`${p}/${Number(issue)}-${Number(pr)}-`
     const priors=[...new Set([REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX].flatMap((p)=>io.listRefs(prefix(p))).map(({ref})=>parseAssignmentRef(ref)).filter((named)=>named&&named.issue===Number(issue)&&named.pr===Number(pr)).map((named)=>named.headSha))].filter((sha)=>sha!==head)
     const equivalent=priors.filter((sha)=>io.contentPreservingRefresh(sha,head)?.ok===true)

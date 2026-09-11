@@ -29,7 +29,10 @@
 import { execFileSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 
-export const REFRESH_REGENERATED_PATHSPEC = ':(exclude).agent'
+// `top` anchors at the repository root and the trailing slash limits the match to
+// the directory, so only the root `.agent/` tree is excluded: a nested
+// `sub/.agent/` path, or a root FILE named `.agent`, is still compared.
+export const REFRESH_REGENERATED_PATHSPEC = ':(top,exclude).agent/'
 
 const SHA = /^[0-9a-f]{40}$/
 

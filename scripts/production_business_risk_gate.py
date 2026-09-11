@@ -566,6 +566,10 @@ PREVIEW_PRODUCER_PATHS = (
     # rehearsal to proceed at all. Unpinned, a doctored copy could accept ANY
     # tip -- which is the whole gate.
     "scripts/check-main-tip-freshness.mjs",
+    # Static import of both the manager and the freshness check (#2758). It
+    # decides tip acceptance and whether two heads carry the same pull request
+    # diff, so an unpinned copy could wave any tip or any refresh through.
+    "scripts/lib/pr-content-equivalence.mjs",
     # Invoked by the manager before preview preparation to prove the live sole
     # orchestrator identity. Its result gates whether preparation may proceed.
     "scripts/check-orchestrator-marker.mjs",
@@ -847,7 +851,11 @@ def authored_merge(merge_sha: str) -> ProvedTarget:
 
 
 SIDECAR_PATH = re.compile(r"^scripts/production-verification-sidecars/(\d{14})\.json$")
-_QUALIFIED_OBJECT = re.compile(r'"?([a-z_][a-z0-9_$]*)"?\s*\.\s*"?([a-z_][a-z0-9_$]*)"?')
+# Each part is a quoted identifier (any characters, "" escaping a quote) or a
+# bare one. Quoted names are case-folded with the rest of the text, which can
+# only merge two names into one overlap, never hide one.
+_IDENT = r'(?:"((?:[^"]|"")+)"|([a-z_][a-z0-9_$]*))'
+_QUALIFIED_OBJECT = re.compile(_IDENT + r'\s*\.\s*' + _IDENT)
 _SYSTEM_SCHEMAS = {"pg_catalog", "information_schema"}
 
 
@@ -859,10 +867,13 @@ def migration_objects(sql: str) -> set[str]:
     """
     text = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
     text = re.sub(r"--[^\n]*", " ", text).lower()
-    return {
-        f"{schema}.{name}" for schema, name in _QUALIFIED_OBJECT.findall(text)
-        if schema not in _SYSTEM_SCHEMAS
-    }
+    names = set()
+    for quoted_schema, bare_schema, quoted_name, bare_name in _QUALIFIED_OBJECT.findall(text):
+        schema = quoted_schema.replace('""', '"') if quoted_schema else bare_schema
+        name = quoted_name.replace('""', '"') if quoted_name else bare_name
+        if schema not in _SYSTEM_SCHEMAS:
+            names.add(f"{schema}.{name}")
+    return names
 
 
 def independent_sidecar_paths(

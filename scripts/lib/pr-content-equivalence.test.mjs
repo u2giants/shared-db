@@ -58,6 +58,15 @@ test('an .agent evidence-only change keeps the approval', () => {
   } finally { rmSync(repo, { recursive: true, force: true }) }
 })
 
+test('POSITIVE CONTROL: only the root .agent/ tree is excluded; a nested .agent path is compared', () => {
+  const { repo, approved } = fixture()
+  try {
+    const nested = commit(repo, { 'supabase/.agent/contract.json': '{"smuggled":true}\n' }, 'nested agent dir')
+    const proof = check(repo, approved, nested)
+    assert.equal(proof.ok, false); assert.match(proof.reason, /diff changed/)
+  } finally { rmSync(repo, { recursive: true, force: true }) }
+})
+
 test('POSITIVE CONTROL: a rewritten branch is not a refresh even with the same diff', () => {
   const { repo, approved } = fixture()
   try {
