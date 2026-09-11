@@ -42,5 +42,5 @@
   "stop_conditions": [
     "Stop if implementation requires a database or production write."
   ],
-  "generation": 2
+  "generation": 3
 }
