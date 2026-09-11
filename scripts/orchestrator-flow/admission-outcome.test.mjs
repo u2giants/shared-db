@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange } from './admission.mjs'
+import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange, inspectPrStructuralChange } from './admission.mjs'
 import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
 import { formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
 import { admitIssue, buildDynamicQueues, claimBody, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
@@ -182,6 +182,18 @@ test('a merge-closed admitted issue reopens only for a merged linked PR', () => 
   assert.equal(state,'open')
 })
 
+test('a refused merged PR leaves its closed issue closed',()=>{
+  let state='closed',updates=0
+  const io={getIssue:()=>({...issue(scopeBody()),state}),updateIssue:(_n,fields)=>{updates++;state=fields.state},closingIssuesForPr:()=>[{number:41,state:'closed'}],getPr:()=>({merged_at:'2026-09-11T00:00:00Z',head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'drop table core.example, core.other;'}
+  assert.throws(()=>admitIssue(41,io,{pr:7}),/structural objects must exactly match/)
+  assert.equal(state,'closed');assert.equal(updates,0)
+})
+
+test('multi-target DDL binds every structural object',()=>{
+  const result=inspectPrStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'drop table core.example, core.other;'}])
+  assert.deepEqual(result.objects,['table core.example','table core.other'])
+})
+
 test('downloaded proof contents bind live assertion and generated types to exact issue, app head, and instant',()=>{
   const evidence={work_issue:41,application_commit_sha:'a'.repeat(40),live_assertion:'create works',environment:'production',verified_at:'2026-09-11T01:00:00Z',generated_types_output_digest:`sha256:${'b'.repeat(64)}`}
   const live={schema_version:1,work_issue:41,application_commit_sha:'a'.repeat(40),live_assertion:'create works',environment:'production',result:'passed',observed_at:'2026-09-11T01:00:00Z'}
@@ -208,6 +220,14 @@ test('outcome lifecycle refuses every skip and merge is not live completion', ()
   assert.equal(outcomeHistory(skipped).valid,false)
   assert.equal(outcomeHistory(eventComments('merged')).complete,false)
   assert.equal(outcomeHistory(eventComments('live_verified')).complete,true)
+})
+
+test('untrusted forged and malformed event comments cannot alter lifecycle history',()=>{
+  const trusted=eventComments('classified').map((row)=>({...row,author_association:'OWNER'}))
+  const forged={...eventComments('live_verified').at(-1),author_association:'NONE'}
+  const malformed={body:'```db-coordination-event\n{bad json}\n```',author_association:'NONE'}
+  const history=outcomeHistory([...trusted,forged,malformed],41)
+  assert.equal(history.valid,true);assert.equal(history.state,'classified')
 })
 
 test('admission and dispatch can share the command clock without invalidating claim history',()=>{
@@ -247,13 +267,13 @@ test('every linear outcome transition records exactly once and every skip refuse
 function completionFixture({through='production_applied',generated='not-applicable'}={}) {
   const comments=eventComments(through), merge='a'.repeat(40), app='b'.repeat(40)
   let issueState='open'
-  const evidence={schema_version:1,work_issue:41,merge_pr:7,merge_sha:merge,application_repository:'u2giants/example-app',application_commit_sha:app,live_assertion:'authenticated create-and-read succeeds',live_evidence:'https://github.com/u2giants/example-app/actions/runs/99',live_artifact_id:123,live_artifact_digest:`sha256:${'c'.repeat(64)}`,environment:'production',verified_at:'2026-09-11T01:00:00Z',...(generated==='required'?{generated_types_evidence:'https://github.com/u2giants/example-app/actions/runs/98',generated_types_artifact_id:122,generated_types_artifact_digest:`sha256:${'d'.repeat(64)}`,generated_types_output_digest:`sha256:${'e'.repeat(64)}`}:{})}
+  const evidence={schema_version:1,work_issue:41,merge_pr:7,merge_sha:merge,production_evidence:'https://github.com/u2giants/shared-db/actions/runs/97',production_artifact_id:121,production_artifact_digest:`sha256:${'f'.repeat(64)}`,application_repository:'u2giants/example-app',application_commit_sha:app,live_assertion:'authenticated create-and-read succeeds',live_evidence:'https://github.com/u2giants/example-app/actions/runs/99',live_artifact_id:123,live_artifact_digest:`sha256:${'c'.repeat(64)}`,environment:'production',verified_at:'2026-09-11T01:00:00Z',...(generated==='required'?{generated_types_evidence:'https://github.com/u2giants/example-app/actions/runs/98',generated_types_artifact_id:122,generated_types_artifact_digest:`sha256:${'d'.repeat(64)}`,generated_types_output_digest:`sha256:${'e'.repeat(64)}`}:{})}
   const io={
     getIssue:()=>({...issue(scopeBody({generated})),state:issueState}),updateIssue:(_n,fields)=>{issueState=fields.state},parseScope:parseQueueScope,issueComments:()=>comments,
     readOutcomeEvidence:()=>['```db-outcome-evidence',JSON.stringify(evidence),'```'].join('\n'),
     closingIssuesForPr:()=>[{number:41,state:'closed'}],prStructuralObjects:()=>['table core.example'],
     getPr:()=>({merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:merge}),mergeCommitInMain:()=>true,
-    applicationCommitInDefaultBranch:()=>true,verifyLiveAssertion:()=>true,verifyGeneratedTypes:()=>true,
+    applicationCommitInDefaultBranch:()=>true,verifyProductionApply:()=>true,verifyLiveAssertion:()=>true,verifyGeneratedTypes:()=>true,
     commentIssue:(_n,body)=>comments.push({body}),
   }
   return {io,comments}
@@ -291,6 +311,14 @@ test('completion retries safely after completion-comment or close response loss'
   }
 })
 
+test('existing incompatible completion refuses before publishing live_verified',()=>{
+  const {io,comments}=completionFixture()
+  comments.push({body:['```db-work-completion',JSON.stringify({schema_version:1,work_issue:41,outcome:'merged',pr:7,merge_sha:'a'.repeat(40),migration_versions:[]}), '```'].join('\n')})
+  const before=comments.length
+  assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/existing immutable completion record disagrees/)
+  assert.equal(comments.length,before);assert.equal(outcomeHistory(comments,41).state,'production_applied')
+})
+
 test('completion refuses preview-only, merge-only, missing generated types, missing return address, and mismatched live assertion', () => {
   for(const through of ['preview_verified','merged']){const {io}=completionFixture({through});assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/not production_applied/)}
   {const {io}=completionFixture({generated:'required'});const base=io.readOutcomeEvidence;io.readOutcomeEvidence=()=>base().replace(/,"generated_types_evidence":"[^"]+"/,'');assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/generated types/)}
@@ -298,4 +326,5 @@ test('completion refuses preview-only, merge-only, missing generated types, miss
   {const {io}=completionFixture();const base=io.readOutcomeEvidence;io.readOutcomeEvidence=()=>base().replace('authenticated create-and-read succeeds','different assertion');assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/live_assertion/)}
   {const {io}=completionFixture();io.closingIssuesForPr=()=>[{number:41},{number:42}];assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/not linked exclusively/)}
   {const {io}=completionFixture();io.prStructuralObjects=()=>['table core.other'];assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/structural objects do not match/)}
+  {const {io}=completionFixture();io.verifyProductionApply=()=>false;assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/production application/)}
 })

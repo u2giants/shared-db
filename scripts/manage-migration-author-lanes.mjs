@@ -1791,7 +1791,7 @@ export const githubIo = {
   createClaim(title, body) { return gh(['issue', 'create', '--repo', REPO, '--label', 'db-claim', '--title', `CLAIM: ${title}`, '--body', body]).trim() },
   createIssueIn(repo, title, body) { return gh(['issue','create','--repo',repo,'--title',title,'--body',body]).trim() },
   commentIssue(number, body) { gh(['issue','comment',String(number),'--repo',REPO,'--body',body]) },
-  issueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body: c.body })) },
+  issueComments(number) { return ghPaginated(`repos/${REPO}/issues/${number}/comments?per_page=100`).map((c)=>({ body:c.body, author_association:c.author_association, author:c.user?.login })) },
   readOutcomeEvidence(ref) {
     const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/(?:issues|pull)\/\d+#issuecomment-(\d+)$/.exec(String(ref??''))
     if(!match)throw new LaneError('outcome evidence must be an exact GitHub issue or pull-request comment URL')
@@ -1802,6 +1802,15 @@ export const githubIo = {
     if(!branch)return false
     const comparison=ghJson(['api',`repos/${repository}/compare/${sha}...${encodeURIComponent(branch)}`])
     return comparison?.behind_by===0&&['identical','ahead'].includes(comparison?.status)
+  },
+  verifyProductionApply(evidence){
+    const match=/^https:\/\/github\.com\/(u2giants\/shared-db)\/actions\/runs\/(\d+)$/.exec(String(evidence?.production_evidence??''))
+    if(!match)return false
+    const run=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}`])
+    if(run?.conclusion!=='success'||run?.event!=='workflow_dispatch'||run?.path!=='.github/workflows/shared-supabase-migrations.yml'||String(run?.head_sha??'').toLowerCase()!==String(evidence.merge_sha).toLowerCase())return false
+    const artifacts=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}/artifacts`])?.artifacts
+    const artifact=Array.isArray(artifacts)?artifacts.find((row)=>Number(row.id)===Number(evidence.production_artifact_id)):null
+    return artifact?.name===`production-migration-apply-${String(evidence.merge_sha).toLowerCase()}`&&artifact.expired===false&&String(artifact.digest??'').toLowerCase()===String(evidence.production_artifact_digest).toLowerCase()
   },
   verifyLiveAssertion(evidence) {
     const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)$/.exec(String(evidence?.live_evidence??''))
@@ -5362,6 +5371,7 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
   let issue = io.getIssue(Number(number))
   let livePr=null
   let scope=null
+  let reopenAfterValidation=false
   try {
     if(pr!==null){
       livePr=io.getPr(Number(pr))
@@ -5369,9 +5379,8 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       if(!Array.isArray(linked)||linked.length!==1||Number(linked[0]?.number)!==Number(number))throw new AdmissionError(`pull request #${pr} must close exactly admitted issue #${number}`)
       if(String(issue?.state??'').toLowerCase()==='closed'){
         if(!livePr?.merged_at||typeof io.updateIssue!=='function')throw new AdmissionError(`issue #${number} is closed and cannot be admitted`)
-        io.updateIssue(Number(number),{state:'open'})
-        issue=io.getIssue(Number(number))
-        if(String(issue?.state??'').toLowerCase()!=='open')throw new AdmissionError(`issue #${number} did not reopen after its linked merge`)
+        reopenAfterValidation=true
+        issue={...issue,state:'open'}
       }
     }
     scope = parseQueueScope(issue?.body ?? '')
@@ -5389,6 +5398,11 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       const declared=[...scope.writes].sort()
       if(inspection.objects.length!==declared.length||inspection.objects.some((value,index)=>value!==declared[index]))throw new AdmissionError(`pull request #${pr} structural objects must exactly match admitted issue #${number} writes`)
       admitted={...admitted,actual_objects:inspection.objects,migrations:inspection.migrations}
+    }
+    if(reopenAfterValidation){
+      io.updateIssue(Number(number),{state:'open'})
+      issue=io.getIssue(Number(number))
+      if(String(issue?.state??'').toLowerCase()!=='open')throw new AdmissionError(`issue #${number} did not reopen after its linked merge`)
     }
     if(!admitted.legacy&&io.issueComments&&io.commentIssue){
       let history=outcomeHistory(io.issueComments(Number(number)),number)

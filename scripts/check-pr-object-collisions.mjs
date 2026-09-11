@@ -405,10 +405,10 @@ const DISPATCH_PATTERNS = [
   {
     kinds: ['table'],
     re: new RegExp(
-      String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED})`,
+      String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED}(?:\s*,\s*${QUALIFIED})*)`,
       'gi',
     ),
-    map: (m) => [{ action: 'drop', kind: 'table', target: canonical(m[1]) }],
+    map: (m) => [...m[1].matchAll(new RegExp(QUALIFIED,'g'))].map((target) => ({ action:'drop', kind:'table', target:canonical(target[0]) })),
   },
   {
     // `alter table` in ALL its forms. Per plan D9 this is TABLE-level: every
@@ -701,9 +701,11 @@ export function extractOperations(sql) {
   while ((temporaryMatch = temporaryCreate.exec(text)) !== null) {
     temporaryEvents.push({ offset: temporaryMatch.index, action: 'create', target: canonical(temporaryMatch[1]) })
   }
-  const tableDrop = new RegExp(String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED})`, 'gi')
+  const tableDrop = new RegExp(String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED}(?:\s*,\s*${QUALIFIED})*)`, 'gi')
   while ((temporaryMatch = tableDrop.exec(text)) !== null) {
-    temporaryEvents.push({ offset: temporaryMatch.index, action: 'drop', target: canonical(temporaryMatch[1]) })
+    for(const target of temporaryMatch[1].matchAll(new RegExp(QUALIFIED,'g'))){
+      temporaryEvents.push({ offset:temporaryMatch.index, action:'drop', target:canonical(target[0]) })
+    }
   }
   temporaryEvents.sort((a,b)=>a.offset-b.offset)
   const liveTemporaryTables=new Set(),temporaryCleanupOffsets=new Set()

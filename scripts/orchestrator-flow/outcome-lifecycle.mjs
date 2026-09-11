@@ -27,6 +27,7 @@ export function parseOutcomeEvidence(body = '') {
   if (!record || typeof record !== 'object' || Array.isArray(record)) throw new OutcomeError('db-outcome-evidence must be a JSON object')
   const known = new Set([
     'schema_version', 'work_issue', 'merge_pr', 'merge_sha', 'application_repository',
+    'production_evidence', 'production_artifact_id', 'production_artifact_digest',
     'application_commit_sha', 'generated_types_evidence', 'generated_types_artifact_id', 'generated_types_artifact_digest', 'generated_types_output_digest', 'live_assertion',
     'live_evidence', 'live_artifact_id', 'live_artifact_digest', 'environment', 'verified_at',
   ])
@@ -35,6 +36,9 @@ export function parseOutcomeEvidence(body = '') {
   if (!Number.isInteger(record.work_issue) || record.work_issue <= 0) throw new OutcomeError('db-outcome-evidence work_issue must be positive')
   if (!Number.isInteger(record.merge_pr) || record.merge_pr <= 0) throw new OutcomeError('db-outcome-evidence must name merge_pr')
   if (!SHA.test(record.merge_sha ?? '')) throw new OutcomeError('db-outcome-evidence must name the exact 40-character merge_sha')
+  if (typeof record.production_evidence !== 'string' || !EVIDENCE_REF.test(record.production_evidence)) throw new OutcomeError('db-outcome-evidence must link durable production apply proof')
+  if (!Number.isInteger(record.production_artifact_id) || record.production_artifact_id <= 0) throw new OutcomeError('db-outcome-evidence must name the production apply artifact id')
+  if (typeof record.production_artifact_digest !== 'string' || !/^sha256:[0-9a-f]{64}$/i.test(record.production_artifact_digest)) throw new OutcomeError('db-outcome-evidence must name the production apply artifact sha256 digest')
   if (!REPOSITORY.test(record.application_repository ?? '')) throw new OutcomeError('db-outcome-evidence must name application_repository as owner/repo')
   if (!SHA.test(record.application_commit_sha ?? '')) throw new OutcomeError('db-outcome-evidence must name the exact application_commit_sha')
   if (typeof record.live_assertion !== 'string' || !record.live_assertion.trim()) throw new OutcomeError('db-outcome-evidence must repeat the live assertion')
@@ -46,9 +50,16 @@ export function parseOutcomeEvidence(body = '') {
   return record
 }
 
+export function trustedOutcomeComments(comments = []) {
+  return comments.filter((comment) => {
+    const association = String(comment?.author_association ?? comment?.authorAssociation ?? '').toUpperCase()
+    return association === '' || association === 'OWNER'
+  })
+}
+
 export function outcomeHistory(comments = [], issue) {
   const expectedIssue = issue === undefined ? null : Number(issue)
-  const events = comments.flatMap((comment) => parseEventComment(comment?.body ?? ''))
+  const events = trustedOutcomeComments(comments).flatMap((comment) => parseEventComment(comment?.body ?? ''))
     .filter((event) => OUTCOME_STATES.includes(event.event_type))
     .filter((event) => expectedIssue === null || Number(event.work_issue) === expectedIssue)
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)
@@ -129,7 +140,8 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
   const scope = io.parseScope(work.body ?? '')
   if (!scope || scope.workType !== 'structural' || scope.route !== 'shared-db-orchestrator') throw new OutcomeError('only an admitted structural outcome can complete')
   if (!scope.applicationReturnTo || !scope.liveAssertion) throw new OutcomeError('outcome is missing its application return address or live assertion')
-  const history = outcomeHistory(io.issueComments(Number(issue)),issue)
+  const comments=trustedOutcomeComments(io.issueComments(Number(issue)))
+  const history = outcomeHistory(comments,issue)
   if (!history.valid) throw new OutcomeError(`outcome history is invalid: ${history.problems.join('; ')}`)
   if (!['production_applied','live_verified'].includes(history.state)) throw new OutcomeError(`merge or preview is not completion; outcome is at ${history.state ?? 'none'}, not production_applied`)
   if(String(work.state).toLowerCase()==='closed'&&history.state!=='live_verified')throw new OutcomeError(`outcome issue #${issue} closed before live verification`)
@@ -154,6 +166,7 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
   const pr = io.getPr(evidence.merge_pr)
   if (!pr?.merged_at || !sameSha(evidence.merge_sha, pr.merge_commit_sha ?? '')) throw new OutcomeError('merge evidence does not match GitHub')
   if (!io.mergeCommitInMain(evidence.merge_sha)) throw new OutcomeError('merge commit is not in current shared-db main history')
+  if (!io.verifyProductionApply(evidence)) throw new OutcomeError('production application could not be re-derived from exact run and artifact evidence')
   if (!io.applicationCommitInDefaultBranch(evidence.application_repository, evidence.application_commit_sha)) {
     throw new OutcomeError('application commit is not in the application default branch history')
   }
@@ -164,12 +177,16 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
     merge_sha:evidence.merge_sha, application_repository:evidence.application_repository,
     application_commit_sha:evidence.application_commit_sha, live_evidence:evidence.live_evidence,
   })
+  const existingCompletion=findCompletionRecord(comments)
+  if(existingCompletion){
+    for(const [key,value] of Object.entries(completion))if(existingCompletion[key]!==value)throw new OutcomeError(`existing immutable completion record disagrees on ${key}`)
+  }
   if(history.state==='production_applied'){
     assertOutcomeTransition(io.issueComments(Number(issue)), 'live_verified', issue)
     const event = outcomeEvent({ issue, state: 'live_verified', actor, timestamp, evidenceUrls: [evidenceRef, evidence.live_evidence] })
     io.commentIssue(Number(issue), formatEventComment(event))
   }
-  let completionReadBack=findCompletionRecord(io.issueComments(Number(issue)))
+  let completionReadBack=existingCompletion
   if(completionReadBack){
     for(const [key,value] of Object.entries(completion))if(completionReadBack[key]!==value)throw new OutcomeError(`existing immutable completion record disagrees on ${key}`)
   }else{
@@ -177,7 +194,7 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
       'Authoritative outcome completion. Published only after live evidence was re-derived.', '',
       '```'+COMPLETION_FENCE, JSON.stringify(completion,null,2), '```',
     ].join('\n'))
-    completionReadBack=findCompletionRecord(io.issueComments(Number(issue)))
+    completionReadBack=findCompletionRecord(trustedOutcomeComments(io.issueComments(Number(issue))))
   }
   const readBack = outcomeHistory(io.issueComments(Number(issue)), issue)
   if (!readBack.valid || !readBack.complete || completionReadBack?.outcome!=='live_verified') throw new OutcomeError('live_verified event or completion record did not read back as the authoritative completion')
