@@ -8,8 +8,10 @@
   ],
   "contract_ref": "refs/db-contracts/2478/1",
   "contract_sha256": "adfee00a4d886efb70e6f3f5c46863e47d6fcc65a6ad4c40706df53d206cbd29",
-  "head_sha": "6b7123b2cea9fe703a7f5d4e2c97c28b19370e31",
+  "head_sha": "d4c9ddbf6020a8958b53b1b507d05b14871d0a84",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260911075244_shared_style_group_sku_key.sql",
     "supabase/tests/style_group_drift_reconciler_contracts.sql",
     "supabase/tests/style_group_key_for_sku_contracts.sql"
@@ -35,6 +37,11 @@
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
+    },
+    {
+      "command": "python -m unittest scripts.test_migration_derivation",
+      "exit_code": 0,
+      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
     }
   ],
   "assumptions_resolved": [
