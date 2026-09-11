@@ -1,28 +1,64 @@
 {
   "schema_version": 1,
-  "work_issue": 2783,
+  "work_issue": 2785,
   "outcome": "ready-for-merge",
-  "pr": 2782,
+  "pr": 2786,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2783/1",
-  "contract_sha256": "8fb07821210b281cbd983e43768bc7ccb0439b94d794b62e2e60c25a4aa6b8e1",
-  "head_sha": "d8676c8f14b829f919d26f2ed81e5b76c4c19ce3",
+  "contract_ref": "refs/db-contracts/2785/1",
+  "contract_sha256": "7014c15d3a75f4e05bec9bcafe08632bca7eece0c9eb93e3ff30b02748fa5b50",
+  "head_sha": "38cbd24e75c747c5d85b9f20504e49420add9574",
   "files_changed": [
-    "scripts/test_historical_preview_recovery.py",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/tests/test_import_order_list.py"
+    ".github/workflows/business-rule-library.yml",
+    ".github/workflows/documents-only-merge-authorization.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    ".github/workflows/orchestrator-marker-guard.yml",
+    ".github/workflows/pr-object-collision.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    ".github/workflows/task-gates.yml",
+    "AGENTS.md",
+    "scripts/check-actions-quota.mjs",
+    "scripts/check-actions-quota.test.mjs",
+    "scripts/check-dispatch-collision.mjs",
+    "scripts/check-dispatch-collision.test.mjs",
+    "scripts/check-pr-object-collisions.mjs",
+    "scripts/check-pr-source-collisions.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-transport.test.mjs",
+    "scripts/lib/open-pr-files.mjs",
+    "scripts/lib/open-pr-files.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "python -m unittest scripts/test_production_business_risk_gate.py scripts/test_historical_preview_recovery.py",
+      "command": "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
       "exit_code": 0,
-      "evidence": "Ran 152 tests, OK at d8676c8f. PR CI job SQL migration guards (all scripts/test_*.py) also passed at d8676c8f. GIT_TRACE2_EVENT on a two-commit repo shows 4 detached 'git maintenance run --auto --detach' spawns without the settings and 0 with gc.auto=0 and maintenance.auto=false."
+      "evidence": "658 tests, 658 pass, 0 fail, 0 skipped. Includes: rate-limit 403 waits 301 s then succeeds; other 403s fail after one call with no probe; collision result identical with shared snapshot vs self-gather, snapshot path makes no network reads."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_business_risk_gate",
+      "exit_code": 0,
+      "evidence": "Ran 141 tests OK after merging main 2662aa1a; pre-lane invocation waits, lane-held invocation fails fast."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "216 files scanned; conformance tests 10/10 pass; contract suites 41/41 pass."
     }
   ],
   "assumptions_resolved": [
-    "Confirmed: the only unwaited writer is git's detached auto-maintenance; every foreground fixture subprocess.run already waits. Attempt 2 of run 34615626046 passed the same tests on the same SHA, consistent with a race."
+    "Only primary quota exhaustion (403/429 with remaining 0) waits, at most 15 minutes and only for reads; secondary limits and other 403s still fail immediately.",
+    "The shared open-PR snapshot keeps every completeness proof and is bound to repo, PR number and schema; a mismatch fails closed.",
+    "No database reads or writes; no lock-holding workflow waits on quota."
   ],
   "stop_conditions_hit": []
 }

@@ -1,42 +1,84 @@
 {
   "schema_version": 1,
-  "work_issue": 2783,
+  "work_issue": 2785,
   "generation": 1,
-  "work_type": "tooling",
-  "route": "shared-db-orchestrator",
-  "goal": "Make temp git fixture repos in the Python tests deterministic by disabling git's detached background maintenance (gc.auto=0, maintenance.auto=false), so TemporaryDirectory cleanup can no longer race it and fail the SQL migration guards job with Errno 39, without relaxing, skipping or retrying any guard or assertion.",
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Cut GitHub Actions installation API quota use so production applies stop failing at about ten active PRs, without weakening any safety check or changing which collisions are found.",
   "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
-  "dispatcher": "Albert Hazan (owner request in chat)",
-  "worker": "Claude deterministic-git-fixture worker",
-  "branch": "claude/deterministic-git-fixture-cleanup",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/jovial-moore-5fd4c8",
+  "dispatcher": "Claude coordinator session",
+  "worker": "Claude api-quota-reduction worker",
+  "branch": "claude/api-quota-reduction",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/test_historical_preview_recovery.py",
-    "scripts/tests/test_import_order_list.py"
+    "AGENTS.md",
+    ".github/workflows/business-rule-library.yml",
+    ".github/workflows/documents-only-merge-authorization.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    ".github/workflows/orchestrator-marker-guard.yml",
+    ".github/workflows/pr-object-collision.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    ".github/workflows/task-gates.yml",
+    "scripts/check-actions-quota.mjs",
+    "scripts/check-actions-quota.test.mjs",
+    "scripts/check-dispatch-collision.mjs",
+    "scripts/check-dispatch-collision.test.mjs",
+    "scripts/check-pr-object-collisions.mjs",
+    "scripts/check-pr-source-collisions.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-transport.test.mjs",
+    "scripts/lib/open-pr-files.mjs",
+    "scripts/lib/open-pr-files.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/test_historical_preview_recovery.py",
-    "scripts/tests/test_import_order_list.py"
+    "AGENTS.md",
+    ".github/workflows/business-rule-library.yml",
+    ".github/workflows/documents-only-merge-authorization.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    ".github/workflows/orchestrator-marker-guard.yml",
+    ".github/workflows/pr-object-collision.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    ".github/workflows/task-gates.yml",
+    "scripts/check-actions-quota.mjs",
+    "scripts/check-actions-quota.test.mjs",
+    "scripts/check-dispatch-collision.mjs",
+    "scripts/check-dispatch-collision.test.mjs",
+    "scripts/check-pr-object-collisions.mjs",
+    "scripts/check-pr-source-collisions.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-transport.test.mjs",
+    "scripts/lib/open-pr-files.mjs",
+    "scripts/lib/open-pr-files.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "No shared database reads or writes, no production or preview apply, no migration files, no change to any guard, assertion, skip or retry, no fabricated reviews."
+    "No database reads or writes, no production infrastructure changes, no weakening of any collision, lease, lock or production safety check.",
+    "No quota wait while holding the merge or production lane."
   ],
   "required_checks": [
-    "python -m unittest scripts/test_production_business_risk_gate.py scripts/test_historical_preview_recovery.py"
+    "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
+    "python -m unittest scripts.test_production_business_risk_gate",
+    "git diff --check"
   ],
   "assumptions": [
-    "The Errno 39 cleanup failures come from the detached git maintenance process that git 2.47+ spawns after each commit, not from an unwaited foreground subprocess."
+    "Quota exhaustion is the primary rate limit (403/429 with remaining 0); secondary limits and other 403s must keep failing immediately.",
+    "The shared open-PR file snapshot proves completeness exactly as each check did before."
   ],
   "stop_conditions": [
-    "Any required check fails.",
-    "The fix would need to change a guard, an assertion, or the gate code under test."
+    "Any collision test finds a different set of conflicts than the previous algorithm.",
+    "Any safety check would need to be relaxed to reduce quota use."
   ]
 }
