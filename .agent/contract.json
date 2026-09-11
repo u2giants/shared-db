@@ -4,11 +4,11 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
+  "base_sha": "9b02ad489d09427fc0556248c0a85b7cc78807ff",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2727-steps2-3",
+  "worktree": "C:/repos/shared-db-worktrees/cl-2738",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
@@ -64,12 +64,13 @@
     "Legacy structural work already in flight remains executable only when the proposed PR contains real schema DDL; new work requires the complete outcome fields.",
     "Outcome lifecycle replay is bound to the requested work issue so another issue's events cannot authorize completion.",
     "Admission, dependent claim creation, dispatched recording, manual lifecycle advancement, reviewer entry, preview preparation, and shared-stage entry revalidate inside the operation's single author-mutex ownership interval.",
-    "Only completion and lifecycle evidence by repository owner u2giants with explicit OWNER association is trusted; every refused admission publishes current owner proof rather than trusting or deduplicating against stale comments; lost dispatch responses preserve ambiguous claims; completion is mutex-serialized through live verification, evidence, and closure; lifecycle advancement requires durable evidence; preview preparation rechecks marker ownership inside its mutex; unsupported multi-command routing refuses; completion reads exact production apply, manifest, after-ledger, and catalog proof; closed issues mutate only after validation; and every supported multi-target DROP binds all objects."
+    "Only completion and lifecycle evidence by repository owner u2giants with explicit OWNER association is trusted; every refused admission publishes current owner proof rather than trusting or deduplicating against stale comments; lost dispatch responses preserve ambiguous claims; completion is mutex-serialized through live verification, evidence, and closure; lifecycle advancement requires durable evidence; preview preparation rechecks marker ownership inside its mutex; unsupported multi-command routing refuses; completion reads exact production apply, manifest, after-ledger, and catalog proof; closed issues mutate only after validation; and every supported multi-target DROP binds all objects.",
+    "Generation 26 is a takeover by the Claude shared-db orchestrator sub-agent (marker #2758) after the Codex worker was idle from 14:29Z to 16:43Z; scope is unchanged and limited to refreshing on main 9b02ad48 (#2767) and resolving the lane-manager conflict by keeping admission enforcement inside assignWithMutexRetry with the reviewer queue disabled."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 25
+  "generation": 26
 }

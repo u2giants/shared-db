@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/25",
-  "contract_sha256": "f82b0d5ff633a0a66830e50706b27634a2d29dc6cff952221f986fbd678905c9",
-  "head_sha": "334d5da5c8ba630d386f652df9e7d83419a9a2fb",
+  "contract_ref": "refs/db-contracts/2727/26",
+  "contract_sha256": "94893547f6619d8fa7c112b1221d52ee903197c158899b75bd4a637f4d4711e3",
+  "head_sha": "aaa849571bc0e7854286a1d4ce77a348ebacb770",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -19,8 +19,8 @@
     "scripts/lib/work-dependencies.test.mjs",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/admission.mjs",
     "scripts/orchestrator-flow/admission-outcome.test.mjs",
+    "scripts/orchestrator-flow/admission.mjs",
     "scripts/orchestrator-flow/outcome-lifecycle.mjs",
     "scripts/orchestrator-flow/reconcile.mjs",
     "scripts/orchestrator-flow/reconcile.test.mjs"
@@ -31,22 +31,22 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors after merging current main and repairing the linked-PR admission tests."
+      "evidence": "git diff --check 9b02ad48 aaa84957 reports no whitespace errors after merging main 9b02ad48 (#2767) and resolving the lane-manager conflict."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "710-test required suite passed before the final routing-fixture repair; the exact impacted 622-test suite then passed with zero failed, skipped, cancelled, or todo, including zero-valued admission and command routing."
+      "evidence": "At aaa84957: tests 712, pass 712, fail 0, cancelled 0, skipped 0."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK with 278 semantically reviewed call sites."
+      "evidence": "At aaa84957: truth audit OK: call_sites=278."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "All GitHub calls in 215 scanned files use the governed transport."
+      "evidence": "At aaa84957: 215 files scanned, every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
@@ -57,7 +57,8 @@
     "The sealed and parallel reviews rejected unadmitted legacy dispatch, unbound objects, linkage confusion, cross-issue or unidentified replay, unsafe partial writes, metadata-only production proof, incomplete multi-target DDL, clock inversion, and admission-to-dependent-write races; every finding is fixed and covered before this report.",
     "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects.",
     "Reviewer assignment, reviewer replacement, shared-stage acquisition, and preview preparation now revalidate admission inside their own single mutex interval; preview preparation with --admit-issue executes preparation rather than silently returning after admission.",
-    "Dependency completion is trusted only from the explicitly identified repository owner; preview marker ownership is rechecked inside the mutex; lifecycle advances require durable references; and unsupported compound commands refuse before any operation runs."
+    "Dependency completion is trusted only from the explicitly identified repository owner; preview marker ownership is rechecked inside the mutex; lifecycle advances require durable references; and unsupported compound commands refuse before any operation runs.",
+    "Generation 26 takeover: merged main 9b02ad48 (#2767); the only code conflict was two lane-manager hunks, resolved by keeping requireAdmissionArguments and admissionOptions inside assignWithMutexRetry with enableReviewerQueue:false. No database, preview, or production operation was performed."
   ],
   "stop_conditions_hit": []
 }
