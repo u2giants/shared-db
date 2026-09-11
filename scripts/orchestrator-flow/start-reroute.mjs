@@ -14,7 +14,7 @@ function assertions(value,label='required assertions'){
 }
 
 function exactPair(pair,{digest,record}){
-  return pair?.digest===digest&&canonicalJson(pair.record)===canonicalJson(record)&&pair.acknowledgement?.reroute_id===digest&&pair.acknowledgement?.replacement_id===record.replacement_id&&pair.acknowledgement?.status==='created'
+  return pair?.digest===digest&&canonicalJson(pair.record)===canonicalJson(record)&&pair.queue?.reroute_id===digest&&pair.queue?.replacement_id===record.replacement_id&&pair.queue?.status==='queued'
 }
 
 export function createDurableStartRerouteAdapter(durable){
@@ -25,20 +25,37 @@ export function createDurableStartRerouteAdapter(durable){
         const existing=durable.readPair(request.ref)
         if(existing){
           if(!exactPair(existing,request))throw new StartRerouteError(`a different ${request.record.kind} replacement already owns this original attempt`)
-          return {...existing.acknowledgement,status:'existing'}
+          return {...existing.queue,status:'existing'}
         }
         request.validateLive(durable.readLive(request.record.kind,request.record.original_id))
-        const pair={digest:request.digest,record:request.record,acknowledgement:{status:'created',reroute_id:request.digest,replacement_id:request.record.replacement_id}}
-        if(durable.compareCreatePair(request.ref,null,pair))return pair.acknowledgement
+        const pair={digest:request.digest,record:request.record,queue:{status:'queued',reroute_id:request.digest,replacement_id:request.record.replacement_id}}
+        if(durable.compareCreatePair(request.ref,null,pair))return pair.queue
         const winner=durable.readPair(request.ref)
         if(!exactPair(winner,request))throw new StartRerouteError(`a different ${request.record.kind} replacement won the atomic reservation`)
-        return {...winner.acknowledgement,status:'existing'}
+        return {...winner.queue,status:'existing'}
       })
     },
     readReroute(ref){const pair=durable.readPair(ref);return pair?{digest:pair.digest,record:pair.record}:null},
     createAccepted:(...args)=>durable.createAccepted?.(...args),
     readAccepted:(...args)=>durable.readAccepted?.(...args),
   }
+}
+
+export function dispatchQueuedReroute(ref,durable){
+  for(const name of ['withMutex','readPair','readDispatchAck','compareCreateDispatchClaim','dispatchReplacement','compareCreateDispatchAck'])if(typeof durable?.[name]!=='function')throw new StartRerouteError(`durable reroute worker requires ${name}`)
+  return durable.withMutex(()=>{
+    const pair=durable.readPair(ref)
+    if(!pair?.record||!exactPair(pair,{digest:pair.digest,record:pair.record}))throw new StartRerouteError('queued reroute is missing or corrupt')
+    const existing=durable.readDispatchAck(ref)
+    if(existing){if(existing.reroute_id!==pair.digest||existing.replacement_id!==pair.record.replacement_id||!['created','existing'].includes(existing.dispatch_status))throw new StartRerouteError('durable dispatch acknowledgement is corrupt');return{...existing,status:'existing'}}
+    const claim={reroute_id:pair.digest,replacement_id:pair.record.replacement_id}
+    if(!durable.compareCreateDispatchClaim(ref,claim)){const prior=durable.readDispatchClaim?.(ref);if(canonicalJson(prior)!==canonicalJson(claim))throw new StartRerouteError('another worker owns a different replacement dispatch')}
+    const dispatched=durable.dispatchReplacement(pair.digest,pair.record)
+    if(!dispatched||dispatched.reroute_id!==pair.digest||dispatched.replacement_id!==pair.record.replacement_id||!['created','existing'].includes(dispatched.status))throw new StartRerouteError('replacement dispatcher did not return an exact idempotent acknowledgement')
+    const ack={reroute_id:pair.digest,replacement_id:pair.record.replacement_id,dispatch_status:dispatched.status}
+    if(!durable.compareCreateDispatchAck(ref,ack)){const winner=durable.readDispatchAck(ref);if(canonicalJson(winner)!==canonicalJson(ack))throw new StartRerouteError('conflicting durable dispatch acknowledgement')}
+    return {...ack,status:'acknowledged'}
+  })
 }
 
 export function reviewerStartDecision(assignment,{now,provider_state,lifecycle=[]}){
@@ -80,7 +97,7 @@ function reserveAndDispatch(kind,original,decision,replacement,io){
     return true
   }
   const acknowledgement=io.compareCreateRerouteAndReplacement({ref,digest:rerouteId,record:sealed,validateLive})
-  if(!acknowledgement||acknowledgement.reroute_id!==rerouteId||acknowledgement.replacement_id!==replacementId||!['created','existing'].includes(acknowledgement.status))throw new StartRerouteError(`${kind} replacement lacks exact compare-and-create acknowledgement`)
+  if(!acknowledgement||acknowledgement.reroute_id!==rerouteId||acknowledgement.replacement_id!==replacementId||!['queued','existing'].includes(acknowledgement.status))throw new StartRerouteError(`${kind} replacement lacks exact durable queue acknowledgement`)
   return {ref,reroute_id:rerouteId,replacement_id:replacementId,status:acknowledgement.status}
 }
 
