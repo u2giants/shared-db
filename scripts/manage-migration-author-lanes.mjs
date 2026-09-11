@@ -186,25 +186,25 @@ export function isReviewRefListingRefusal(error){return Boolean(error?.reviewRef
 // exact wrapper behaviour that was read. Treat an old date as UNVERIFIED and
 // re-read the wrapper before trusting its `true`.
 export const REVIEWERS = Object.freeze([
-  { name:'grok-4.6', wrapper:'ai-grok-review', readsRepository:true,
+  { name:'grok-4.6', provider:'grok', wrapper:'ai-grok-review', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-grok-review: grok --cwd <checkout> with a read-only permission set' } },
-  { name:'glm-5.3', wrapper:'ai-glm', readsRepository:true,
+  { name:'glm-5.3', provider:'glm', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-glm: OpenCode session pinned to the review directory, read-only agent' } },
-  { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true,
+  { name:'kimi-k3', provider:'kimi', wrapper:'ai-kimi', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-kimi: read-only agent profile over the checkout/worktree' } },
-  { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true,
+  { name:'qwen-3.8-max', provider:'qwen', wrapper:'ai-qwen', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-07', evidence:'ai-devops/bin/ai-qwen: read-only review over a sealed evidence packet copy of the checkout; the live qualification review of merged commit 795902d8 cited specific file lines from it and returned a well-formed verdict' } },
-  { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
+  { name:'glm-5.2', provider:'glm', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
-  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
+  { name:'muse-spark-1.2-contributor', provider:'muse', wrapper:'ai-muse', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-muse wrapper; durable assignments and verdicts recorded before issue #2285 still resolve through this row' } },
-  { name:'muse-spark-1.3-contributor', wrapper:'ai-muse', readsRepository:true,
+  { name:'muse-spark-1.3-contributor', provider:'muse', wrapper:'ai-muse', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-08', evidence:'ai-devops/bin/ai-muse: sealed evidence-packet checkout; live issue #2285 qualification identified meta-model-api/muse-spark-1.3-contributor and cited the reviewed files' } },
-  { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
+  { name:'codex-gpt-5.6-sol', provider:'codex', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
-  { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false,
+  { name:'deepseek-chat', provider:'deepseek', wrapper:'ai-deepseek-agent', readsRepository:false,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-deepseek-agent: HTTP chat completions only; --worktree sets a spawn cwd it never uses' } },
-  { name:'gemini-3.8-flash-high', wrapper:'ai-gemini', readsRepository:true,
+  { name:'gemini-3.8-flash-high', provider:'gemini', wrapper:'ai-gemini', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-06', evidence:'ai-devops/bin/ai-gemini: disposable sandbox copy of the checkout under --sandbox with a byte inventory; the live re-qualification review of merged commit 99fbefcb cited specific file lines from it' } },
 ])
 // Keep REVIEWERS as the historical evidence registry. Paused providers remain
@@ -470,6 +470,19 @@ export function reviewersForOrchestrator(engine, reviewers=ACTIVE_REVIEWERS){
   const normalized=String(engine??'').trim().toLowerCase()
   if(!normalized)throw new LaneError('live orchestrator engine is unreadable; reviewer assignment refused')
   return reviewers.filter((row)=>String(row.orchestratorEngine??'').toLowerCase()!==normalized)
+}
+
+export function allocatableReviewers(io){
+  const independent=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  if(!independent.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
+  if(typeof io.reviewerUsability!=='function')throw new LaneError('reviewer allocation cannot read the reconciled ai-review-preflight state; no sequence or lease was consumed')
+  const usability=io.reviewerUsability(independent)
+  if(!(usability instanceof Map))throw new LaneError('reviewer allocation received malformed reconciled ai-review-preflight state; no sequence or lease was consumed')
+  const usable=(row)=>usability.get(row.provider)?.usable===true
+  return {
+    eligible:independent.filter(usable),
+    unusable:new Map(independent.filter((row)=>!usable(row)).map((row)=>[row.name,usability.get(row.provider)??{status:'unreadable',usable:false}]))
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1782,6 +1795,26 @@ export const githubIo = {
     // RECORD the proof (reinstateReviewerExclusion) quotes the wrapper verbatim
     // instead of paraphrasing it. Nothing else reads it.
     return {...summarizeDoctorOutput(output),output}
+  },
+  reviewerUsability(reviewers){
+    const command='ai-review-preflight',resolved=resolveCommandPath(command)
+    if(!resolved)throw new LaneError(`${command} is not on PATH; reviewer assignment cannot prove the reconciled provider state`)
+    const args=['usable'], spawn=process.platform==='win32'&&/\.(cmd|bat)$/i.test(resolved)
+      ?{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
+      :{file:resolved,args}
+    let output=''
+    try{output=execFileSync(spawn.file,spawn.args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:REVIEWER_DOCTOR_TIMEOUT_MS})}
+    catch(error){output=String(error?.stdout??'')}
+    const rows=[]
+    for(const line of output.split(/\r?\n/).filter(Boolean)){
+      try{const row=JSON.parse(line);if(typeof row?.provider==='string'&&typeof row?.usable==='boolean')rows.push(row)}catch{/* explanatory output is not provider state */}
+    }
+    const byProvider=new Map(rows.map((row)=>[row.provider,row]))
+    for(const reviewer of reviewers){
+      if(!reviewer?.provider)throw new LaneError(`reviewer ${reviewer?.name??'unknown'} has no ai-review-preflight provider identity`)
+      if(!byProvider.has(reviewer.provider))throw new LaneError(`ai-review-preflight returned no reconciled state for ${reviewer.provider}; reviewer assignment refused`)
+    }
+    return byProvider
   },
   resolveOrchestratorEngine(){
     return orchestratorEngineFromResolution(readOrchestratorResolution(()=>runOrchestratorResolver()))
@@ -3807,7 +3840,7 @@ export function describeMovedAssignmentHead(request,recorded){
 // must NOT be reused for a draw without that branch and those filters.
 export function pickReviewer(sequence,io){
   const busy=findBusyReviewers(io)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  const {eligible}=allocatableReviewers(io)
   if(!eligible.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
   const eligibleNames=new Set(eligible.map((row)=>row.name)),start=(sequence-1)%ACTIVE_REVIEWERS.length
   const ordered=Array.from({length:ACTIVE_REVIEWERS.length},(_,offset)=>ACTIVE_REVIEWERS[(start+offset)%ACTIVE_REVIEWERS.length]).filter((row)=>eligibleNames.has(row.name))
@@ -4040,8 +4073,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
   io=reviewOperationIo(io)
   const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha),slot:Number(slot)}
   const concurrentLeases=Boolean(io.requiresExactReviewHeadSha)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
-  if(!eligible.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
+  const {eligible,unusable}=allocatableReviewers(io)
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   // Slot >=2 needs a name to exclude BEFORE the mutex is taken: cheap, and it
   // lets an ungoverned "assign slot 2 with no slot 1" request fail fast.
@@ -4212,6 +4244,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       // provider is now given the reason `notTaken` ACTUALLY rejected it by,
       // tested in the same order the predicate tests them.
       const refusalFor=(name)=>{
+        if(unusable.has(name)){const state=unusable.get(name);return `unusable by ai-review-preflight (${state.status??state.failure_class??'unavailable'})`}
         if(!eligibleNames.has(name))return 'conflicts with the live orchestrator engine, or is retired or quarantined'
         if(!concurrentLeases&&busy.has(name))return 'already holds a live review lease (serial-lease protocol)'
         if(name===excludedProvider)return `already holds slot 1 for this exact head`
@@ -4576,7 +4609,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     :validateTerminalReviewerFailure({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot},'reviewer replacement')
   if(silenceReplacement&&(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/i.test(request.headSha)||!Number.isInteger(request.failedSequence)||!Number.isInteger(request.slot)||request.slot<1||!confirmNoVerdict||!confirmNoArtifact||String(failingCheck??'').trim()))throw new LaneError('silent reviewer replacement requires exact issue, PR, 40-character head SHA, failed sequence, review slot, no failing check, and explicit confirmation of no verdict and no artifact')
   const concurrentLeases=Boolean(io.requiresExactReviewHeadSha)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  const {eligible}=allocatableReviewers(io)
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   // A LOCAL fault is not the reviewer's fault. Replacing on one spends a
   // rotation slot and records permanent evidence against a provider that was
