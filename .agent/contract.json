@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 36,
+  "generation": 37,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "5ec8aef002471e8520f45aef290101e0424e69d7",
+  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
   "dispatcher": "Claude orchestrator marker2758",
   "worker": "Claude issue2506 refresh worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -80,7 +80,8 @@
     "Generation 33 rebases the contract on main 72c299b8 with no scope change.",
     "Generation 34 rebases on main 72c299b8 and records the lane-tool supersession of migration 20260911205753 to 20260911213429 past main's newer 20260911210709; SQL bytes unchanged, benchmark and catalog binding test repointed, no scope change.",
     "Generation 35 rebases the contract on main 9ea5c664 with no scope change.",
-    "Generation 36 rebases the contract on main 5ec8aef0 with no scope change."
+    "Generation 36 rebases the contract on main 5ec8aef0 with no scope change.",
+    "Generation 37 rebases the contract on main 26d9345b with no scope change."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
