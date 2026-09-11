@@ -8,6 +8,8 @@
   "contract_sha256": "a0e3ea60de66ae26f74b55bdc64225506ac3bdbdf62b821180c9032fafd33e19",
   "head_sha": "0f762cdac47f2f91452aa112ed05ef043c3ce266",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/shared-supabase-migrations.yml",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/test_production_review_source_pr_preflight.py"
