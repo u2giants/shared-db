@@ -1,57 +1,52 @@
 {
   "schema_version": 1,
-  "work_issue": 2703,
+  "work_issue": 2478,
   "outcome": "ready-for-merge",
-  "pr": 2740,
+  "pr": 2746,
   "migration_versions": [
-    "20260911061539"
+    "20260911075244"
   ],
-  "contract_ref": "refs/db-contracts/2703/6",
-  "contract_sha256": "89e5ad2bb883f83f248226b378df039b9836eb1877df7ecbc8e53f8bae509919",
-  "head_sha": "bb8dcce7440e323e5dc2097778539d2d92a106cd",
+  "contract_ref": "refs/db-contracts/2478/1",
+  "contract_sha256": "adfee00a4d886efb70e6f3f5c46863e47d6fcc65a6ad4c40706df53d206cbd29",
+  "head_sha": "8147168575b839758bc4b8a4de6deee38a926ef2",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
-    "docs/business-rules/licensing-master-data.md",
-    "supabase/migrations/20260911061539_opa_route_compliance.sql",
-    "supabase/tests/opa_route_compliance_contracts.sql"
+    "supabase/migrations/20260911075244_shared_style_group_sku_key.sql",
+    "supabase/tests/style_group_drift_reconciler_contracts.sql",
+    "supabase/tests/style_group_key_for_sku_contracts.sql"
   ],
   "db_reads": [],
   "db_writes": [
-    "column plm.opa_property_scope_membership.compliance_status",
-    "function api.db_data_admin_scraped_properties",
-    "function plm.finalize_opa_property_compliance_capture",
-    "function plm.guard_opa_property_compliance_capture",
-    "function plm.guard_opa_property_compliance_membership",
-    "index plm.opa_compliance_capture_route_time_idx",
-    "index plm.opa_compliance_membership_capture_idx",
-    "table plm.opa_property_compliance_capture",
-    "table plm.opa_property_current_compliance",
-    "table plm.opa_property_scope_membership",
-    "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
-    "trigger opa_compliance_capture_truncate_guard on plm.opa_property_compliance_capture",
-    "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
-    "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
-    "view plm.opa_property_current_compliance"
+    "function public.style_group_key_for_sku",
+    "function public.rebuild_style_groups_batch",
+    "function public.reconcile_style_group_drift"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards passed. No local disposable database configured; PR database CI remains required."
+      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
+    },
+    {
+      "command": "local PostgreSQL helper parity contracts",
+      "exit_code": 0,
+      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
+    },
+    {
+      "command": "python -m unittest scripts.test_migration_derivation",
+      "exit_code": 0,
+      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
     }
   ],
   "assumptions_resolved": [
-    "Exact route/account latest approved complete explicit observations define current rights; retained source identity is separate.",
-    "Private loader contract requires reviewed companion route/authentication proof; no rows loaded.",
-    "Final database CI and independent review remain required; production timeout investigation remains open before final review.",
-    "Initial database replay34569988648 passed; supported claim expansions account for GRANT view/table alias, column comment and explicit capture truncate guard."
+    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
+    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
+    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
+    "No 6392-row application drift correction and no nightly-path retirement."
   ],
   "stop_conditions_hit": []
 }

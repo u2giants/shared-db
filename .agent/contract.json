@@ -1,65 +1,53 @@
 {
-  "schema_version": 1,
-  "generation": 6,
-  "work_issue": 2703,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Preserve explicit route/account OPA compliance observations, admit only newest approved complete evidence as current rights, and retain historical source identity and visibility.",
-  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
-  "dispatcher": "Claude orchestrator #2758",
-  "worker": "claude-2758-2703",
-  "branch": "codex/issue-2703",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2703",
-  "allowed_paths": [
-    "supabase/migrations/20260911061539_opa_route_compliance.sql",
-    "supabase/tests/opa_route_compliance_contracts.sql",
-    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
-    "docs/business-rules/licensing-master-data.md",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "file_writes": [
-    "supabase/migrations/20260911061539_opa_route_compliance.sql",
-    "supabase/tests/opa_route_compliance_contracts.sql",
-    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
-    "docs/business-rules/licensing-master-data.md",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "db_reads": [],
-  "db_writes": [
-    "column plm.opa_property_scope_membership.compliance_status",
-    "function api.db_data_admin_scraped_properties",
-    "function plm.finalize_opa_property_compliance_capture",
-    "function plm.guard_opa_property_compliance_capture",
-    "function plm.guard_opa_property_compliance_membership",
-    "index plm.opa_compliance_capture_route_time_idx",
-    "index plm.opa_compliance_membership_capture_idx",
-    "table plm.opa_property_compliance_capture",
-    "table plm.opa_property_current_compliance",
-    "table plm.opa_property_scope_membership",
-    "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
-    "trigger opa_compliance_capture_truncate_guard on plm.opa_property_compliance_capture",
-    "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
-    "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
-    "view plm.opa_property_current_compliance"
-  ],
-  "prohibited_actions": [
-    "No shared database writes by worker; parent merges and promotes.",
-    "No private source row loads, private rows in public artifacts, or invented route/account evidence.",
-    "Preserve2706/2579 source arms, authentication, historical mappings and signed studio identity."
-  ],
-  "required_checks": [
-    "bash scripts/check-sql.sh",
-    "git diff --check"
-  ],
-  "assumptions": [
-    "Current rights require explicit compliant observation in newest approved complete capture for exact Property, route and account.",
-    "Absence is not deletion or deactivation; legacy is unknown.",
-    "Private companion route/auth binding is a loader prerequisite."
-  ],
-  "stop_conditions": [
-    "Exact object collision.",
-    "Regression in source visibility, append-only evidence, source identity or authorization."
-  ]
+    "schema_version": 1,
+    "generation": 1,
+    "work_issue": 2478,
+    "work_type": "structural",
+    "route": "shared-db-orchestrator",
+    "goal": "Extract one SKU derivation shared by rebuild and read-only drift detector without changing grouping, correction, or drift behavior.",
+    "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
+    "dispatcher": "Codex orchestrator #2714",
+    "worker": "codex-2714-2478",
+    "branch": "codex/issue-2478-shared-sku-key",
+    "worktree": "C:/repos/shared-db-worktrees/issue-2478-shared-sku-key",
+    "allowed_paths": [
+        "supabase/migrations/20260911075244_shared_style_group_sku_key.sql",
+        "supabase/tests/style_group_key_for_sku_contracts.sql",
+        "supabase/tests/style_group_drift_reconciler_contracts.sql",
+        ".agent/contract.json",
+        ".agent/completion.json"
+    ],
+    "file_writes": [
+        "supabase/migrations/20260911075244_shared_style_group_sku_key.sql",
+        "supabase/tests/style_group_key_for_sku_contracts.sql",
+        "supabase/tests/style_group_drift_reconciler_contracts.sql",
+        ".agent/contract.json",
+        ".agent/completion.json"
+    ],
+    "db_reads": [],
+    "db_writes": [
+        "function public.style_group_key_for_sku",
+        "function public.rebuild_style_groups_batch",
+        "function public.reconcile_style_group_drift"
+    ],
+    "prohibited_actions": [
+        "No shared database writes by worker.",
+        "No correction of application row drift or change to nightly correction path.",
+        "No paid review, merge or main movement before parent priority window clears.",
+        "No changes to issues2705 or2709."
+    ],
+    "required_checks": [
+        "bash scripts/check-sql.sh",
+        "local PostgreSQL helper parity contracts",
+        "git diff --check"
+    ],
+    "assumptions": [
+        "Parent authorized adapting obsolete inline-token assertion to shared-helper wiring while preserving all existing behavior/security tests.",
+        "Latest consumer definitions derive from migrations20260906035323 and20260907031246."
+    ],
+    "stop_conditions": [
+        "Object overlap or changed source definitions.",
+        "Old/new grouping parity mismatch.",
+        "Consumer behavior or security changes beyond helper delegation."
+    ]
 }
