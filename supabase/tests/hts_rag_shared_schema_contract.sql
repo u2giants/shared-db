@@ -1,4 +1,4 @@
--- Behavioural contracts for migration 20260911124845 (#2712): schema hts_rag and its
+-- Behavioural contracts for migration 20260911185745 (#2712): schema hts_rag and its
 -- four least-privilege roles. The Database Contract Tests workflow runs this inside a
 -- transaction that rolls back. Every row below is synthetic.
 
