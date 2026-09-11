@@ -1832,7 +1832,7 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
         # opened one without looking, so every new mention is made to argue for
         # itself. If this citation ever becomes a read, this entry must go and
         # docs must be pinned in PREVIEW_PRODUCER_PATHS instead.
-        ("scripts/manage-migration-author-lanes.mjs", "message-citation"): 1,
+        ("scripts/manage-migration-author-lanes.mjs", "message-citation"): 2,
         ("scripts/production_migration_guard.py", "message-citation"): 1,
     }
 

@@ -904,6 +904,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": "scripts/manage-migration-author-lanes.mjs:1342",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:8adc9b054f8c6e4ce85fb3cb69e4cb7d6288bbb63b76ab3d0f1f0f0cd7e783af:1",
+      "line_sha256": "8adc9b054f8c6e4ce85fb3cb69e4cb7d6288bbb63b76ab3d0f1f0f0cd7e783af",
+      "disposition": "excluded",
+      "reason": "Classifies documentation paths from the authenticated Git snapshot; it does not report migration throughput or alter a refusal message."
+    },
+    {
       "site": "scripts/manage-migration-author-lanes.mjs:3265",
       "semantic_key": "scripts/manage-migration-author-lanes.mjs:8da94f391777fd03edd79c104d91688f45731132e59a130de7ff14c484311415:1",
       "line_sha256": "8da94f391777fd03edd79c104d91688f45731132e59a130de7ff14c484311415",
@@ -1947,7 +1954,7 @@
       "reason": "Issue 2789 early refusal: with the automatic risk policy active, a production apply review dispatched without a numeric source_pr is refused by name before any credential is used. It adds a refusal and changes no existing check."
     }
   ],
-  "call_site_count": 276,
-  "call_site_sha256": "f6039611702d56bc44e6b074c74f2b928fdd91b8dc2c2b1246bbdb918135cfc8",
+  "call_site_count": 277,
+  "call_site_sha256": "5e4ef87014c723b43cdcae31a2935945e4e8927ceaa9c750993be71ef4251aa4",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

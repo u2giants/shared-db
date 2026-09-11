@@ -11,6 +11,7 @@ import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, REVIEW_SILENT_RECLAIM_REQUEST_LIMIT, REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict, markReviewRefListingRefusal, isReviewRefListingRefusal } from './manage-migration-author-lanes.mjs'
+import { readDatabasePreviewClassificationFile, withDatabasePreviewClassificationFile, databasePreviewAdmission, buildDatabasePreviewFileSnapshot } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -5030,6 +5031,65 @@ function mergedRehearsalIo({version='20260828232207',migration=`supabase/migrati
     previewLedger:()=>({versions:[]}),
   }}
 }
+
+test('live no-database-preview returns before claims, pull requests, reviews, or preview evidence are read',()=>{
+  const target={repository:'u2giants/shared-db',issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40)},files=[{path:'docs/note.md',status:'modified',mode:'100644',blob_sha:'c'.repeat(40),sha256:'a'.repeat(64),impact:'documentation',reason:'documentation-only change'}],applicable_checks=['unit-tests']
+  const database_preview={schema_version:1,...target,decision:'NO_DATABASE_PREVIEW',reason_code:'proven_non_database_change',inspected_digest:sha256(canonicalJson({classifier_version:1,...target,files,applicable_checks})),files,applicable_checks,invalidated_by:['file-content-change','file-set-change','impact-evidence-change','applicable-check-change','classifier-version-change']}
+  const forbidden=()=>{throw new Error('late database admission dependency must not run')}
+  const snapshot=files.map(({path,status,mode,blob_sha,sha256,impact})=>({path,status,mode,blob_sha,sha256,impact})),bundle_id=sha256(canonicalJson({repository:target.repository,pr:target.pr,base_sha:target.base_sha,head_sha:target.head_sha,files:snapshot}))
+  const evidence={...target,bundle_id,database_preview,inspected_files:snapshot},live={number:99,state:'open',base:{sha:target.base_sha,repo:{full_name:target.repository}},head:{sha:target.head_sha}}
+  const io={databasePreviewClassificationEvidence:evidence,databasePreviewClassification:githubIo.databasePreviewClassification,getPr:()=>live,databasePreviewFileSnapshot:()=>snapshot,openClaims:forbidden,openPulls:forbidden,previewGateProof:forbidden,previewLedger:forbidden}
+  const result=deriveLivePreviewCandidate(433,io)
+  assert.equal(result.route,'no_database_preview');assert.equal(result.next_action,'return-to-natural-owner');assert.equal(result.pr,99);assert.equal(result.head_sha,target.head_sha)
+  for(const replay of [{...evidence,pr:100},{...evidence,head_sha:'7'.repeat(40)}])assert.throws(()=>deriveLivePreviewCandidate(433,{...io,databasePreviewClassificationEvidence:replay}),/exact command repository|authenticated live pull request/)
+})
+
+test('the live adapter reads one explicit classification file once and fails closed on unreadable or ambiguous input',()=>{
+  const evidence={repository:'u2giants/shared-db',issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40),bundle_id:'b'.repeat(64)}
+  let reads=0
+  const io=withDatabasePreviewClassificationFile({databasePreviewClassification:githubIo.databasePreviewClassification},'classification.json',{reader:()=>{reads++;return JSON.stringify(evidence)}})
+  assert.deepEqual(io.databasePreviewClassification(433),evidence);assert.deepEqual(io.databasePreviewClassification(433),evidence);assert.equal(reads,1)
+  assert.throws(()=>io.databasePreviewClassification(434),/not #434/)
+  assert.throws(()=>readDatabasePreviewClassificationFile('missing.json',{reader:()=>{throw new Error('not found')}}),/unreadable: not found/)
+  assert.throws(()=>readDatabasePreviewClassificationFile('many.json',{reader:()=>JSON.stringify([evidence,evidence])}),/exactly one evidence object/)
+  assert.throws(()=>readDatabasePreviewClassificationFile('bad.json',{reader:()=>'{'}),/unreadable/)
+})
+
+test('live preview snapshot preserves unsafe old and new Git identities and never exempts destructive history',()=>{
+  const blob=(char,mode='100644',type='blob')=>({blob_sha:char.repeat(40),mode,type})
+  const snapshot=({files,baseRows,headRows,contents})=>buildDatabasePreviewFileSnapshot(files,new Map(baseRows),new Map(headRows),(path,side)=>contents[`${side}:${path}`])
+  const renamed=snapshot({files:[{filename:'docs/schema.md',previous_filename:'supabase/migrations/20260911010101_schema.sql',status:'renamed'}],baseRows:[['supabase/migrations/20260911010101_schema.sql',blob('a')]],headRows:[['docs/schema.md',blob('b')]],contents:{'base:supabase/migrations/20260911010101_schema.sql':'create table x.y();','head:docs/schema.md':'harmless prose'}})[0]
+  assert.equal(renamed.impact,'database-behavior');assert.equal(renamed.previous_path,'supabase/migrations/20260911010101_schema.sql');assert.equal(renamed.base.blob_sha,'a'.repeat(40));assert.equal(renamed.head.blob_sha,'b'.repeat(40))
+  const symlink=snapshot({files:[{filename:'docs/note.md',status:'modified'}],baseRows:[['docs/note.md',blob('c','120000')]],headRows:[['docs/note.md',blob('d')]],contents:{'base:docs/note.md':'unsafe-target','head:docs/note.md':'harmless prose'}})[0]
+  assert.equal(symlink.impact,'ambiguous');assert.equal(symlink.base.mode,'120000');assert.equal(symlink.head.mode,'100644')
+  const unsafeOld=snapshot({files:[{filename:'docs/note.md',status:'modified'}],baseRows:[['docs/note.md',blob('e')]],headRows:[['docs/note.md',blob('f')]],contents:{'base:docs/note.md':'run psql against production','head:docs/note.md':'harmless prose'}})[0]
+  assert.equal(unsafeOld.impact,'database-behavior');assert.notEqual(unsafeOld.base.sha256,unsafeOld.head.sha256)
+})
+
+test('claim, reviewer, and shared-stage admission cannot ignore supplied no-preview evidence',()=>{
+  const target={repository:'u2giants/shared-db',issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40)},files=[{path:'docs/note.md',status:'modified',mode:'100644',blob_sha:'c'.repeat(40),sha256:'a'.repeat(64),impact:'documentation',reason:'documentation-only change'}],applicable_checks=['unit-tests']
+  const database_preview={schema_version:1,...target,decision:'NO_DATABASE_PREVIEW',reason_code:'proven_non_database_change',inspected_digest:sha256(canonicalJson({classifier_version:1,...target,files,applicable_checks})),files,applicable_checks,invalidated_by:['file-content-change','file-set-change','impact-evidence-change','applicable-check-change','classifier-version-change']}
+  const snapshot=files.map(({path,status,mode,blob_sha,sha256,impact})=>({path,status,mode,blob_sha,sha256,impact})),bundle_id=sha256(canonicalJson({repository:target.repository,pr:target.pr,base_sha:target.base_sha,head_sha:target.head_sha,files:snapshot}))
+  const evidence={...target,bundle_id,database_preview,inspected_files:snapshot}
+  const live={number:99,state:'open',base:{sha:target.base_sha,repo:{full_name:target.repository}},head:{sha:target.head_sha}}
+  const io={databasePreviewClassificationEvidence:evidence,databasePreviewClassification:githubIo.databasePreviewClassification,getPr:()=>live,databasePreviewFileSnapshot:()=>snapshot}
+  for(const command of [{claim:true,issue:433,pr:99},{assignReviewer:true,issue:433,pr:99},{acquireExclusive:'preview',issue:433,pr:99},{preparePreviewDispatch:433,pr:99},{reconcileFlow:true,issue:433,pr:99}]){
+    const result=databasePreviewAdmission(command,io);assert.equal(result.decision,'NO_DATABASE_PREVIEW');assert.equal(result.next_action,'return-to-natural-owner')
+  }
+  for(const command of [{claim:true,issue:433},{assignReviewer:true,issue:433},{acquireExclusive:'merge',issue:433}])assert.equal(databasePreviewAdmission(command,{databasePreviewClassificationEvidence:null}).decision,'DATABASE_PREVIEW_REQUIRED')
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:434,pr:99},io),/not #434/)
+  assert.throws(()=>databasePreviewAdmission({assignReviewer:true,issue:433,pr:99},{...io,databasePreviewClassificationEvidence:{...evidence,database_preview:{...database_preview,head_sha:'7'.repeat(40)}}}),/unverifiable/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,getPr:()=>({...live,base:{...live.base,sha:'7'.repeat(40)}})}),/authenticated live pull request/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,getPr:()=>({...live,head:{sha:'7'.repeat(40)}})}),/authenticated live pull request/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,databasePreviewClassificationEvidence:{...evidence,repository:'attacker/fork'}}),/exact command repository/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:100},io),/exact command repository/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,getPr:()=>null}),/authenticated live pull request/)
+  let liveReads=0;assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,getPr:()=>++liveReads===1?live:{...live,head:{sha:'7'.repeat(40)}}}),/moved while/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,databasePreviewFileSnapshot:()=>[{...snapshot[0],sha256:'f'.repeat(64)}]}),/bundle identity/)
+  assert.throws(()=>databasePreviewAdmission({reconcileFlow:true,issue:433,pr:99},{...io,databasePreviewFileSnapshot:()=>[{...snapshot[0],path:'fabricated.md'}]}),/bundle identity/)
+  const ambiguous=[{...snapshot[0],impact:'ambiguous'}],fabricated={...evidence,bundle_id:sha256(canonicalJson({repository:target.repository,pr:target.pr,base_sha:target.base_sha,head_sha:target.head_sha,files:ambiguous}))}
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,databasePreviewClassificationEvidence:fabricated,databasePreviewFileSnapshot:()=>ambiguous}),/impact classification/)
+})
 
 function immutablePreviewApplyIo({sourcePr=1809,artifactRunId='33308168016',mergeCommitSha='b'.repeat(40)}={}){
   const runId='33308168016',headSha='75a6e35e46a79af7c059836a64a5b621ac79404a',version='20260828232207'
