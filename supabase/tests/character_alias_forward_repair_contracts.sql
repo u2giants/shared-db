@@ -10,13 +10,13 @@ CREATE TEMP TABLE forward_rows_before AS SELECT to_jsonb(t) AS row_value FROM co
 CREATE TEMP VIEW forward_catalog_now AS
 SELECT 'constraint'::text AS kind,conrelid::regclass::text AS object_name,conname AS member,
  pg_get_constraintdef(oid)||' validated='||convalidated AS definition
-FROM pg_constraint WHERE conrelid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+FROM pg_constraint WHERE conrelid IN ('core.character'::regclass,to_regclass('core.character_alias'),'core.taxonomy_source_ref'::regclass)
 UNION ALL
 SELECT 'index',schemaname||'.'||tablename,indexname,indexdef FROM pg_indexes
 WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref')
 UNION ALL
 SELECT 'relation',oid::regclass::text,'security',relrowsecurity::text||'|'||coalesce(relacl::text,'')
-FROM pg_class WHERE oid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+FROM pg_class WHERE oid IN ('core.character'::regclass,to_regclass('core.character_alias'),'core.taxonomy_source_ref'::regclass)
 UNION ALL
 SELECT 'policy',schemaname||'.'||tablename,policyname,roles::text||'|'||cmd||'|'||coalesce(qual,'')||'|'||coalesce(with_check,'')
 FROM pg_policies WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref');
@@ -228,7 +228,7 @@ BEGIN
  JOIN pg_namespace n ON n.oid=p.pronamespace WHERE n.nspname='core' AND pg_get_functiondef(p.oid)<>b.definition) THEN
   RAISE EXCEPTION 'Historical and fresh paths did not converge to reviewed function definitions';
  END IF;
- IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid='core.character_alias'::regclass
+ IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conrelid=to_regclass('core.character_alias')
  AND conname='character_alias_parent_matches_character' AND confupdtype='c' AND convalidated) THEN
   RAISE EXCEPTION 'Parent licensor alias integrity missing after historical upgrade';
  END IF;
@@ -245,13 +245,13 @@ BEGIN;
 CREATE TEMP VIEW forward_catalog_now AS
 SELECT 'constraint'::text AS kind,conrelid::regclass::text AS object_name,conname AS member,
  pg_get_constraintdef(oid)||' validated='||convalidated AS definition
-FROM pg_constraint WHERE conrelid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+FROM pg_constraint WHERE conrelid IN ('core.character'::regclass,to_regclass('core.character_alias'),'core.taxonomy_source_ref'::regclass)
 UNION ALL
 SELECT 'index',schemaname||'.'||tablename,indexname,indexdef FROM pg_indexes
 WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref')
 UNION ALL
 SELECT 'relation',oid::regclass::text,'security',relrowsecurity::text||'|'||coalesce(relacl::text,'')
-FROM pg_class WHERE oid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+FROM pg_class WHERE oid IN ('core.character'::regclass,to_regclass('core.character_alias'),'core.taxonomy_source_ref'::regclass)
 UNION ALL
 SELECT 'policy',schemaname||'.'||tablename,policyname,roles::text||'|'||cmd||'|'||coalesce(qual,'')||'|'||coalesce(with_check,'')
 FROM pg_policies WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref');
