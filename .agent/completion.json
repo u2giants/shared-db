@@ -8,10 +8,12 @@
   "contract_sha256": "4319a4d6ccf0f1d13d01d2adf0a2bb42b476ceae8ae102990720703d0739db89",
   "head_sha": "1c1577f7543ebddeaec270dfe1b880f539c0cf6d",
   "files_changed": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
     "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md"
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
