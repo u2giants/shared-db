@@ -1,62 +1,41 @@
 {
   "schema_version": 1,
-  "work_issue": 2781,
+  "work_issue": 2769,
   "outcome": "ready-for-merge",
-  "pr": 2780,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2781/6",
-  "contract_sha256": "cbde92650b63e01d2af3081b671b1b8d44153c670fd3809a7d40afbcebf85aea",
-  "head_sha": "993e37456050ec0e2357926d3436e519815c24af",
+  "pr": 2776,
+  "migration_versions": [
+    "20260911145659"
+  ],
+  "contract_ref": "refs/db-contracts/2769/2",
+  "contract_sha256": "cb815eaa9c2adfa9bf76d6c1098af19287d15abf115d71c6136634e1fe7dc108",
+  "head_sha": "ffb1e799bf50720ad2e7366ba9148c3bb35edecf",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/migration-author-lease.yml",
-    "AGENTS.md",
-    "config/orchestrator-global-invalidators-v1.json",
-    "scripts/check-exact-head-approval.mjs",
-    "scripts/check-exact-head-approval.test.mjs",
-    "scripts/check-main-tip-freshness.mjs",
-    "scripts/check-main-tip-freshness.test.mjs",
-    "scripts/lib/pr-content-equivalence.mjs",
-    "scripts/lib/pr-content-equivalence.test.mjs",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_business_risk_gate.py"
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
+    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function public.queue_nightly_rebuild_style_groups"
+  ],
   "checks": [
     {
-      "command": "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "tests 31, pass 31, fail 0, skipped 0 at 993e3745: merge-only refresh ok, migration edit refused, main editing the same file outside the hunk context refused (fails against 5edc11f1), .agent-only change ok, nested .agent path compared, independent main move ok, overlapping file, version collision and conflict refused."
+      "evidence": "Run at c42e3673 (after merging main f15f0f0e) in C:/repos/shared-db-worktrees/issue-2769: Static checks passed. No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
     },
     {
-      "command": "node --test scripts/check-exact-head-approval.test.mjs",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "tests 53, pass 53, fail 0, skipped 0 at 993e3745, including approval carried across an equivalent refresh, refused when the diff changed, refused when the new head has its own assignment or return, and refused when an equivalent head known only by its verdict cannot be read (fails against 5edc11f1)."
-    },
-    {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
-      "exit_code": 0,
-      "evidence": "tests 522, pass 522, fail 0, skipped 0 at 993e3745, including durable approval carried to an equivalent later head, refused when that head has its own assignment or return, and refused when an equivalent head known only by its verdict is unreadable (fails against 5edc11f1)."
-    },
-    {
-      "command": "python -m pytest scripts/test_production_business_risk_gate.py",
-      "exit_code": 0,
-      "evidence": "143 passed, 0 failed, 145 subtests passed at 993e3745; the unrelated-sidecar and quoted-identifier tests pass."
-    },
-    {
-      "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs",
-      "exit_code": 0,
-      "evidence": "tests 6, pass 6, fail 0, skipped 0 at 993e3745; the invalidator inventory covers the manager import closure including scripts/lib/pr-content-equivalence.mjs, which is also a pinned preview producer path."
+      "evidence": "git diff --check f15f0f0e c42e3673 reported no whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "The PR diff against its merge base, root .agent/ aside, is compared byte-exactly, and any path main also changed between the two merge bases refuses the carry, so a combined file always gets a new review.",
-    "A later sidecar keeps the preview proof only when its migration shares no schema-qualified object (quoted or bare) with every promoted migration; any doubt refuses.",
-    "A head with reviewer records of its own is judged on those alone; prior heads are found through assignments, returns and verdicts, and an unreadable equivalent head refuses the carry."
+    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
+    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
+    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
+    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
   ],
   "stop_conditions_hit": []
 }
