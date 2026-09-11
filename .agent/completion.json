@@ -6,18 +6,14 @@
   "migration_versions": [
     "20260911061539"
   ],
-  "contract_ref": "refs/db-contracts/2703/3",
-  "contract_sha256": "5e3e2ab391a30d85e8b4308cadc110bb27e55bcd9b378b78e96b5c8585e125ca",
-  "head_sha": "938c88529629051ad7c70273786a1ef5664f3d50",
+  "contract_ref": "refs/db-contracts/2703/4",
+  "contract_sha256": "5812defcd9f149749e6a9b591713fc1ff747fe2f770fc4fde357ce9e69f6f7c5",
+  "head_sha": "ae94b2bd83762e720794468da3f3d0d4e07e2154",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
     "docs/business-rules/licensing-master-data.md",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
-    "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
     "supabase/migrations/20260911061539_opa_route_compliance.sql",
     "supabase/tests/opa_route_compliance_contracts.sql"
   ],
