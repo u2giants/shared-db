@@ -1,50 +1,65 @@
 {
   "schema_version": 1,
-  "generation": 2,
-  "work_issue": 2769,
-  "work_type": "structural",
+  "work_issue": 2781,
+  "generation": 6,
+  "work_type": "tooling",
   "route": "shared-db-orchestrator",
-  "goal": "Restrict EXECUTE on public.queue_nightly_rebuild_style_groups() so PUBLIC, anon and authenticated cannot run the #2440 rebuild-queue function; keep service_role and postgres (the cron caller).",
-  "base_sha": "b68a1900a6c287bd16adcbdacc8a3e4a8db543b1",
-  "dispatcher": "Claude orchestrator #2758",
-  "worker": "claude-2758-2769",
-  "branch": "claude/issue-2769-rebuild-queue-grants",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2769",
+  "goal": "Keep reviewer approvals, guarded-merge freshness and production preview proofs valid across main refreshes that leave the pull request's own change untouched, while still refusing any overlap, conflict, version collision or change of the pull request's own diff.",
+  "base_sha": "153b7754155a22b8541349cc7fe372d14c4e4c96",
+  "dispatcher": "Claude shared-db orchestrator marker2758",
+  "worker": "Claude approval-carry-forward worker",
+  "branch": "claude/approval-carry-over-main-refresh",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "config/orchestrator-global-invalidators-v1.json",
+    ".github/workflows/migration-author-lease.yml",
+    "AGENTS.md",
+    "scripts/check-exact-head-approval.mjs",
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/check-main-tip-freshness.mjs",
+    "scripts/check-main-tip-freshness.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/lib/pr-content-equivalence.mjs",
+    "scripts/lib/pr-content-equivalence.test.mjs"
   ],
   "file_writes": [
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "config/orchestrator-global-invalidators-v1.json",
+    ".github/workflows/migration-author-lease.yml",
+    "AGENTS.md",
+    "scripts/check-exact-head-approval.mjs",
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/check-main-tip-freshness.mjs",
+    "scripts/check-main-tip-freshness.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/lib/pr-content-equivalence.mjs",
+    "scripts/lib/pr-content-equivalence.test.mjs"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
-  ],
+  "db_writes": [],
   "prohibited_actions": [
-    "No direct production DDL; production changes only through the governed promotion workflow.",
-    "No fabricated reviews or verdicts; no deleting locks, audit rows or history.",
-    "Do not touch #2705, #2709, #2290, #2678 or the #2543 residual."
+    "No shared database reads or writes, no production or preview apply, no migration files, no fabricated reviews."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "git diff --check"
+    "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
+    "node --test scripts/check-exact-head-approval.test.mjs",
+    "node --test scripts/manage-migration-author-lanes.test.mjs"
   ],
   "assumptions": [
-    "The only runtime caller is the nightly cron job running as postgres; no app (including popdam3) calls the function as anon or authenticated.",
-    "Revoking authenticated does not change the function body or its signature."
+    "The byte-level PR diff against its merge base, .agent evidence aside, is the right identity for an approved change.",
+    "A later sidecar of another migration version is not a producer for the promoted version unless their migrations share a schema-qualified object."
   ],
   "stop_conditions": [
-    "An application caller that runs as anon or authenticated is found.",
-    "Exact object collision with another active claim."
+    "Any required check fails.",
+    "A relaxation would accept a change of the pull request's own diff, an overlapping file, a migration version collision, a merge conflict, or a shared database object."
   ]
 }
