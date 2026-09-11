@@ -19,9 +19,9 @@
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/run-governed-review.test.mjs",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "563 passed, 0 failed, 0 skipped; refreshed with both current main prerequisites."
+      "evidence": "514 passed, 0 failed, 0 skipped; combined manager and governed-review suite also passed 563 tests."
     },
     {
       "command": "python scripts/test_verify_preview_apply_artifact.py",
@@ -40,3 +40,4 @@
   ],
   "stop_conditions_hit": []
 }
+
