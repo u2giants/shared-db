@@ -6,12 +6,13 @@
   "migration_versions": [
     "20260911051552"
   ],
-  "contract_ref": "refs/db-contracts/2506/15",
-  "contract_sha256": "39381e937a19ac438ecdd0a76de9ae7f7e5f33ee1d7926168679d1b5196ad6ec",
-  "head_sha": "7678cdbf41483b10a8a20710e4f6f76f4c3a8efd",
+  "contract_ref": "refs/db-contracts/2506/16",
+  "contract_sha256": "b5e50fb8f406c193bc4c5d3880a8821e3ac0243dc67df4f0ae601f292278533e",
+  "head_sha": "b7b0c0df5a7ae1abf8d276a61914f13cc9b70cd6",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2_production.py",
     "scripts/production-verification-sidecars/20260911051552.json",
@@ -20,7 +21,6 @@
     "supabase/migrations/20260911051552_popsg_search_v2_production_performance.sql"
   ],
   "db_reads": [
-    "table public.style_guide_files",
     "table public.style_guide_search_documents",
     "table public.style_guide_render_queue"
   ],
@@ -28,7 +28,8 @@
     "function public.search_style_guide_library_v2",
     "index public.idx_sgf_live_preview_ids",
     "index public.idx_sgf_live_missing_clean_ids",
-    "index public.idx_sgf_live_missing_error_ids"
+    "index public.idx_sgf_live_missing_error_ids",
+    "table public.style_guide_files"
   ],
   "checks": [
     {
@@ -45,6 +46,11 @@
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
       "evidence": "Static SQL guards passed against main39ee46b2 after supported supersession. Live-ledger guard not configured; parent owns shared target acceptance."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "275 semantically bound call sites verified; added one explicit exclusion for the synthetic missing-state input literal, not live absence evidence."
     }
   ],
   "assumptions_resolved": [
@@ -52,7 +58,8 @@
     "No shared database writes performed.",
     "Main39ee46b2 merged without SQL changes.188 verifier tests and complete sidecar inventory pass on this integration.",
     "Existing160 exact JSON parity cases, production-width benchmark and dirty visibility-map proof retained; no unchanged benchmark rerun.",
-    "One governed external review, required CI, parent preview and actual production runtime acceptance remain separate delivery gates."
+    "One governed external review, required CI, parent preview and actual production runtime acceptance remain separate delivery gates.",
+    "Exact-PR supported expansion added the CREATE INDEX parent table to claim2722; no structural SQL changed. Contract16 immutable ref readback confirmed after transient GitHub visibility delay."
   ],
   "stop_conditions_hit": []
 }

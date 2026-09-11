@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 15,
+  "generation": 16,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
@@ -18,7 +18,8 @@
     "scripts/production-verification-sidecars/20260911051552.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json"
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "file_writes": [
     ".agent/contract.json",
@@ -28,10 +29,10 @@
     "scripts/production-verification-sidecars/20260911051552.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json"
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "db_reads": [
-    "table public.style_guide_files",
     "table public.style_guide_search_documents",
     "table public.style_guide_render_queue"
   ],
@@ -39,7 +40,8 @@
     "function public.search_style_guide_library_v2",
     "index public.idx_sgf_live_preview_ids",
     "index public.idx_sgf_live_missing_clean_ids",
-    "index public.idx_sgf_live_missing_error_ids"
+    "index public.idx_sgf_live_missing_error_ids",
+    "table public.style_guide_files"
   ],
   "prohibited_actions": [
     "Do not rewrite applied migration bytes, raise timeouts, weaken RLS, quarantine assertions or remove fast/warm search capability.",
@@ -55,7 +57,8 @@
     "Fresh supported claim2722 covers exactly the function and three indexes.",
     "Local diagnostic candidate predates this fresh contract; no false claim of publication before diagnostic authorship.",
     "All fixture rows are synthetic. Production acceptance remains a separate parent-owned gate.",
-    "Supported unapplied-version supersession reserved20260911051552; main39ee46b2 integrated without SQL changes. Existing benchmark evidence remains applicable; no unchanged benchmark rerun."
+    "Supported unapplied-version supersession reserved20260911051552; main39ee46b2 integrated without SQL changes. Existing benchmark evidence remains applicable; no unchanged benchmark rerun.",
+    "CREATE INDEX parser additionally declares its parent table; supported exact-PR claim expansion binds that table without any extra SQL change. Synthetic benchmark missing-state literal receives a reviewed truth-audit disposition."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
