@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict } from './manage-migration-author-lanes.mjs'
+import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict, markReviewRefListingRefusal, isReviewRefListingRefusal } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -573,6 +573,26 @@ test('reviewer cursor advances atomically through the durable round robin',()=>{
   for(let n=1;n<=ACTIVE_REVIEWERS.length+1;n++)names.push(assignNextReviewer({issue:n,pr:100+n,headSha:`abcdef${n}`},io).reviewer)
   assert.deepEqual(names,[...ACTIVE_REVIEWERS.map((row)=>row.name),ACTIVE_REVIEWERS[0].name])
   assert.ok(io.refs.has(REVIEW_CURSOR_REF))
+})
+
+test('#2694 exact-head assignments let one reviewer hold concurrent independent reviews without overwriting either lease',()=>{
+  const io=withAtomicRefs(reviewIo()),heads=new Map()
+  io.requiresExactReviewHeadSha=true
+  io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr)),ref:'codex/x'}})
+  const assigned=[]
+  for(let n=0;n<=ACTIVE_REVIEWERS.length;n++){
+    const request={issue:2694+n,pr:3694+n,headSha:n.toString(16).padStart(40,'a')}
+    heads.set(request.pr,request.headSha)
+    assigned.push(assignNextReviewer(request,io))
+  }
+  const first=assigned[0],again=assigned.at(-1)
+  assert.equal(again.reviewer,first.reviewer,'round-robin may reuse a reviewer even while its earlier exact-head review is live')
+  const firstRef=reviewActiveRef(first.reviewer,first),againRef=reviewActiveRef(again.reviewer,again)
+  assert.notEqual(firstRef,againRef)
+  assert.ok(io.refs.has(firstRef),'the first exact assignment lease remains intact')
+  assert.ok(io.refs.has(againRef),'the concurrent exact assignment owns a separate lease')
+  assert.equal(io.refs.get(firstRef),io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${first.issue}-${first.pr}-${first.headSha}`))
+  assert.equal(io.refs.get(againRef),io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/${again.issue}-${again.pr}-${again.headSha}`))
 })
 
 test('durable per-PR exclusion skips a truthfully disposed reviewer on a new head',()=>{
@@ -2103,6 +2123,43 @@ test('release frees a terminally failed lease when every reviewer slot is full',
   assert.equal(io.refs.get(REVIEW_CURSOR_REF),cursorBefore,'release must not move the rotation cursor')
   assert.throws(()=>assignNextReviewer(failedReview,io),/terminal failure was released/,'an assignment retry must not recreate a terminally released lease')
   assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/already released/,'release evidence is create-only and retry-safe')
+})
+
+// #2694 round 2, and the regression the round-1 code did NOT have. The
+// already-released retry used to answer "is a lease still present?" by reading
+// ONE ref name and testing it for non-emptiness. Under the one-provider ref name
+// that question cannot tell THIS job's lease from a completely unrelated SIBLING
+// job the same provider is running: the moment grok-4.6 picked up any other
+// work, an honest retry of a release that had already succeeded was answered
+// with "reconciliation requires manual audit" -- a false corruption alarm that
+// sends an operator hand-editing refs a live job is using. The retry now PROVES
+// a candidate ref holds this exact assignment tuple before treating it as this
+// job's outstanding lease.
+//
+// RED/GREEN: replace `leaseRefHoldsAssignment(...)` in the already-released
+// branch of `releaseFailedReviewer` with the round-1 `io.readRef(ref)!==null`
+// and this test fails on the manual-audit refusal instead.
+test('a release retry does not mistake a live sibling job for the outstanding lease of this job (#2694)',()=>{
+  const io=failedReviewIo()
+  io.readReviewStates=(leases)=>new Map(leases.map((lease)=>[`${lease.issue}:${lease.pr}`,{issue:{state:'open'},pr:{state:'open',head:{sha:lease.headSha}},evidence:[]}]))
+  io.readReviewRefs=(refs)=>new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{for(const change of changes)assert.equal(io.refs.get(change.ref)??null,change.expected??null);for(const change of changes){if(change.sha===null)io.refs.delete(change.ref);else io.refs.set(change.ref,change.sha)}}
+  io.atomicReviewMutexRelease=(ownerSha)=>io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:null}])
+  const released=releaseFailedReviewer(replacementRequest,io)
+  assert.equal(released.reviewer,'grok-4.6')
+  const leaseRef=reviewActiveRef('grok-4.6')
+  assert.equal(io.refs.get(leaseRef)??null,null,'the released job hands its own lease back')
+  // The SAME provider now holds a lease for a DIFFERENT job. Nothing about this
+  // job changed: its release evidence is still immutable and still complete.
+  const siblingSha=io.makeOwnerCommit('db-coordination reviewer-cursor sequence=7 reviewer=grok-4.6 issue=4242 pr=4343 head=cafe000000000000000000000000000000000000 slot=1')
+  io.refs.set(leaseRef,siblingSha)
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/already released/,'the sibling lease must not be read as the outstanding lease of this job')
+  assert.equal(io.refs.get(leaseRef),siblingSha,'the lease of the sibling job is left exactly as it was')
+  // POSITIVE CONTROL: when the ref really does hold THIS job's lease again, the
+  // manual-audit refusal still fires, so the check above is not simply disabled.
+  const ownSha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=grok-4.6 issue=${failedReview.issue} pr=${failedReview.pr} head=${failedReview.headSha} slot=1`)
+  io.refs.set(leaseRef,ownSha)
+  assert.throws(()=>releaseFailedReviewer(replacementRequest,io),/reconciliation requires manual audit/)
 })
 
 test('terminal release resolves the historical unsuffixed first replacement record',()=>{
@@ -5700,6 +5757,40 @@ test('an assignment that already carries a durable verdict is never returned (is
   assert.ok(io.refs.get(`${REVIEW_ASSIGNMENT_REF_PREFIX}/1999-2005-${head}`))
 })
 
+// A completed review on an older head is immutable evidence, not a live lease.
+// When that same reviewer holds a separate current exact-head assignment, an
+// exclusion must return only the current assignment instead of treating the
+// historical verdict as a reason to strand the current slot.
+test('#2694 returns a live exact-head assignment despite the same reviewer having approved an older head',()=>{
+  const io=withAtomicRefs(reviewIo()),issue=2694,pr=3699,oldHead='a'.repeat(40),currentHead='b'.repeat(40)
+  io.requiresExactReviewHeadSha=true
+  let liveHead=oldHead
+  io.getPr=()=>({number:pr,state:'open',head:{sha:liveHead,ref:'codex/x'}})
+  const old=assignNextReviewer({issue,pr,headSha:oldHead},io)
+  const oldAssignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${oldHead}`
+  const oldLeaseRef=reviewActiveRef(old.reviewer,old)
+  const oldEvidenceSha=io.refs.get(oldAssignmentRef)
+  io.refs.delete(oldLeaseRef)
+  io.refs.set(`refs/db-review-verdicts/${issue}-${pr}-${oldHead}`,oldEvidenceSha)
+  for(let n=0;n<ACTIVE_REVIEWERS.length-1;n++){
+    const head=(n+1).toString(16).padStart(40,'c'),otherPr=3700+n
+    io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:Number(number)===pr?liveHead:head,ref:'codex/x'}})
+    assignNextReviewer({issue:2700+n,pr:otherPr,headSha:head},io)
+  }
+  liveHead=currentHead
+  const current=assignNextReviewer({issue,pr,headSha:currentHead},io)
+  assert.equal(current.reviewer,old.reviewer,'round-robin must reuse the reviewer for the separate current assignment')
+  const currentAssignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${currentHead}`
+  const currentEvidenceSha=io.refs.get(currentAssignmentRef)
+  const excluded=excludeReviewerForPr({issue,pr,reviewer:current.reviewer,reason:'terminal-unavailable',evidenceSha:currentEvidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(excluded.returned[0].assignmentRef,currentAssignmentRef)
+  assert.ok(io.refs.get(oldAssignmentRef),'the approved historical assignment remains durable')
+  assert.equal(io.refs.get(`refs/db-review-verdicts/${issue}-${pr}-${oldHead}`),oldEvidenceSha,'the historical verdict remains untouched')
+  assert.equal(io.refs.get(currentAssignmentRef),undefined,'only the live current assignment is returned')
+  assert.equal(io.refs.get(reviewActiveRef(current.reviewer,current)),undefined,'the returned assignment own exact-head lease is released with it')
+})
+
 // A REPLACEMENT HOLDER STRANDS THE SLOT THE SAME WAY AN ORIGINAL DOES.
 // --assign-reviewer reads the replacement namespace FIRST, so a replacement ref
 // left naming an excluded reviewer is the identical #1999 deadlock. The
@@ -6656,6 +6747,19 @@ test('a created verdict ref that reads back absent is retried, not burned', () =
   assert.ok(io.state.waits>0)
 })
 
+test('#2694 a verdict accepts its own parallel exact-head lease even when no legacy provider lease exists', () => {
+  let verdictReads=0
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active-v2/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active/'))return null
+    return ++verdictReads<=3 ? null : 'b'.repeat(40)
+  }})
+  io.requiresExactReviewHeadSha=true
+  const result=recordReviewVerdict(VERDICT_OPTS,io)
+  assert.equal(result.verdict,'APPROVE')
+})
+
 test('a standing verdict with a genuinely different record still refuses, and is marked created', () => {
   const io=verdictIo({readRef(ref){
     if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
@@ -6709,7 +6813,7 @@ test('#2311 a verdict refused on the active lease names the assignment the lease
   io.commits.set(other,{message:'db-coordination reviewer-cursor sequence=8 reviewer=muse-spark-1.2-contributor issue=2320 pr=2415 head='+'a'.repeat(40)+' slot=1'})
   let error=null
   assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
-  assert.match(error.message,/active lease holds the assignment for issue #2320, PR #2415/)
+  assert.match(error.message,/active lease \(refs\/db-review-active\/muse-spark-1\.2-contributor\) holds the assignment for issue #2320, PR #2415/)
   assert.match(error.message,/this verdict is for issue #2355, PR #2415/)
   assert.match(error.message,/an orchestrator marker is not the work issue/)
 })
@@ -6723,4 +6827,289 @@ test('#2311 a reviewer with no active lease at all is told that, not told it hol
   assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
   assert.match(error.message,/holds no active lease at all/)
   assert.doesNotMatch(error.message,/the assignment for issue/,'there is no other assignment to name')
+})
+
+// #2694 REVIEW (REVISE at 2e4cc55a) -- THE PROOF SET FOR FINDINGS 1-4.
+//
+// Every test below drives a PRODUCTION-SHAPED io: `requiresExactReviewHeadSha`
+// is true, so the lane code names leases exactly as `githubIo` makes it. Each
+// one is red against the reviewed head:
+//   1  legacy exclusion -- the return scan read the v2 name and called the live
+//      one-provider lease "not outstanding", then deleted it anyway.
+//   3  v2 exclusion -- the delete named only the one-provider ref, so the v2
+//      lease outlived the assignment it held.
+//   2  legacy release -- the compare-and-swap named an empty v2 ref and threw.
+//   4  two live jobs -- the reviewer-keyed compatibility view collapsed them,
+//      so the repaired job's lease was never released.
+function productionReviewIo(){
+  const io=withAtomicRefs(reviewIo()),heads=new Map()
+  io.requiresExactReviewHeadSha=true
+  io.heads=heads
+  io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:heads.get(Number(number))??'abcdef9',ref:'codex/x'}})
+  // Production lists the whole active-lease namespace in one complete-or-refused
+  // read; without it `findBusyReviewers` only enumerates the one-provider names
+  // and cannot see a second concurrent job at all.
+  io.readActiveReviewLeases=()=>new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:io.getCommit(sha)}]))
+  return io
+}
+// An assignment drawn before the cutover: its lease sits under the ONE-PROVIDER
+// ref, which is where every in-flight review's lease was when this head shipped.
+function demoteLeaseToLegacy(io,assignment){
+  const v2=reviewActiveRef(assignment.reviewer,assignment),sha=io.refs.get(v2)
+  assert.ok(sha,'the fixture must start from a real exact-head lease')
+  io.refs.delete(v2)
+  io.refs.set(reviewActiveRef(assignment.reviewer),sha)
+  return {legacyRef:reviewActiveRef(assignment.reviewer),leaseSha:sha}
+}
+// A SECOND, independent live job for the same provider, as its own v2 lease.
+function plantConcurrentLease(io,{reviewer,issue,pr,headSha,sequence}){
+  io.heads.set(pr,headSha)
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${sequence} reviewer=${reviewer} issue=${issue} pr=${pr} head=${headSha}`)
+  const ref=reviewActiveRef(reviewer,{issue,pr,headSha})
+  io.refs.set(ref,sha)
+  return {ref,sha}
+}
+
+test('#2694 excluding the holder of a pre-cutover one-provider lease returns the slot instead of stranding it',()=>{
+  const io=productionReviewIo(),issue=2694,pr=3801,head='1'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const {legacyRef,leaseSha}=demoteLeaseToLegacy(io,first)
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${head}`
+  const evidenceSha=io.refs.get(assignmentRef)
+  assert.equal(evidenceSha,leaseSha,'the lease and the assignment are the same commit')
+  const excluded=excludeReviewerForPr({issue,pr,reviewer:first.reviewer,reason:'terminal-unavailable',evidenceSha},io)
+  // PRE-FIX: `returned` came back empty -- the scan looked at the v2 name, saw
+  // nothing, and skipped the live assignment -- while the one-provider lease was
+  // deleted regardless, leaving a slot that could never be returned or refilled.
+  assert.equal(excluded.returned.length,1,'the live legacy assignment must be returned')
+  assert.equal(excluded.returned[0].assignmentRef,assignmentRef)
+  assert.equal(io.refs.get(assignmentRef),undefined,'the assignment ref is cleared')
+  assert.equal(io.refs.get(legacyRef),undefined,'the one-provider lease it held is released with it')
+  const next=assignNextReviewer({issue,pr,headSha:head},io)
+  assert.notEqual(next.reviewer,first.reviewer,'the returned slot is refillable')
+})
+
+test('#2694 excluding one of two concurrent exact-head jobs frees that job lease and leaves the other alone',()=>{
+  const io=productionReviewIo(),issue=2694,pr=3802,head='2'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const leaseRef=reviewActiveRef(first.reviewer,first)
+  const other=plantConcurrentLease(io,{reviewer:first.reviewer,issue:2695,pr:3803,headSha:'3'.repeat(40),sequence:9001})
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${head}`
+  const evidenceSha=io.refs.get(assignmentRef)
+  const excluded=excludeReviewerForPr({issue,pr,reviewer:first.reviewer,reason:'terminal-unavailable',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(io.refs.get(assignmentRef),undefined)
+  // PRE-FIX: the delete named only `refs/db-review-active/<reviewer>`, so this
+  // lease survived its own returned assignment -- a ghost that left the slot
+  // both taken and impossible to redraw.
+  assert.equal(io.refs.get(leaseRef),undefined,'the returned assignment lease is deleted')
+  assert.equal(io.refs.get(other.ref),other.sha,'the reviewer independent concurrent job is untouched')
+})
+
+test('#2694 a terminal failure on a pre-cutover one-provider lease can still be released',()=>{
+  const io=productionReviewIo(),issue=2696,pr=3804,head='4'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const {legacyRef}=demoteLeaseToLegacy(io,first)
+  // PRE-FIX: the compare-and-swap named the v2 ref, which is empty here, so the
+  // post-mutex ownership check threw and the provider could never be freed.
+  const released=releaseFailedReviewer({issue,pr,headSha:head,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  assert.equal(released.reviewer,first.reviewer)
+  assert.equal(io.refs.get(legacyRef),undefined,'the lease that actually held the assignment is released')
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('#2694 a replacement retry repairs the failed job even when its reviewer holds a second live job',()=>{
+  const io=productionReviewIo(),issue=2697,pr=3805,head='5'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const failedLeaseRef=reviewActiveRef(first.reviewer,first),failedLeaseSha=io.refs.get(failedLeaseRef)
+  const request={issue,pr,headSha:head,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  const replacement=replaceFailedReviewer(request,io)
+  assert.notEqual(replacement.reviewer,first.reviewer)
+  // A torn first attempt: the failed job lease is still there, and the SAME
+  // failed provider now also holds a second independent live job recorded after
+  // it, so the reviewer-keyed compatibility view answers with the second only.
+  io.refs.set(failedLeaseRef,failedLeaseSha)
+  const other=plantConcurrentLease(io,{reviewer:first.reviewer,issue:2698,pr:3806,headSha:'6'.repeat(40),sequence:9002})
+  // PRE-FIX: `[...preflightBusy.leases.values()].find(...)` could not see the
+  // failed job, so the retry restored the replacement lease while leaving the
+  // failed reviewer a live claim on the same slot.
+  assert.deepEqual(replaceFailedReviewer(request,io),replacement)
+  assert.equal(io.refs.get(failedLeaseRef),undefined,'the failed job lease is released by the retry')
+  assert.equal(io.refs.get(other.ref),other.sha,'the reviewer independent concurrent job is untouched')
+})
+
+// #2694 REVIEW ROUND 2 (REVISE at 2e4cc55a) -- THE PROOF SET FOR FINDINGS 2,5,6,7,8,9,10.
+
+// CRITICAL 2. Nothing released a reviewer lease after a verdict. Pre-cutover the
+// reviewer-keyed ref was implicitly reclaimed by that reviewer's NEXT draw; a
+// tuple-keyed v2 ref is never wanted again, so it leaks forever and the
+// namespace grows without bound until the listing ceiling refuses everything.
+function verdictLeaseIo(){
+  const refs=new Map()
+  const head='a'.repeat(40)
+  const leaseRef=`refs/db-review-active-v2/muse-spark-1.2-contributor/2355-2415-${head}`
+  refs.set(`refs/db-review-assignments/2355-2415-${head}`,'c'.repeat(40))
+  refs.set(leaseRef,'c'.repeat(40))
+  const io=verdictIo({readRef:(ref)=>refs.get(ref)??null})
+  io.requiresExactReviewHeadSha=true
+  io.refs=refs
+  io.leaseRef=leaseRef
+  io.createRef=(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true}
+  io.deleteRef=(ref)=>{refs.delete(ref)}
+  io.readReviewRefs=(names)=>new Map(names.map((ref)=>[ref,refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{
+    for(const change of changes)if((refs.get(change.ref)??null)!==(change.expected??null))throw new LaneError(`atomic reviewer ref transition failed: ${change.ref}`)
+    for(const change of changes){if(change.sha)refs.set(change.ref,change.sha);else refs.delete(change.ref)}
+  }
+  return io
+}
+
+test('#2694 a recorded verdict releases its own assignment-keyed lease',()=>{
+  const io=verdictLeaseIo()
+  const result=recordReviewVerdict(VERDICT_OPTS,io)
+  assert.equal(result.verdict,'APPROVE')
+  assert.equal(result.lease_ref,io.leaseRef)
+  assert.equal(result.lease_released,true,'the verdict must reclaim the tuple-keyed lease nothing else will ever want again')
+  assert.equal(io.refs.has(io.leaseRef),false,'the v2 lease ref must be gone once the verdict is durable')
+})
+
+test('#2694 a verdict never fails because its lease could not be released',()=>{
+  const io=verdictLeaseIo()
+  io.atomicReviewRefs=()=>{throw new LaneError('transport down')}
+  io.deleteRef=()=>{throw new LaneError('transport down')}
+  const result=recordReviewVerdict(VERDICT_OPTS,io)
+  assert.equal(result.verdict,'APPROVE','a release failure must never void a durable verdict artifact')
+  assert.equal(result.lease_released,false)
+})
+
+// HIGH 5. The listing ceiling is a REFUSAL, not a truncation, and
+// `findBusyReviewers` swallowed it into a fail-open `null` that every caller
+// then reported as "active reviewer leases are unreadable" -- naming the wrong
+// cause for a total outage of every draw, release and capacity report.
+function leaseListingIo(thrown){
+  return {readActiveReviewLeases:()=>{throw thrown},listRefs:()=>[],readRef:(ref)=>ref===REVIEW_ACTIVE_CUTOVER_REF?'cutover-complete':null,getCommit:()=>null}
+}
+
+test('#2694 a determinate lease-listing refusal names its real cause instead of "unreadable"',()=>{
+  const refusal=markReviewRefListingRefusal(new LaneError(`refs/db-review-active-v2/ returned 1000 refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling; refusing a possibly truncated reviewer audit. Retire refs rather than raising the ceiling (#2152)`),{reason:'ceiling'})
+  assert.equal(isReviewRefListingRefusal(refusal),true)
+  let error=null
+  assert.throws(()=>{try{findBusyReviewers(leaseListingIo(refusal))}catch(caught){error=caught;throw caught}},LaneError)
+  assert.match(error.message,/at or past the 1000-ref ceiling/)
+  assert.match(error.message,/Retire refs rather than raising the ceiling/)
+  assert.doesNotMatch(error.message,/unreadable/,'a ceiling refusal is determinate, not an unreadable namespace')
+})
+
+test('#2694 a transient lease-listing failure still fails open rather than stopping the lane',()=>{
+  const transient=new LaneError('HTTP 502: bad gateway')
+  assert.equal(isReviewRefListingRefusal(transient),false)
+  assert.equal(findBusyReviewers(leaseListingIo(transient)),null)
+})
+
+// MEDIUM-HIGH 6. The capacity report read the lossy reviewer-keyed Map, so two
+// live jobs held by one provider collapsed into a single row and the second job
+// was invisible to the operator deciding whether the pool had room.
+test('#2694 the capacity report shows one row per live lease, not one per reviewer',()=>{
+  const io=withAtomicRefs(reviewIo()),heads=new Map()
+  io.requiresExactReviewHeadSha=true
+  io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr)),ref:'codex/x'}})
+  const assigned=[]
+  for(let n=0;n<=ACTIVE_REVIEWERS.length;n++){
+    const request={issue:2694+n,pr:3894+n,headSha:n.toString(16).padStart(40,'a')}
+    heads.set(request.pr,request.headSha)
+    assigned.push(assignNextReviewer(request,io))
+  }
+  const doubled=assigned[0].reviewer
+  assert.equal(assigned.at(-1).reviewer,doubled,'round-robin must hand the same provider a second concurrent job')
+  io.readActiveReviewLeases=()=>new Map([...io.refs].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)||ref.startsWith('refs/db-review-active-v2')).map(([ref,sha])=>[ref,{sha,commit:{...io.getCommit(sha),committedDate:'2026-09-02T11:00:00Z'}}]))
+  const rows=reviewerCapacityReport(io).reviewers.filter((row)=>row.reviewer===doubled&&row.held)
+  assert.equal(rows.length,2,'both live jobs for one provider must be reported')
+  assert.deepEqual(rows.map((row)=>row.leaseRef).sort(),[reviewActiveRef(doubled,assigned[0]),reviewActiveRef(doubled,assigned.at(-1))].sort())
+})
+
+// MEDIUM 7. The exclusion scan charged one uncached `readRef` per candidate
+// lease ref against the 25-request wire budget; `readReviewRefs` costs one for
+// the whole set and the proxy already offers it.
+test('#2694 the exclusion scan batches its lease reads instead of paying per ref',()=>{
+  const head='f'.repeat(40),{io,first,evidenceSha}=returnScenario(1999,2011,head)
+  let perRefReads=0
+  const inner=io.readRef
+  io.readRef=(ref)=>{if(ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)||ref.startsWith('refs/db-review-active-v2'))perRefReads++;return inner(ref)}
+  excludeReviewerForPr({issue:1999,pr:2011,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io)
+  assert.equal(perRefReads,0,'every candidate lease ref must be read through the single batched request')
+})
+
+// MEDIUM 8. The refusal was built from the LEGACY ref's contents while the v2
+// ref held the conflicting lease, so it reported "holds no active lease at all"
+// about a reviewer that demonstrably held one -- defeating #2311's guarantee
+// that a refusal names the assignment the lease actually holds.
+test('#2694 a verdict refused on a parallel lease names that lease, not the empty legacy ref',()=>{
+  const other='e'.repeat(40)
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active-v2/'))return other
+    return null
+  }})
+  io.requiresExactReviewHeadSha=true
+  io.commits.set(other,{message:'db-coordination reviewer-cursor sequence=8 reviewer=muse-spark-1.2-contributor issue=2320 pr=2415 head='+'a'.repeat(40)+' slot=1'})
+  let error=null
+  assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
+  assert.match(error.message,/refs\/db-review-active-v2\/muse-spark-1\.2-contributor\//)
+  assert.match(error.message,/holds the assignment for issue #2320, PR #2415/)
+  assert.doesNotMatch(error.message,/holds no active lease at all/,'the parallel lease is held, so the refusal must not claim there is none')
+})
+
+// MEDIUM 9. The exhaustion message named "is already assigned to this exact
+// head" as a cause, which `notTaken` does not implement at all. The message now
+// states, per provider, the reason that provider was actually refused.
+test('#2694 the exhaustion refusal states the reason each provider was refused',()=>{
+  const {io}=busyIo()
+  let error=null
+  assert.throws(()=>{try{assignNextReviewer({issue:9,pr:119,headSha:'abcdef9'},io)}catch(caught){error=caught;throw caught}},/no reviewer is available/)
+  for(const row of ACTIVE_REVIEWERS)assert.ok(error.message.includes(row.name),`the refusal must account for ${row.name}`)
+  assert.match(error.message,/already holds a live review lease \(serial-lease protocol\)/)
+  assert.doesNotMatch(error.message,/is already assigned to this exact head/,'no code path implements that cause')
+})
+
+// LOW 10. Cutover activation backfilled reviewer-keyed refs, so a provider that
+// legitimately held two live pre-cutover reviews was refused as a corruption.
+test('#2694 cutover activation backfills assignment-keyed leases for a provider holding two live reviews',()=>{
+  const io=withAtomicRefs(freshCutoverIo()),headA='a'.repeat(40),headB='b'.repeat(40)
+  io.requiresExactReviewHeadSha=true
+  io.openPulls=()=>[{number:510,head:{sha:headA}},{number:511,head:{sha:headB}}]
+  seedAssignment(io,{issue:51,pr:510,headSha:headA,reviewer:'glm-5.3'})
+  seedAssignment(io,{issue:52,pr:511,headSha:headB,reviewer:'glm-5.3',sequence:2})
+  const result=activateReviewCutover(io)
+  assert.equal(result.activated,true)
+  assert.equal(result.backfilled.length,2)
+  assert.deepEqual(result.backfilled.map((row)=>row.ref).sort(),[
+    reviewActiveRef('glm-5.3',{issue:51,pr:510,headSha:headA,slot:1}),
+    reviewActiveRef('glm-5.3',{issue:52,pr:511,headSha:headB,slot:1}),
+  ].sort())
+  for(const row of result.backfilled)assert.ok(io.refs.has(row.ref))
+})
+
+test('#2694 releasing a slot 2 failure is refused when the lease at that ref names slot 1',()=>{
+  // The inline lease-match check in `releaseFailedReviewer` compared issue, PR,
+  // head, sequence and reviewer but NOT the slot. It only ever agreed with
+  // `leaseMatchesAssignment` because one global sequence cursor keeps sequences
+  // unique across slots. Here the slot-2 assignment's lease ref holds a lease
+  // that names slot 1, and every other field matches: PRE-FIX the release
+  // proceeded and deleted a lease belonging to another slot.
+  const io=withAtomicRefs(reviewIo()),request={issue:2694,pr:2694,headSha:'c7'.repeat(20)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  assignNextReviewer(request,io)
+  const second=assignNextReviewer({...request,slot:2},io)
+  const leaseRef=[...io.refs.keys()].find((ref)=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)&&String(io.getCommit(io.refs.get(ref))?.message??'').includes(`sequence=${second.sequence} `))
+  assert.ok(leaseRef,'the fixture must start from a real slot 2 lease')
+  const original=String(io.getCommit(io.refs.get(leaseRef)).message)
+  assert.ok(/ slot=2(|$)/.test(original),'the slot 2 lease must carry its slot')
+  // Same tuple, slot 1 instead of slot 2 (a cursor-form lease with no slot token
+  // IS slot 1).
+  io.refs.set(leaseRef,io.makeOwnerCommit(original.replace(/ slot=2(?=s|$)/,'')))
+  assert.throws(()=>releaseFailedReviewer({issue:request.issue,pr:request.pr,headSha:request.headSha,failedSequence:second.sequence,slot:2,failureCode:'provider_unavailable',confirmNoVerdict:true,confirmNoArtifact:true},io),/active lease does not match the terminal failure evidence/)
 })
