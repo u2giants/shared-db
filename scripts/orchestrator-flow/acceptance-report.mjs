@@ -1,4 +1,5 @@
 import { median } from '../throughput-guard/ledger-lib.mjs'
+import { canonicalJson, sha256 } from './evidence-bundle.mjs'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
@@ -17,18 +18,43 @@ export const ACCEPTANCE_PHASES=Object.freeze([
 ])
 
 const minutes=(start,end)=>{const value=(Date.parse(end)-Date.parse(start))/60000;if(!Number.isFinite(value)||value<0)throw new AcceptanceReportError('outcome timestamps must be chronological ISO instants');return value}
+const SHA=/^[0-9a-f]{40}$/i, DIGEST=/^sha256:[0-9a-f]{64}$/i, EVENT_ID=/^[0-9a-f]{64}$/i
+const EVIDENCE=/^(?:https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:issues|pull|actions\/runs)\/[^\s]+|artifact:[A-Za-z0-9][A-Za-z0-9._:\/-]*)$/
 
-export function buildFiveOutcomeAcceptanceReport({outcomes,baseline,refusal_evidence=[]}){
+function validateCohort(cohort,outcomes){
+  if(!cohort||cohort.schema_version!==1||!EVIDENCE.test(cohort.source_evidence??'')||!Number.isInteger(cohort.artifact_id)||cohort.artifact_id<1||!DIGEST.test(cohort.artifact_digest??'')||!SHA.test(cohort.ledger_head_sha??''))throw new AcceptanceReportError('authoritative cohort proof is incomplete')
+  if(!Array.isArray(cohort.ordered_work_issues)||cohort.ordered_work_issues.length!==5||new Set(cohort.ordered_work_issues).size!==5||cohort.ordered_work_issues.some((n)=>!Number.isInteger(n)||n<1))throw new AcceptanceReportError('authoritative cohort must name five unique ordered work issues')
+  const identity={schema_version:cohort.schema_version,source_evidence:cohort.source_evidence,artifact_id:cohort.artifact_id,artifact_digest:cohort.artifact_digest,ledger_head_sha:cohort.ledger_head_sha,ordered_work_issues:cohort.ordered_work_issues}
+  const expected=`sha256:${sha256(canonicalJson(identity))}`
+  if(cohort.cohort_digest!==expected)throw new AcceptanceReportError('authoritative cohort digest does not match its exact identity')
+  if(outcomes.some((row,index)=>row.issue!==cohort.ordered_work_issues[index]))throw new AcceptanceReportError('caller outcome order does not match the authoritative consecutive cohort')
+  return identity
+}
+
+function validateSamples(name,value){
+  if(!Array.isArray(value?.samples)||!value.samples.length||value.samples.some((n)=>!Number.isFinite(n)||n<=0))throw new AcceptanceReportError(`raw ${name} samples are required`)
+  if(value.n!==value.samples.length)throw new AcceptanceReportError(`${name} n does not match its raw samples`)
+  const computed=median(value.samples)
+  if(value.median_request_to_live_minutes!==computed)throw new AcceptanceReportError(`${name} median does not match its raw samples`)
+  return computed
+}
+
+function boundDigest(value,keys){return `sha256:${sha256(canonicalJson(Object.fromEntries(keys.map((key)=>[key,value[key]]))))}`}
+
+export function buildFiveOutcomeAcceptanceReport({outcomes,cohort,baseline,refusal_evidence=[]}){
   if(!Array.isArray(outcomes)||outcomes.length!==5)throw new AcceptanceReportError('exactly five consecutive outcomes are required')
-  if(!Number.isInteger(baseline?.n)||baseline.n<1||!Number.isFinite(baseline?.median_request_to_live_minutes)||baseline.median_request_to_live_minutes<=0)throw new AcceptanceReportError('raw baseline n and positive median are required')
-  const numbers=outcomes.map((row)=>row.sequence)
-  if(numbers.some((value,index)=>!Number.isInteger(value)||(index&&value!==numbers[index-1]+1)))throw new AcceptanceReportError('outcome sequence is not consecutive')
-  const rows=outcomes.map((row)=>{
+  const cohortIdentity=validateCohort(cohort,outcomes),baselineMedian=validateSamples('baseline',baseline)
+  const rows=outcomes.map((row,index)=>{
     if(row.work_type!=='structural'||!['urgent-application','standard-application'].includes(row.service_class))throw new AcceptanceReportError(`outcome #${row.issue} is not an admitted structural service outcome`)
     if(row.unchanged_poll_count!==0||row.manual_reconstruction_count!==0)throw new AcceptanceReportError(`outcome #${row.issue} used unchanged polling or manual queue reconstruction`)
-    const events=(row.events??[]).filter((event)=>event.work_issue===row.issue&&event.result!=='refused')
+    const identity=row.lifecycle_identity
+    if(!identity||identity.work_issue!==row.issue||!EVENT_ID.test(identity.event_id??'')||!SHA.test(identity.head_sha??'')||!EVIDENCE.test(identity.evidence??'')||!DIGEST.test(identity.evidence_digest??''))throw new AcceptanceReportError(`outcome #${row.issue} lacks an exact issue-bound durable lifecycle identity`)
+    if(identity.evidence_digest!==boundDigest(identity,['work_issue','event_id','head_sha','evidence']))throw new AcceptanceReportError(`outcome #${row.issue} lifecycle evidence digest is not bound to its issue, event, head, and evidence`)
+    const events=row.events??[]
     const requiredTypes=['entered',...ACCEPTANCE_PHASES.map(([, ,to])=>to)]
-    if(events.length!==requiredTypes.length||requiredTypes.some((type,index)=>events[index]?.event_type!==type))throw new AcceptanceReportError(`outcome #${row.issue} lifecycle is duplicated, incomplete, or out of order`)
+    if(events.length!==requiredTypes.length||requiredTypes.some((type,eventIndex)=>events[eventIndex]?.event_type!==type)||events.some((event)=>event.work_issue!==row.issue||event.result!=='succeeded'))throw new AcceptanceReportError(`outcome #${row.issue} lifecycle is duplicated, incomplete, failed, foreign, or out of order`)
+    const live=events.at(-1)
+    if(live.event_type!=='live_verified'||live.event_id!==identity.event_id||live.head_sha!==identity.head_sha||(live.evidence_urls??[]).includes(identity.evidence)===false)throw new AcceptanceReportError(`outcome #${row.issue} live_verified event does not match its durable lifecycle identity`)
     const byType=new Map(events.map((event)=>[event.event_type,event]))
     const phases={}
     for(const [name,from,to] of ACCEPTANCE_PHASES){if(!byType.has(from)||!byType.has(to))throw new AcceptanceReportError(`outcome #${row.issue} is missing ${from} or ${to}`);phases[name]=minutes(byType.get(from).timestamp,byType.get(to).timestamp)}
@@ -37,12 +63,13 @@ export function buildFiveOutcomeAcceptanceReport({outcomes,baseline,refusal_evid
     if(phases.request_to_dispatch>dispatchTarget)throw new AcceptanceReportError(`outcome #${row.issue} missed its ${dispatchTarget}-minute dispatch target`)
     const waits={owner:0,external:0}
     for(const wait of row.waits??[]){if(!['owner','external'].includes(wait.kind))throw new AcceptanceReportError(`outcome #${row.issue} has an unknown wait kind`);waits[wait.kind]+=minutes(wait.started_at,wait.ended_at)}
-    return{sequence:row.sequence,issue:row.issue,service_class:row.service_class,state:'live_verified',phase_minutes:phases,wait_minutes:waits,request_to_live_minutes:requestToLive,exceptions:[...(row.exceptions??[])]}
+    return{cohort_index:index+1,issue:row.issue,service_class:row.service_class,state:'live_verified',lifecycle_identity:identity,phase_minutes:phases,wait_minutes:waits,request_to_live_minutes:requestToLive,exceptions:[...(row.exceptions??[])]}
   })
-  if(!Array.isArray(refusal_evidence)||!refusal_evidence.length||refusal_evidence.some((row)=>row?.result!=='refused'||typeof row?.evidence!=='string'||!row.evidence.trim()))throw new AcceptanceReportError('durable refusal-preservation evidence is required')
-  const currentMedian=median(rows.map((row)=>row.request_to_live_minutes)),improvement=(baseline.median_request_to_live_minutes-currentMedian)/baseline.median_request_to_live_minutes
+  if(!Array.isArray(refusal_evidence)||!refusal_evidence.length||refusal_evidence.some((row)=>row?.result!=='refused'||!Number.isInteger(row?.work_issue)||row.work_issue<1||!SHA.test(row?.head_sha??'')||!EVENT_ID.test(row?.event_id??'')||!EVIDENCE.test(row?.evidence??'')||!DIGEST.test(row?.evidence_digest??'')))throw new AcceptanceReportError('durable issue/head/digest-bound refusal-preservation evidence is required')
+  if(refusal_evidence.some((row)=>row.evidence_digest!==boundDigest(row,['result','work_issue','event_id','head_sha','evidence'])))throw new AcceptanceReportError('refusal evidence digest is not bound to its exact refused issue, event, head, and evidence')
+  const currentSamples=rows.map((row)=>row.request_to_live_minutes),currentMedian=median(currentSamples),improvement=(baselineMedian-currentMedian)/baselineMedian
   if(improvement<0.5)throw new AcceptanceReportError(`median request-to-live improvement is ${(improvement*100).toFixed(1)}%, below 50%`)
-  return{schema_version:1,status:'accepted',sample:{n:rows.length,consecutive_from:numbers[0],consecutive_to:numbers.at(-1)},baseline:{n:baseline.n,median_request_to_live_minutes:baseline.median_request_to_live_minutes},current:{n:rows.length,median_request_to_live_minutes:currentMedian,improvement_percent:Number((improvement*100).toFixed(1))},outcomes:rows,refusal_evidence,exceptions:rows.flatMap((row)=>row.exceptions.map((value)=>({issue:row.issue,detail:value})))}
+  return{schema_version:1,status:'accepted',cohort:{...cohortIdentity,cohort_digest:cohort.cohort_digest},sample:{n:rows.length,issues:cohort.ordered_work_issues},baseline:{n:baseline.n,samples:[...baseline.samples],median_request_to_live_minutes:baselineMedian},current:{n:rows.length,samples:currentSamples,median_request_to_live_minutes:currentMedian,improvement_percent:Number((improvement*100).toFixed(1))},outcomes:rows,refusal_evidence,exceptions:rows.flatMap((row)=>row.exceptions.map((value)=>({issue:row.issue,detail:value})))}
 }
 
 export function main(argv){const index=argv.indexOf('--input');if(index<0||!argv[index+1]){console.error('REFUSED: --input <five-outcome.json> is required');return 2}try{console.log(JSON.stringify(buildFiveOutcomeAcceptanceReport(JSON.parse(readFileSync(argv[index+1],'utf8'))),null,2));return 0}catch(error){console.error(`REFUSED: ${error.message}`);return 2}}
