@@ -6,7 +6,7 @@ set local plan_cache_mode=force_generic_plan;
 do $$
 declare v_name text; v_index regclass;
 begin
-  foreach v_name in array array['idx_assets_tag_visible_facets','idx_assets_tag_pending_facets'] loop
+  foreach v_name in array array['idx_assets_tag_rls_visible_ids','idx_assets_tag_visible_facets','idx_assets_tag_pending_facets'] loop
     v_index := to_regclass('public.'||v_name);
     if v_index is null then raise exception 'missing narrow eligibility index %',v_name; end if;
     if exists(select 1 from pg_index i join pg_attribute a

@@ -5,6 +5,16 @@
 -- access. No authorization, RLS, exact counts or eight-second ceiling changes.
 -- derived-from: 20260911045353, 20260904121037
 
+-- Ordinary transactional builds preserve the governed atomic lane. Refuse
+-- lock contention promptly; each build has a bounded execution budget. These
+-- migration-local limits do not alter the eight-second API function settings.
+set local lock_timeout='2s';
+set local statement_timeout='30s';
+
+-- The unchanged tag RLS policy proves an asset is visible through EXISTS(id).
+-- Neither thumbnail-partitioned index alone covers that broader predicate.
+create index idx_assets_tag_rls_visible_ids on public.assets(id)
+  where is_deleted=false;
 create index idx_assets_tag_visible_facets on public.assets(id)
   include(file_type,status,workflow_status,stage,is_licensed)
   where is_deleted=false and thumbnail_url is not null;
