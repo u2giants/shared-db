@@ -5451,6 +5451,12 @@ export function activateReviewCutover(io=githubIo){return withReviewRequestBudge
 // admission fields; only earlier in-flight work may use the legacy path.
 export const ADMISSION_LEGACY_CUTOVER = '2026-09-11T18:00:00Z'
 
+function trustedCompletionComments(comments=[]){return comments.filter((comment)=>{
+  const association=String(comment?.author_association??comment?.authorAssociation??'').toUpperCase()
+  const author=String(comment?.author??comment?.author_login??'').toLowerCase()
+  return association==='OWNER'&&author==='u2giants'
+})}
+
 export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-migration-author-lanes', allowLegacy = false, timestamp } = {}) {
   let issue = io.getIssue(Number(number))
   let livePr=null
@@ -5465,7 +5471,7 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       if(String(issue?.state??'').toLowerCase()==='closed'){
         if(!livePr?.merged_at||typeof io.updateIssue!=='function')throw new AdmissionError(`issue #${number} is closed and cannot be admitted`)
         const completion=typeof io.issueComments==='function'
-          ?findCompletionRecord(io.issueComments(Number(number)),{requireTrustedAuthor:true})
+          ?findCompletionRecord(trustedCompletionComments(io.issueComments(Number(number))))
           :null
         if(completion?.outcome==='live_verified'){
           if(completion.work_issue!==Number(number)||completion.pr!==Number(pr)||completion.merge_sha!==livePr.merge_commit_sha)throw new AdmissionError(`issue #${number} completed outcome does not match merged pull request #${pr}`)
@@ -5545,7 +5551,7 @@ export function resolveAdmittedIssueForPr(pr, io = githubIo) {
   const linked = io.closingIssuesForPr(Number(pr))
   if (!Array.isArray(linked)) throw new LaneError('pull request closing-issue linkage is unreadable')
   if (linked.length !== 1) throw new LaneError(`pull request must close exactly one structural work issue; found ${linked.length}`)
-  const result = admitIssueSerialized(Number(linked[0].number), io, { pr:Number(pr), allowLegacy:false })
+  const result = admitIssueSerialized(Number(linked[0].number), io, { pr:Number(pr), allowLegacy:true })
   return { issue:Number(linked[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
 }
 

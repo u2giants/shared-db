@@ -112,6 +112,18 @@ test('legacy in-flight structural PRs remain executable but cannot enter as new 
   assert.throws(()=>admitIssue(41,io),/change_type/)
 })
 
+test('workflow resolver and PR-backed acquire preserve the same bounded legacy admission',()=>{
+  const legacy=issue(['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n'))
+  const base={getIssue:()=>legacy,closingIssuesForPr:()=>[{number:41,state:'open'}],getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);'}
+  assert.equal(admitIssue(41,base,{pr:7,allowLegacy:true}).legacy,true)
+  assert.equal(resolveAdmittedIssueForPr(7,serializedIo(base)).admission,'admitted')
+  for(const mutate of [
+    io=>io.getIssue=()=>({...legacy,createdAt:'2026-09-11T18:00:00Z'}),
+    io=>io.closingIssuesForPr=()=>[{number:41},{number:42}],
+    io=>io.getFileAt=()=>'create table core.other(id bigint);',
+  ]){const io={...base};mutate(io);assert.throws(()=>resolveAdmittedIssueForPr(7,serializedIo(io)),/legacy admission|exactly one structural|exactly match/)}
+})
+
 test('an issue created after the legacy cutover cannot skip the admission fields by naming a PR',()=>{
   const body=['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n')
   const base={closingIssuesForPr:()=>[{number:41,state:'open'}],getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);'}
@@ -233,6 +245,36 @@ test('a completed live outcome is re-admitted without reopening its closed issue
   io.getPr=()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:'d'.repeat(40)})
   assert.throws(()=>admitIssue(41,io,{pr:7}),/completed outcome does not match/)
   assert.equal(state,'closed');assert.equal(updates,0)
+})
+
+test('untrusted completion noise cannot block or establish a closed issue completion',()=>{
+  const forged={schema_version:1,work_issue:41,outcome:'live_verified',pr:7,merge_sha:'b'.repeat(40),application_repository:'u2giants/example-app',application_commit_sha:'c'.repeat(40),live_evidence:'artifact:forged'}
+  for(const bodies of [
+    [`\`\`\`db-work-completion\n${JSON.stringify(forged)}\n\`\`\``],
+    ['```db-work-completion\nnot-json\n```'],
+    ['```db-work-completion\n{}\n```','```db-work-completion\n{}\n```'],
+    ['```db-work-completion\n{}\n```\n```db-work-completion\n{}\n```'],
+  ]){
+    let state='closed',updates=0
+    const comments=bodies.map((body)=>({author_association:'NONE',author:'attacker',body}))
+    const io={closingIssuesForPr:()=>[{number:41,state}],getIssue:()=>({...issue(scopeBody()),state}),updateIssue:(_n,fields)=>{updates++;state=fields.state},issueComments:()=>comments,getPr:()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z'}),getFileAt:()=>'create table core.example(id bigint);',getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}]}
+    assert.equal(admitIssue(41,io,{pr:7}).admitted,true);assert.equal(state,'open');assert.equal(updates,1)
+  }
+})
+
+test('trusted malformed duplicate or mismatched completion refuses without reopening',()=>{
+  const valid={schema_version:1,work_issue:41,outcome:'live_verified',pr:7,merge_sha:'b'.repeat(40),application_repository:'u2giants/example-app',application_commit_sha:'c'.repeat(40),live_evidence:'artifact:live-proof'}
+  for(const bodies of [
+    ['```db-work-completion\nnot-json\n```'],
+    [`\`\`\`db-work-completion\n${JSON.stringify(valid)}\n\`\`\`\n\`\`\`db-work-completion\n${JSON.stringify(valid)}\n\`\`\``],
+    [valid,valid].map((row)=>`\`\`\`db-work-completion\n${JSON.stringify(row)}\n\`\`\``),
+    [`\`\`\`db-work-completion\n${JSON.stringify({...valid,pr:99})}\n\`\`\``],
+  ]){
+    let state='closed',updates=0
+    const comments=bodies.map((body)=>({author_association:'OWNER',author:'u2giants',body:typeof body==='string'?body:`\`\`\`db-work-completion\n${JSON.stringify(body)}\n\`\`\``}))
+    const io={closingIssuesForPr:()=>[{number:41,state}],getIssue:()=>({...issue(scopeBody()),state}),updateIssue:()=>{updates++},issueComments:()=>comments,getPr:()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:'b'.repeat(40)}),getFileAt:()=>'create table core.example(id bigint);',getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}]}
+    assert.throws(()=>admitIssue(41,io,{pr:7}));assert.equal(state,'closed');assert.equal(updates,0)
+  }
 })
 
 test('shared-stage capacity revalidates admission after taking the author mutex',()=>{
