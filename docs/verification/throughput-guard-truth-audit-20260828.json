@@ -344,6 +344,13 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": "scripts/benchmark_popsg_search_v2_production.py:14",
+      "semantic_key": "scripts/benchmark_popsg_search_v2_production.py:692d1cb0b25417625966fe67514c6f9b6cc2bfc81de7d878a6fe0cca7fdb1ddc:1",
+      "line_sha256": "692d1cb0b25417625966fe67514c6f9b6cc2bfc81de7d878a6fe0cca7fdb1ddc",
+      "disposition": "excluded",
+      "reason": "Synthetic disposable benchmark fixture uses the missing preview-state enum as an input; it makes no claim that a live schema object or source capture is absent."
+    },
+    {
       "site": "scripts/benchmark_popsg_search_v2.py:13",
       "semantic_key": "scripts/benchmark_popsg_search_v2.py:692d1cb0b25417625966fe67514c6f9b6cc2bfc81de7d878a6fe0cca7fdb1ddc:1",
       "line_sha256": "692d1cb0b25417625966fe67514c6f9b6cc2bfc81de7d878a6fe0cca7fdb1ddc",
@@ -354,6 +361,27 @@
       "site": "scripts/catalog-truth.mjs:14",
       "semantic_key": "scripts/catalog-truth.mjs:dc299927710ce668393c11ef50b43a3ef9cf60d8b0e73d1eca1e4db32dc0f3aa:1",
       "line_sha256": "dc299927710ce668393c11ef50b43a3ef9cf60d8b0e73d1eca1e4db32dc0f3aa",
+      "disposition": "enriched",
+      "reason": "This call site reports independent evidence and preserves the existing refusal exit."
+    },
+    {
+      "site": "scripts/check_pass2_routine_supersession.py:23",
+      "semantic_key": "scripts/check_pass2_routine_supersession.py:655746e0ec9435b21a9fabc5c13612aec794fdeb6a242417787ccffd8a9e3198:1",
+      "line_sha256": "655746e0ec9435b21a9fabc5c13612aec794fdeb6a242417787ccffd8a9e3198",
+      "disposition": "excluded",
+      "reason": "Explanatory docstring prose describing why a contract test reports a function missing its intended grants; it is narrative documentation, not a code path that diagnoses or reports a missing object."
+    },
+    {
+      "site": "scripts/check_production_verification_sidecars.py:41",
+      "semantic_key": "scripts/check_production_verification_sidecars.py:6e494c651ced298d5cee9dbaae0bbdf9c4b0fbf8e72e5f9669e9bd6e7626b876:1",
+      "line_sha256": "6e494c651ced298d5cee9dbaae0bbdf9c4b0fbf8e72e5f9669e9bd6e7626b876",
+      "disposition": "enriched",
+      "reason": "This call site reports independent evidence and preserves the existing refusal exit."
+    },
+    {
+      "site": "scripts/check_production_verification_sidecars.py:34",
+      "semantic_key": "scripts/check_production_verification_sidecars.py:e47fc51b7d39934fc8bf83e0788a61943d78d1174ad1dd72357cc9f5e75b2b97:1",
+      "line_sha256": "e47fc51b7d39934fc8bf83e0788a61943d78d1174ad1dd72357cc9f5e75b2b97",
       "disposition": "enriched",
       "reason": "This call site reports independent evidence and preserves the existing refusal exit."
     },
@@ -391,6 +419,13 @@
       "line_sha256": "d29e78c035a6ddef1223223bf45ed9f98c999e7c796542eed0b9e165a2253174",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/check-db-data-admin-property-source-coverage.mjs:188",
+      "semantic_key": "scripts/check-db-data-admin-property-source-coverage.mjs:ffbf35823d149fb0f048c966ffd7771a9a53c5383c8cf46a8bf3d5a8e48a5b1b:1",
+      "line_sha256": "ffbf35823d149fb0f048c966ffd7771a9a53c5383c8cf46a8bf3d5a8e48a5b1b",
+      "disposition": "excluded",
+      "reason": "Reviewed 2026-09-10 for #2579: this line reports the reserved migration file as missing only after a direct fs.existsSync test on that exact path, so the absence is measured rather than inferred; there is nothing to enrich and no not-derivable case can reach it."
     },
     {
       "site": "scripts/check-handoff-contract.mjs:300",
@@ -631,32 +666,32 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/check_pass2_routine_supersession.py:23",
-      "semantic_key": "scripts/check_pass2_routine_supersession.py:655746e0ec9435b21a9fabc5c13612aec794fdeb6a242417787ccffd8a9e3198:1",
-      "line_sha256": "655746e0ec9435b21a9fabc5c13612aec794fdeb6a242417787ccffd8a9e3198",
-      "disposition": "excluded",
-      "reason": "Explanatory docstring prose describing why a contract test reports a function missing its intended grants; it is narrative documentation, not a code path that diagnoses or reports a missing object."
-    },
-    {
-      "site": "scripts/check_production_verification_sidecars.py:41",
-      "semantic_key": "scripts/check_production_verification_sidecars.py:6e494c651ced298d5cee9dbaae0bbdf9c4b0fbf8e72e5f9669e9bd6e7626b876:1",
-      "line_sha256": "6e494c651ced298d5cee9dbaae0bbdf9c4b0fbf8e72e5f9669e9bd6e7626b876",
-      "disposition": "enriched",
-      "reason": "This call site reports independent evidence and preserves the existing refusal exit."
-    },
-    {
-      "site": "scripts/check_production_verification_sidecars.py:34",
-      "semantic_key": "scripts/check_production_verification_sidecars.py:e47fc51b7d39934fc8bf83e0788a61943d78d1174ad1dd72357cc9f5e75b2b97:1",
-      "line_sha256": "e47fc51b7d39934fc8bf83e0788a61943d78d1174ad1dd72357cc9f5e75b2b97",
-      "disposition": "enriched",
-      "reason": "This call site reports independent evidence and preserves the existing refusal exit."
-    },
-    {
       "site": "scripts/experiment_611_db_push_atomicity.sh:140",
       "semantic_key": "scripts/experiment_611_db_push_atomicity.sh:03d91ac66d438482ddacf7ed63810b052889ef9fd2027e0574afd2cf824bc75d:1",
       "line_sha256": "03d91ac66d438482ddacf7ed63810b052889ef9fd2027e0574afd2cf824bc75d",
       "disposition": "excluded",
       "reason": "This discovered shell guard keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/historical_preview_recovery.py:118",
+      "semantic_key": "scripts/historical_preview_recovery.py:059ddfaa9bc2681385b08bedcb8d7c3bfe65d383d595dd4bf8dfea21a4b52a85:1",
+      "line_sha256": "059ddfaa9bc2681385b08bedcb8d7c3bfe65d383d595dd4bf8dfea21a4b52a85",
+      "disposition": "excluded",
+      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/historical_preview_recovery.py:98",
+      "semantic_key": "scripts/historical_preview_recovery.py:7d0f0f7443e657f961669221c2e509194c130623d3b565bd3ca45e55e180a3b3:1",
+      "line_sha256": "7d0f0f7443e657f961669221c2e509194c130623d3b565bd3ca45e55e180a3b3",
+      "disposition": "excluded",
+      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/historical_preview_recovery.py:31",
+      "semantic_key": "scripts/historical_preview_recovery.py:cc5fe0d1f54bb8415b7b1592e5806f9f343c1ee0adb24fb5da8ce0a61579b227:1",
+      "line_sha256": "cc5fe0d1f54bb8415b7b1592e5806f9f343c1ee0adb24fb5da8ce0a61579b227",
+      "disposition": "excluded",
+      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
       "site": "scripts/historical-item-mg-reclassification/build-manifest.mjs:47",
@@ -713,27 +748,6 @@
       "reason": "This line reports a read-only post-apply verification failure for the reclassification executor; it describes a live database row or function that is absent and makes no throughput derivability claim.",
       "semantic_key": "scripts/historical-item-mg-reclassification/lib/verify.mjs:e8b31e35869f65ef1cb3e8da8b78f22a118d7640948fd1b3ecadea22555031e9:1",
       "line_sha256": "e8b31e35869f65ef1cb3e8da8b78f22a118d7640948fd1b3ecadea22555031e9"
-    },
-    {
-      "site": "scripts/historical_preview_recovery.py:118",
-      "semantic_key": "scripts/historical_preview_recovery.py:059ddfaa9bc2681385b08bedcb8d7c3bfe65d383d595dd4bf8dfea21a4b52a85:1",
-      "line_sha256": "059ddfaa9bc2681385b08bedcb8d7c3bfe65d383d595dd4bf8dfea21a4b52a85",
-      "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
-    },
-    {
-      "site": "scripts/historical_preview_recovery.py:98",
-      "semantic_key": "scripts/historical_preview_recovery.py:7d0f0f7443e657f961669221c2e509194c130623d3b565bd3ca45e55e180a3b3:1",
-      "line_sha256": "7d0f0f7443e657f961669221c2e509194c130623d3b565bd3ca45e55e180a3b3",
-      "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
-    },
-    {
-      "site": "scripts/historical_preview_recovery.py:31",
-      "semantic_key": "scripts/historical_preview_recovery.py:cc5fe0d1f54bb8415b7b1592e5806f9f343c1ee0adb24fb5da8ce0a61579b227:1",
-      "line_sha256": "cc5fe0d1f54bb8415b7b1592e5806f9f343c1ee0adb24fb5da8ce0a61579b227",
-      "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
       "site": "scripts/import-order-list-xlsx.py:2006",
@@ -1933,13 +1947,6 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/check-db-data-admin-property-source-coverage.mjs:188",
-      "semantic_key": "scripts/check-db-data-admin-property-source-coverage.mjs:ffbf35823d149fb0f048c966ffd7771a9a53c5383c8cf46a8bf3d5a8e48a5b1b:1",
-      "line_sha256": "ffbf35823d149fb0f048c966ffd7771a9a53c5383c8cf46a8bf3d5a8e48a5b1b",
-      "disposition": "excluded",
-      "reason": "Reviewed 2026-09-10 for #2579: this line reports the reserved migration file as missing only after a direct fs.existsSync test on that exact path, so the absence is measured rather than inferred; there is nothing to enrich and no not-derivable case can reach it."
-    },
-    {
       "site": ".github/workflows/shared-supabase-migrations.yml:1154",
       "semantic_key": ".github/workflows/shared-supabase-migrations.yml:5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4:1",
       "line_sha256": "5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4",
@@ -1954,7 +1961,7 @@
       "reason": "#2809. This line is explanatory comment prose quoting the guard refusal text it fixes; it performs no missing-object detection and changes no refusal behaviour, so it carries no enrichment obligation."
     }
   ],
-  "call_site_count": 277,
-  "call_site_sha256": "59965bf6503298e345048733639b06644e7f1a870fb1a20fa689a25f716ea58a",
+  "call_site_count": 278,
+  "call_site_sha256": "27761cb001bf68c97776dc14ede01626afffd9020ae39a5d1234491692c776e6",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
