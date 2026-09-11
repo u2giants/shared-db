@@ -1,59 +1,27 @@
 {
   "schema_version": 1,
-  "work_issue": 2662,
+  "work_issue": 2789,
   "outcome": "ready-for-merge",
-  "pr": 2764,
-  "migration_versions": [
-    "20260911124746"
-  ],
-  "contract_ref": "refs/db-contracts/2662/6",
-  "contract_sha256": "d147d233f14733d214884880d2bbe10fac7dcc0703b00ba75a080a43ec6dcde4",
-  "head_sha": "439cc01bc1f07a5b5a2fa8fb4073e663c364ef23",
+  "pr": 2790,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2789/1",
+  "contract_sha256": "0051ff4422fd232e2e215da66cf405247cd807671aa50921ed284d7573fc078f",
+  "head_sha": "4cd32b9b9bcfb9aecb3e9a0a5434507ee3aabac8",
   "files_changed": [
-    "supabase/migrations/20260911124746_crm_definer_views_caller_gate.sql",
-    "supabase/tests/crm_definer_views_caller_gate_contracts.sql"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "scripts/test_production_review_source_pr_preflight.py"
   ],
-  "db_reads": [
-    "table core.customer",
-    "table crm.ingested_domain",
-    "table plm.customer_import",
-    "table app.app_access",
-    "table app.profile",
-    "view api.crm_contact_list",
-    "table core.contact",
-    "table public.sku_files_used",
-    "table public.style_guide_files",
-    "table public.style_groups"
-  ],
-  "db_writes": [
-    "view api.crm_customer_list",
-    "view api.crm_account_list",
-    "view api.crm_ingested_domain_list",
-    "view api.crm_contact_segment_list",
-    "view api.crm_contact_segment_counts",
-    "view public.sg_archive_usage"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "git diff --check",
+      "command": "python -m unittest scripts/test_production_review_source_pr_preflight.py",
       "exit_code": 0,
-      "evidence": "No whitespace errors on 9b02ad48..439cc01b."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static checks passed on 439cc01b."
-    },
-    {
-      "command": "hosted ephemeral migration regression suite",
-      "exit_code": 0,
-      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on commit a4848fde (run 34617412771, job 103322678124), whose supabase files are byte-identical to implementation commit 439cc01b; it applied every migration, including the base-table policy and contact-gate assertions, and ran supabase/tests/crm_definer_views_caller_gate_contracts.sql with non-zero contact and archive fixtures as the authenticated role."
+      "evidence": "Ran 5 tests, OK at 4cd32b9b. The same test against origin/main 5761bc5e's workflow fails 5/5 (step absent). Full scripts/test_*.py: Ran 943 tests, OK (skipped=8)."
     }
   ],
   "assumptions_resolved": [
-    "App consumer search across popcrm-web, popdam3, poppim-web, dflow_plm and edge functions found only popcrm-web authenticated browser reads of the changed views; no service-role consumer.",
-    "Read-only preview baseline: CRM callers with and without a role read 862/862/96 customer/account/domain rows; a DAM-only caller also read 862/862/96, which is the leak closed here."
+    "Confirmed: the new step reads only inputs.source_pr and the activation file, and sits after Verify exact main commit and before the first secrets use in the review job; the later test -n checks in both production jobs are unchanged."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Implementation 439cc01b on main 9b02ad48 (supabase files identical to a4848fde) addresses the REVISE on 4a262c06 (refs/db-review-verdicts/2662-2764-4a262c06b52ea83e9912e4a8edf8db4464aec7ca): base-table grant and open-policy guard for sg_archive_usage, definer and gate guard on api.crm_contact_list, OR rejection on gated view text, non-vacuous contact and archive fixtures. Contract generation 6 declares the added reads. Diff check, static SQL checks and the hosted ephemeral suite all exit 0."
+  "stop_conditions_hit": []
 }
