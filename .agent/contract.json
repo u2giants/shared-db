@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2664,
-  "generation": 2,
+  "generation": 4,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "One authenticated invoker-safe OrderList Find position lookup preserving full filtered/sorted-grid semantics.",
@@ -15,14 +15,18 @@
     ".agent/completion.json",
     "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
     "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py"
+    "scripts/test_order_list_find_position.py",
+    "scripts/production-verification-sidecars/20260911081204.json",
+    "scripts/production_business_risk_gate.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
     "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
     "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py"
+    "scripts/test_order_list_find_position.py",
+    "scripts/production-verification-sidecars/20260911081204.json",
+    "scripts/production_business_risk_gate.py"
   ],
   "db_reads": [
     "view api.dam_order_list"
@@ -40,7 +44,8 @@
   "assumptions": [
     "Claim2747 reserves20260911081204 and exact function.",
     "Live PopDAM helpers define normalized filters and sorts; duplicate2665 shares this contract.",
-    "Implementation committed and local synthetic contracts passed; draft2748 is held for parent priority work."
+    "Implementation committed and local synthetic contracts passed; draft2748 is held for parent priority work.",
+    "CI requires a hash-bound disposition for the runtime dynamic SELECT; it creates no additional durable catalog object and retains normal function/grant verification."
   ],
   "stop_conditions": [
     "Object collision or missing material application contract.",
