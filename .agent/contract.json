@@ -1,42 +1,46 @@
 {
   "schema_version": 1,
-  "work_issue": 2783,
-  "generation": 1,
-  "work_type": "tooling",
-  "route": "shared-db-orchestrator",
-  "goal": "Make temp git fixture repos in the Python tests deterministic by disabling git's detached background maintenance (gc.auto=0, maintenance.auto=false), so TemporaryDirectory cleanup can no longer race it and fail the SQL migration guards job with Errno 39, without relaxing, skipping or retrying any guard or assertion.",
-  "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
-  "dispatcher": "Albert Hazan (owner request in chat)",
-  "worker": "Claude deterministic-git-fixture worker",
-  "branch": "claude/deterministic-git-fixture-cleanup",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/jovial-moore-5fd4c8",
+  "work_issue": 2766,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Remove the global FIFO reviewer draw queue, retry a briefly occupied review mutex, and raise the author lane cap to 24.",
+  "base_sha": "2662aa1a114821e9f8917b3ec3fdfe3fdc10b636",
+  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
+  "worker": "Claude process-unblocking sub-agent of marker 2758",
+  "branch": "claude/reviewer-draw-no-fifo",
+  "worktree": "C:/repos/shared-db-worktrees/unblock-2758",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/test_historical_preview_recovery.py",
-    "scripts/tests/test_import_order_list.py"
+    "docs/agents/section-4-anti-collision-rules.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/test_historical_preview_recovery.py",
-    "scripts/tests/test_import_order_list.py"
+    "docs/agents/section-4-anti-collision-rules.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "No shared database reads or writes, no production or preview apply, no migration files, no change to any guard, assertion, skip or retry, no fabricated reviews."
+    "Do not modify a migration or any database state.",
+    "Do not change per-provider leases, engine exclusions, exact-head binding, or verdict recording.",
+    "Do not change exact object claims, version reservations, or serial stage refs."
   ],
   "required_checks": [
-    "python -m unittest scripts/test_production_business_risk_gate.py scripts/test_historical_preview_recovery.py"
+    "git diff --check",
+    "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "node scripts/check-github-transport-conformance.mjs"
   ],
   "assumptions": [
-    "The Errno 39 cleanup failures come from the detached git maintenance process that git 2.47+ spawns after each commit, not from an unwaited foreground subprocess."
+    "Owner instructions relayed on marker 2758 authorize removing the reviewer FIFO and raising the author cap."
   ],
   "stop_conditions": [
-    "Any required check fails.",
-    "The fix would need to change a guard, an assertion, or the gate code under test."
-  ]
+    "Stop if implementation requires a database or production write."
+  ],
+  "generation": 7
 }

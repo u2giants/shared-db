@@ -1,28 +1,46 @@
 {
   "schema_version": 1,
-  "work_issue": 2783,
+  "work_issue": 2766,
   "outcome": "ready-for-merge",
-  "pr": 2782,
+  "pr": 2767,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2783/1",
-  "contract_sha256": "8fb07821210b281cbd983e43768bc7ccb0439b94d794b62e2e60c25a4aa6b8e1",
-  "head_sha": "d8676c8f14b829f919d26f2ed81e5b76c4c19ce3",
+  "contract_ref": "refs/db-contracts/2766/7",
+  "contract_sha256": "c7325f650f6ec0e781929f0a35bc6ea8895a7c421698971675d8bec5345074da",
+  "head_sha": "97c6251d39e651c075c5983a84867c2a888a3ab3",
   "files_changed": [
-    "scripts/test_historical_preview_recovery.py",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/tests/test_import_order_list.py"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/agents/section-4-anti-collision-rules.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "python -m unittest scripts/test_production_business_risk_gate.py scripts/test_historical_preview_recovery.py",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "Ran 152 tests, OK at d8676c8f. PR CI job SQL migration guards (all scripts/test_*.py) also passed at d8676c8f. GIT_TRACE2_EVENT on a two-commit repo shows 4 detached 'git maintenance run --auto --detach' spawns without the settings and 0 with gc.auto=0 and maintenance.auto=false."
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+      "exit_code": 0,
+      "evidence": "524 tests passed, 0 failed, 0 skipped."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=275"
+    },
+    {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "212 files scanned, all calls governed."
     }
   ],
   "assumptions_resolved": [
-    "Confirmed: the only unwaited writer is git's detached auto-maintenance; every foreground fixture subprocess.run already waits. Attempt 2 of run 34615626046 passed the same tests on the same SHA, consistent with a race."
+    "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Muse REVISE on 5ecafd35 addressed in 451575a5 (stale eight-lane wording, non-mutex zero-wait test). Ready for exact-head review, required CI, and guarded merge."
 }
