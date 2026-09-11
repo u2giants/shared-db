@@ -472,16 +472,44 @@ export function reviewersForOrchestrator(engine, reviewers=ACTIVE_REVIEWERS){
   return reviewers.filter((row)=>String(row.orchestratorEngine??'').toLowerCase()!==normalized)
 }
 
+export function reviewerAdmissionAllowed(row,overrides={},now=Date.now()){
+  const admission=row?.admission,safe=(value)=>typeof value==='string'&&value.length>0&&value.length<=160&&!/[\u0000-\u001f\u007f]/.test(value)
+  const refuse=(reason)=>{throw new LaneError(`reviewer admission ${reason}; no sequence or lease was consumed`)}
+  if(!admission||admission.schema_version!==1||admission.provider!==row.provider||!['eligible','unknown','backoff'].includes(admission.state)||admission.quota_state!=='unknown'||admission.reset_at!==null||!safe(admission.reason))refuse('is missing or malformed')
+  const profile=admission.credential_profile_scope,model=admission.model_scope
+  if((profile!==null&&!safe(profile))||(model!==null&&!safe(model)))refuse('scope is malformed')
+  if((overrides.profile&&profile!==overrides.profile)||(overrides.model&&model!==overrides.model))refuse('scope does not match the effective override')
+  if(admission.state==='unknown'){
+    if(admission.reason!=='unscopable'||(safe(profile)&&safe(model)))refuse('unknown state is malformed')
+    return true // An explicit unknown quota is not evidence of provider refusal.
+  }
+  if(!safe(profile)||!safe(model))refuse('requires an exact profile and model')
+  if(admission.state==='eligible'){
+    if(admission.reason!=='no-applicable-backoff')refuse('eligible state is malformed')
+    return true
+  }
+  if(admission.reason!=='observed-usage-limit'||!Number.isSafeInteger(admission.policy_expires_epoch)||admission.policy_expires_epoch<=0||!safe(admission.source_run_id)||!/^[0-9a-f]{64}$/i.test(admission.evidence_sha256??''))refuse('backoff proof is malformed')
+  if(!Number.isFinite(now))refuse('clock is unreadable')
+  return admission.policy_expires_epoch<=Math.floor(now/1000)
+}
+
 export function allocatableReviewers(io){
   const independent=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
   if(!independent.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
   if(typeof io.reviewerUsability!=='function')throw new LaneError('reviewer allocation cannot read the reconciled ai-review-preflight state; no sequence or lease was consumed')
   const usability=io.reviewerUsability(independent)
   if(!(usability instanceof Map))throw new LaneError('reviewer allocation received malformed reconciled ai-review-preflight state; no sequence or lease was consumed')
-  const usable=(row)=>usability.get(row.provider)?.usable===true
+  const reconciled=new Map()
+  for(const row of independent){
+    const state=usability.get(row.provider)
+    if(state?.provider!==row.provider)throw new LaneError('reviewer admission provider identity does not match the requested provider; no sequence or lease was consumed')
+    const allowed=reviewerAdmissionAllowed(state,io.reviewerAdmissionOverrides?.(row)??{})
+    reconciled.set(row.provider,{...state,usable:state.usable===true&&allowed,...(!allowed?{status:'admission-backoff',failure_class:'observed-usage-limit'}:{})})
+  }
+  const usable=(row)=>reconciled.get(row.provider)?.usable===true
   return {
     eligible:independent.filter(usable),
-    unusable:new Map(independent.filter((row)=>!usable(row)).map((row)=>[row.name,usability.get(row.provider)??{status:'unreadable',usable:false}]))
+    unusable:new Map(independent.filter((row)=>!usable(row)).map((row)=>[row.name,reconciled.get(row.provider)]))
   }
 }
 
@@ -1798,6 +1826,9 @@ export const githubIo = {
     // RECORD the proof (reinstateReviewerExclusion) quotes the wrapper verbatim
     // instead of paraphrasing it. Nothing else reads it.
     return {...summarizeDoctorOutput(output),output}
+  },
+  reviewerAdmissionOverrides(reviewer){
+    return {profile:process.env.AI_REVIEW_ADMISSION_PROFILE||undefined,model:process.env.AI_REVIEW_ADMISSION_MODEL||(reviewer.provider==='kimi'?process.env.AI_KIMI_MODEL:undefined)||undefined}
   },
   reviewerUsability(reviewers){
     const command='ai-review-preflight',resolved=resolveCommandPath(command)

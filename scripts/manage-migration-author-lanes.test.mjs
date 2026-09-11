@@ -539,10 +539,12 @@ function giveVerdict(io,{issue,pr,headSha,slot=1,replacementSequence=null}){
   return ref
 }
 
+function usableAdmission(row){return {provider:row.provider,status:'ready',usable:true,admission:{schema_version:1,provider:row.provider,state:'unknown',reason:'unscopable',quota_state:'unknown',reset_at:null,credential_profile_scope:null,model_scope:null}}}
+
 function reviewIo(){
   const io=memoryIo(), commits=new Map();let seq=0
   io.resolveOrchestratorEngine=()=> 'claude'
-  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:'ready',usable:true}]))
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,usableAdmission(row)]))
   io.refs.set(REVIEW_ACTIVE_CUTOVER_REF,'cutover-complete')
   io.makeOwnerCommit=(message)=>{const sha=(++seq).toString(16).padStart(40,'0');commits.set(sha,{message});return sha}
   io.getCommit=(sha)=>commits.get(sha)
@@ -554,9 +556,60 @@ function reviewIo(){
   return io
 }
 
+for(const fault of ['missing','scope-mismatch','model-mismatch','provider-mismatch','malformed-backoff'])test('#396 admission '+fault+' refuses before assignment mutation',()=>{
+  const io=reviewIo(),before=[...io.refs],original=io.reviewerUsability
+  io.reviewerAdmissionOverrides=()=>({profile:'expected-profile',model:'effective-model'})
+  io.reviewerUsability=(reviewers)=>{
+    const rows=original(reviewers)
+    for(const row of rows.values()){
+      if(fault==='missing')delete row.admission
+      else if(fault==='provider-mismatch')row.provider='wrong-provider'
+      else if(fault==='model-mismatch')row.admission={...row.admission,state:'eligible',reason:'no-applicable-backoff',credential_profile_scope:'expected-profile',model_scope:'wrong-model'}
+      else row.admission={...row.admission,state:fault==='scope-mismatch'?'eligible':'backoff',reason:fault==='scope-mismatch'?'no-applicable-backoff':'observed-usage-limit',credential_profile_scope:fault==='scope-mismatch'?'other-profile':'expected-profile',model_scope:'effective-model'}
+    }
+    return rows
+  }
+  assert.throws(()=>assignNextReviewer({issue:396,pr:397,headSha:'a'.repeat(40)},io),/admission/)
+  assert.deepEqual([...io.refs],before,'invalid admission consumes no sequence, assignment, or lease')
+})
+
+for(const state of ['unknown','eligible','expired-backoff','live-backoff'])test('#396 admission '+state+' preserves truthful allocation',()=>{
+  const io=reviewIo(),before=[...io.refs],original=io.reviewerUsability
+  io.reviewerUsability=(reviewers)=>{
+    const rows=original(reviewers)
+    for(const row of rows.values()){
+      if(state==='unknown')continue
+      row.admission={...row.admission,state:state==='eligible'?'eligible':'backoff',reason:state==='eligible'?'no-applicable-backoff':'observed-usage-limit',credential_profile_scope:'effective-profile',model_scope:'effective-model',policy_expires_epoch:Math.floor(Date.now()/1000)+(state==='expired-backoff'?-60:600),source_run_id:'retained-provider-turn',evidence_sha256:'e'.repeat(64)}
+    }
+    return rows
+  }
+  const request={issue:396,pr:397,headSha:'a'.repeat(40)}
+  if(state==='live-backoff'){
+    assert.throws(()=>assignNextReviewer(request,io),/no.*reviewer|eligible|usable/i)
+    assert.deepEqual([...io.refs],before,'proven refusal does not consume an assignment')
+  }else{
+    assert.ok(assignNextReviewer(request,io).reviewer)
+    for(const row of io.reviewerUsability(ACTIVE_REVIEWERS).values()){
+      assert.equal(row.admission.quota_state,'unknown','policy expiry is never advertised as a known quota reset')
+      assert.equal(row.admission.reset_at,null)
+    }
+  }
+})
+
+test('#396 admission accepts matching explicit model/profile overrides without copying defaults',()=>{
+  const io=reviewIo(),original=io.reviewerUsability
+  io.reviewerAdmissionOverrides=()=>({profile:'custom-profile',model:'custom-model'})
+  io.reviewerUsability=(reviewers)=>{
+    const rows=original(reviewers)
+    for(const row of rows.values())row.admission={...row.admission,state:'eligible',reason:'no-applicable-backoff',credential_profile_scope:'custom-profile',model_scope:'custom-model'}
+    return rows
+  }
+  assert.ok(assignNextReviewer({issue:396,pr:397,headSha:'a'.repeat(40)},io).reviewer)
+})
+
 test('#2705 reviewer assignment skips a provider that reconciled preflight says is unusable',()=>{
   const io=reviewIo(), skipped=ACTIVE_REVIEWERS[0]
-  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.name===skipped.name?'quarantined':'ready',failure_class:row.name===skipped.name?'live-qualification-required':null,usable:row.name!==skipped.name}]))
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{...usableAdmission(row),status:row.name===skipped.name?'quarantined':'ready',failure_class:row.name===skipped.name?'live-qualification-required':null,usable:row.name!==skipped.name}]))
   const assigned=assignNextReviewer({issue:2705,pr:2706,headSha:'a'.repeat(40)},io)
   assert.notEqual(assigned.reviewer,skipped.name)
   assert.equal(assigned.sequence,1,'skipping an unusable provider must not burn a durable sequence')
@@ -7164,7 +7217,7 @@ test('#2694 releasing a slot 2 failure is refused when the lease at that ref nam
 
 test('#2705 replacement allocation also skips providers that reconciled preflight refuses',()=>{
   const io=failedReviewIo(), allowed='qwen'
-  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.provider===allowed?'ready':'quarantined',usable:row.provider===allowed}]))
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{...usableAdmission(row),status:row.provider===allowed?'ready':'quarantined',usable:row.provider===allowed}]))
   const replacement=replaceFailedReviewer(replacementRequest,io)
   assert.equal(replacement.reviewer,'qwen-3.8-max')
 })
