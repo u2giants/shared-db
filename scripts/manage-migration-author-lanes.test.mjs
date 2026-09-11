@@ -3175,12 +3175,12 @@ test('requireOwnedRef fails closed when a stranded lock was replaced',()=>{
   const io=memoryIo();io.refs.set(MUTEX_REF,'new-owner')
   assert.throws(()=>requireOwnedRef(MUTEX_REF,'old-owner',io),/lost ownership/)
 })
-test('stale process that resumes after claim creation closes its own claim and returns no lane',()=>{
+test('stale process that loses ownership after claim creation leaves the claim protected for explicit recovery',()=>{
   const io=memoryIo();let closed=null
   io.createClaim=()=>{io.refs.set(MUTEX_REF,'successor');return 'https://github.test/issues/77'}
   io.closeClaim=(number)=>{closed=String(number)}
-  assert.throws(()=>acquireAuthorLane(opts,NOW,io),/lost ownership/)
-  assert.equal(closed,'77');assert.equal(io.refs.get(MUTEX_REF),'successor')
+  assert.throws(()=>acquireAuthorLane(opts,NOW,io),/claim .* remains protected for explicit recovery/)
+  assert.equal(closed,null);assert.equal(io.refs.get(MUTEX_REF),'successor')
 })
 test('active serialized recovery fences every new author acquisition',()=>{
   const io=memoryIo();io.refs.set(MUTEX_RECOVERY_ACTIVE_REF,'4a69fbbc')

@@ -43,7 +43,7 @@ import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIE
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
-import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
+import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -5525,13 +5525,21 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
     const body = claimBody({ ...options, version: reservation.version, expiresAt })
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const url = io.createClaim(options.task, body)
+    const dispatchArgs={issue:Number(options.admitIssue),state:'dispatched',actor:options.owner,timestamp:now.toISOString(),evidenceUrls:[url]}
+    const expectedDispatch=io.enforceAdmission===true?outcomeEvent(dispatchArgs):null
     try {
       requireOwnedRef(MUTEX_REF,ownerSha,io)
-      if(io.enforceAdmission===true)advanceOutcome({issue:Number(options.admitIssue),state:'dispatched',actor:options.owner,timestamp:now.toISOString(),evidenceUrls:[url]},io)
+      if(io.enforceAdmission===true)advanceOutcome(dispatchArgs,io)
     }
     catch(error) {
+      if(io.readRef(MUTEX_REF)!==ownerSha)throw new LaneError(`lost mutex ownership after claim creation; claim ${url} remains protected for explicit recovery: ${error.message}`)
+      if(expectedDispatch){
+        const history=outcomeHistory(io.issueComments(Number(options.admitIssue)),Number(options.admitIssue))
+        if(history.valid&&history.events.some((event)=>event.event_id===expectedDispatch.event_id))return { version:reservation.version,claim:url,expiresAt:expiresAt.toISOString(),requestId }
+      }
       const number=/\/(\d+)\/?$/.exec(String(url))?.[1]
       if(!number)throw new LaneError(`lost mutex ownership after claim creation and could not identify the claim to close: ${error.message}`)
+      requireOwnedRef(MUTEX_REF,ownerSha,io)
       io.closeClaim(number, CLAIM_CLOSE_REASONS.acquisitionRollback)
       throw error
     }

@@ -285,6 +285,36 @@ test('claim admission and dispatched event share one author-mutex ownership inte
   assert.equal(outcomeHistory(comments,41).state,'dispatched')
 })
 
+test('lost dispatched-comment response preserves the valid claim after exact event readback',()=>{
+  const comments=[],refs=new Map();let closed=0
+  const io={
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,
+    makeOwnerCommit:()=> 'claim-owner',readRef:(ref)=>refs.get(ref)??null,
+    createRef:(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true},deleteRef:(ref)=>refs.delete(ref),
+    openClaims:()=>[],prSources:()=>[],reserveVersion:()=>({version:'20260911133800'}),
+    createClaim:()=> 'https://github.com/u2giants/shared-db/issues/99',closeClaim:()=>{closed++},
+    commentIssue:(_n,body)=>{comments.push(ownerComment(body));if(parseEventComment(body)[0]?.event_type==='dispatched')throw new Error('response lost')},
+  }
+  const old=console.log;console.log=()=>{}
+  try{assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.example'],new Date('2026-09-11T00:00:00Z'),io),0)}finally{console.log=old}
+  assert.equal(closed,0);assert.equal(outcomeHistory(comments,41).state,'dispatched')
+})
+
+test('lost mutex ownership never closes the newly created claim',()=>{
+  const comments=[],refs=new Map();let closed=0,message=''
+  const io={
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,
+    makeOwnerCommit:()=> 'claim-owner',readRef:(ref)=>refs.get(ref)??null,
+    createRef:(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true},deleteRef:(ref)=>refs.delete(ref),
+    openClaims:()=>[],prSources:()=>[],reserveVersion:()=>({version:'20260911133900'}),
+    createClaim:()=> 'https://github.com/u2giants/shared-db/issues/99',closeClaim:()=>{closed++},
+    commentIssue:(_n,body)=>{comments.push(ownerComment(body));if(parseEventComment(body)[0]?.event_type==='dispatched'){for(const ref of refs.keys())refs.set(ref,'successor-owner');throw new Error('response lost after ownership changed')}},
+  }
+  const old=console.error;console.error=(value)=>{message=String(value)}
+  try{assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.example'],new Date('2026-09-11T00:00:00Z'),io),2)}finally{console.error=old}
+  assert.match(message,/claim .* remains protected for explicit recovery/);assert.equal(closed,0);assert.deepEqual([...refs.values()],['successor-owner'])
+})
+
 test('advance validation and lifecycle mutation share one author-mutex interval',()=>{
   const comments=eventComments('classified',41),refs=new Map();let writes=0
   const io={
