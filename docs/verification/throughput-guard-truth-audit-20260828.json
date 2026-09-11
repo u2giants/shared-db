@@ -1938,9 +1938,16 @@
       "line_sha256": "9de2dd292b4305e031e31fafb886b8427cd829cb11c2f4efebc385a08e26075a",
       "disposition": "enriched",
       "reason": "Outcome completion directly reads the current issue and refuses an unreadable state before considering merge, production, or live evidence."
+    },
+    {
+      "site": "scripts/lib/documents-only-change.mjs:102",
+      "semantic_key": "scripts/lib/documents-only-change.mjs:59b3cbf2519d9937a18c077956f4328dd978a7a28681bc93c44e6a4845d7ea69:1",
+      "line_sha256": "59b3cbf2519d9937a18c077956f4328dd978a7a28681bc93c44e6a4845d7ea69",
+      "disposition": "enriched",
+      "reason": "The comment documents a fail-closed classifier rule: a missing or truncated patch is rejected, not treated as evidence that an instruction change is safe."
     }
   ],
-  "call_site_count": 275,
-  "call_site_sha256": "1dd8721972215d3a2e583d9be0993e80abf90c333bcb5d00ebae42340a8e8d57",
+  "call_site_count": 276,
+  "call_site_sha256": "9d40ad735e4c0bdacc671e71b388049ffd4c1400f8aab9f326f2b2dd069e01df",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

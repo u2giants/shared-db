@@ -1088,7 +1088,7 @@ export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT,
 // so it is charged inside the executor the shared transport calls, not around
 // it. Writes default to one attempt. Only the ref helpers below opt into replay,
 // because they prove the requested end state with an owner-bound readback.
-export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4,expectedFailure=null,reportStderr=(text)=>process.stderr.write(text),idempotentWrite=false}={}) {
+export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms),attempts=4,expectedFailure=null,reportStderr=(text)=>process.stderr.write(text),idempotentWrite=false,maxBuffer,encoding,input}={}) {
   return sharedRunGitHubCommand(args,{
     executor:(bin,cmdArgs,options)=>{consumeReviewWireRequest();return executor(bin,cmdArgs,options)},
     wait,
@@ -1096,6 +1096,9 @@ export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.
     idempotentWrite,
     expectedFailure,
     reportStderr,
+    maxBuffer,
+    encoding,
+    input,
     wrapError:(detail)=>new LaneError(`GitHub command failed: ${detail}`),
   })
 }
@@ -1824,7 +1827,7 @@ export const githubIo = {
   readArtifactJson(repository,id,expectedFile){
     const directory=mkdtempSync(path.join(tmpdir(),'shared-db-proof-')),archive=path.join(directory,'proof.zip')
     try{
-      const bytes=execFileSync('gh',['api',`repos/${repository}/actions/artifacts/${Number(id)}/zip`],{encoding:null,maxBuffer:20*1024*1024,stdio:['ignore','pipe','pipe']})
+      const bytes=gh(['api',`repos/${repository}/actions/artifacts/${Number(id)}/zip`],{encoding:null,maxBuffer:20*1024*1024})
       writeFileSync(archive,bytes)
       const entries=execFileSync('tar',['-tf',archive],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).split(/\r?\n/).filter(Boolean)
       if(entries.length!==1||entries[0]!==expectedFile)throw new LaneError(`proof artifact must contain exactly ${expectedFile}`)
