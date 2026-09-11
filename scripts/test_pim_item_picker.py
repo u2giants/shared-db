@@ -38,7 +38,7 @@ grant select on plm.item to authenticated;
     run(source, 'create database ' + name)
     try:
         run(target, fixture)
-        run(target, (ROOT / 'supabase/migrations/20260911093445_pim_canonical_item_picker.sql').read_text())
+        run(target, (ROOT / 'supabase/migrations/20260911170650_pim_canonical_item_picker.sql').read_text())
         run(target, (ROOT / 'supabase/tests/pim_item_picker_contract.sql').read_text())
         run(target, """
 set role authenticated;
