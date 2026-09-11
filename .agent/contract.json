@@ -76,12 +76,13 @@
     "Generation 27 refreshes the same takeover on main 5761bc5e (#2764, #2761); only the .agent evidence pair conflicted and no code changed.",
     "Generation 29 is the explicit handoff back to the Codex issue 401 owner and integrates main 153b7754 while preserving #2767 reviewer queue removal and #2777 unlimited author lanes.",
     "Generation 32 merges current main e11a5989 after #2780 while preserving its approval carry-over behavior; only the .agent evidence pair conflicted and every substantive file auto-merged.",
-    "Generation 34 closes the exact-head governed review finding by requiring authoritative admission identity at every workflow stage caller and refusing re-admission of a completed live outcome."
+    "Generation 34 closes the exact-head governed review finding by requiring authoritative admission identity at every workflow stage caller and refusing re-admission of a completed live outcome.",
+    "Generation 35 corrects the implementation commit identity after generation 34 recorded an invalid expanded SHA; no implementation bytes changed."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 34
+  "generation": 35
 }
