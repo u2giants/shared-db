@@ -7,6 +7,20 @@ JOIN pg_namespace n ON n.oid=p.pronamespace
 WHERE n.nspname='core' AND p.proname IN
 ('guard_taxonomy_source_ref_identity','guard_character_alias_licensor','bump_taxonomy_source_ref_last_seen');
 CREATE TEMP TABLE forward_rows_before AS SELECT to_jsonb(t) AS row_value FROM core.taxonomy_source_ref t;
+CREATE TEMP VIEW forward_catalog_now AS
+SELECT 'constraint'::text AS kind,conrelid::regclass::text AS object_name,conname AS member,
+ pg_get_constraintdef(oid)||' validated='||convalidated AS definition
+FROM pg_constraint WHERE conrelid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+UNION ALL
+SELECT 'index',schemaname||'.'||tablename,indexname,indexdef FROM pg_indexes
+WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref')
+UNION ALL
+SELECT 'relation',oid::regclass::text,'security',relrowsecurity::text||'|'||coalesce(relacl::text,'')
+FROM pg_class WHERE oid IN ('core.character'::regclass,'core.character_alias'::regclass,'core.taxonomy_source_ref'::regclass)
+UNION ALL
+SELECT 'policy',schemaname||'.'||tablename,policyname,roles::text||'|'||cmd||'|'||coalesce(qual,'')||'|'||coalesce(with_check,'')
+FROM pg_policies WHERE schemaname='core' AND tablename IN ('character','character_alias','taxonomy_source_ref');
+CREATE TEMP TABLE forward_schema_before AS SELECT * FROM forward_catalog_now;
 ALTER TABLE core.taxonomy_source_ref ADD COLUMN is_current boolean GENERATED ALWAYS AS (missing_since IS NULL) STORED;
 ALTER TABLE core.character_alias DROP CONSTRAINT character_alias_parent_matches_character;
 DROP INDEX core.character_id_licensor_id_key;
@@ -202,6 +216,10 @@ $guard$;
 \ir ../migrations/20260911063554_character_alias_provenance_forward_repair.sql
 DO $verify$
 BEGIN
+ IF EXISTS ((SELECT * FROM forward_schema_before EXCEPT ALL SELECT * FROM forward_catalog_now)
+ UNION ALL (SELECT * FROM forward_catalog_now EXCEPT ALL SELECT * FROM forward_schema_before)) THEN
+  RAISE EXCEPTION 'Historical upgrade changed reviewed constraints, indexes, policies or grants';
+ END IF;
  IF EXISTS ((SELECT * FROM forward_rows_before EXCEPT ALL SELECT to_jsonb(t) FROM core.taxonomy_source_ref t)
  UNION ALL (SELECT to_jsonb(t) FROM core.taxonomy_source_ref t EXCEPT ALL SELECT * FROM forward_rows_before)) THEN
   RAISE EXCEPTION 'Forward repair changed existing source provenance rows';
