@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911051552"
   ],
-  "contract_ref": "refs/db-contracts/2506/18",
-  "contract_sha256": "2e869ae38e7b24c4e1cef4c0daba6b7da2284a9cc20956e38c928fd6188915a9",
-  "head_sha": "d78012d692b825573f536bd6aaf7d343e5b0e01c",
+  "contract_ref": "refs/db-contracts/2506/19",
+  "contract_sha256": "1509db3e505fc3772db72c0fd29d9eaa87b536551a6ca9c3d38b020f0d247601",
+  "head_sha": "4d17cc6936498ce7c98d9f904c2744afdcd8fb02",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -61,7 +61,8 @@
     "One governed external review, required CI, parent preview and actual production runtime acceptance remain separate delivery gates.",
     "Exact-PR supported expansion added the CREATE INDEX parent table to claim2722; no structural SQL changed. Contract16 immutable ref readback confirmed after transient GitHub visibility delay.",
     "Main8e81462f integration preserves SQL and benchmarks; 188 catalog tests and 275-site truth audit pass again. Contract17 published for refreshed exact-head review.",
-    "Main5af3fafa maintenance integration changes no migration or benchmark bytes. Prior GLM approval remains historical only; new exact-head review required."
+    "Main5af3fafa maintenance integration changes no migration or benchmark bytes. Prior GLM approval remains historical only; new exact-head review required.",
+    "Main208ba30d integration preserves SQL/benchmark bytes; contract19 replaces metadata authority, fresh exact-head CI and review pending."
   ],
   "stop_conditions_hit": []
 }
