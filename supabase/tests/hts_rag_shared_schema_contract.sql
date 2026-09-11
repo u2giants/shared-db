@@ -38,8 +38,9 @@ $catalog$;
 
 -- The CI session user is not a true superuser, so it may only SET ROLE into roles it is
 -- a member of. It created these roles and therefore holds ADMIN on them; the grant is
--- test-only and rolls back with the transaction.
-grant designflow_hts_prod_worker, designflow_hts_prod_runtime, designflow_hts_alsand_runtime to current_user;
+-- test-only and rolls back with the transaction. The grantee is named explicitly:
+-- a CURRENT_USER role spec crashed the hosted Supabase backend (run 34603204421).
+grant designflow_hts_prod_worker, designflow_hts_prod_runtime, designflow_hts_alsand_runtime to postgres;
 
 -- ---------------------------------------------------------------------------------
 -- Worker writes: A is a qualified operative precedent, B is not operative, D is
