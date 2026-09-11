@@ -45,21 +45,22 @@ begin
   if v_gate <> 1 then
     raise exception 'effective list function must invoke public.require_dam_access() exactly once, found %', v_gate;
   end if;
-  if position(') a where public.require_dam_access() and a.is_deleted = false and (' in v_lower) = 0 then
+  if position(') a where public.require_dam_access()' in v_lower) = 0 then
     raise exception 'effective list function must gate on DAM entitlement in its outer WHERE clause';
   end if;
 
-  -- Seven mutually exclusive identity arms, each pinned by its leading guard.
+  -- Eight preserved fallback arms plus two exclusive narrow tag arms, each pinned by its leading guard.
   -- The bare equality tokens also occur as optional conjuncts on the licensor
   -- pair, so counting arms and pinning guards is what stops a deleted
   -- property- or customer-leading arm from passing while the DAM property and
   -- customer libraries silently return nothing.
   v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
-  if v_arms <> 6 then
-    raise exception 'effective identity predicates must keep seven UNION arms, found % UNION ALLs', v_arms;
+  if v_arms <> 9 then
+    raise exception 'effective predicates must keep ten UNION arms, found % UNION ALLs', v_arms;
   end if;
   foreach v_pin in array array[
-    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null union all',
+    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null union all',
+    'select distinct e.asset_id from public.asset_effective_tags e where nullif(p_filters ->> ''tagfilter'', '''') is not null and e.tag = p_filters ->> ''tagfilter''',
     'where nullif(p_filters ->> ''licensorid'', '''') is not null and a.style_group_id is null and a.licensor_id = (p_filters ->> ''licensorid'')::uuid',
     'from public.style_groups sg join public.assets a on a.style_group_id = sg.id where nullif(p_filters ->> ''licensorid'', '''') is not null and sg.licensor_id = (p_filters ->> ''licensorid'')::uuid',
     'and nullif(p_filters ->> ''propertyid'', '''') is not null and a.style_group_id is null and a.property_id = (p_filters ->> ''propertyid'')::uuid',
@@ -76,6 +77,26 @@ begin
   foreach v_pin in array array['''licensorId''', '''propertyId''', '''customerId'''] loop
     if position(v_pin in v_body) = 0 then
       raise exception 'effective list function no longer reads the DAM identity key %', v_pin;
+    end if;
+  end loop;
+end;
+$$;
+
+-- #2501: count wrappers keep the existing timeout and force a value-sensitive
+-- plan for the private helper, so a broad tag does not inherit a generic
+-- nested-loop plan chosen for a selective tag.
+do $$
+declare
+  v_name text;
+  v_config text[];
+begin
+  foreach v_name in array array['get_effective_filter_counts', 'get_filter_counts'] loop
+    select p.proconfig into v_config
+    from pg_proc p
+    where p.oid = to_regprocedure(format('public.%I(jsonb)', v_name));
+    if not ('statement_timeout=8s' = any(coalesce(v_config, '{}')))
+       or not ('plan_cache_mode=force_custom_plan' = any(coalesce(v_config, '{}'))) then
+      raise exception '% does not retain the 8s ceiling plus a custom plan: %', v_name, v_config;
     end if;
   end loop;
 end;
@@ -276,8 +297,8 @@ begin
   -- substring below still appears somewhere else in the body.
   v_arms := (length(v_helper) - length(replace(v_helper, 'union all', '')))
               / length('union all');
-  if v_arms <> 7 then
-    raise exception 'effective count helper must keep five identity arms and three matched arms (seven UNION ALLs), found %', v_arms;
+  if v_arms <> 8 then
+    raise exception 'effective count helper must keep five identity unions and four matched arms (eight UNION ALLs), found %', v_arms;
   end if;
 
   foreach v_pin in array array[

@@ -1897,6 +1897,12 @@ def main() -> int:
     return 0 if result.get("productionPromotionAllowed", result["automaticPromotionAllowed"]) else 3
 
 PREVIEW_PRODUCER_PATHS += (
+    # Issue #2579. The sidecar binds migration 20260910155753, and the coverage
+    # manifest is repository source read by an offline CI validator. Both are
+    # pinned rather than exempted: the test's own instruction is to pin anything
+    # a tool in the preview job could read, and pinning is the stricter answer.
+    "scripts/production-verification-sidecars/20260910155753.json",
+    "config/db-data-admin-property-source-coverage.json",
     "scripts/production-verification-sidecars/20260908214749.json",
     "scripts/production-verification-sidecars/20260909084253.json",
     "scripts/production-verification-sidecars/20260910123636.json",
@@ -1928,6 +1934,7 @@ PREVIEW_PRODUCER_PATHS += (
     "scripts/production-verification-sidecars/20260907200221.json",
     "scripts/production-verification-sidecars/20260907030418.json",
     "scripts/production-verification-sidecars/20260907051735.json",
+    "scripts/production-verification-sidecars/20260911045438.json",
     # Invoked by check-sql.sh during preview; pin the reviewed parser so the
     # protected static check cannot be changed independently of the PR head.
     "scripts/check-expected-count-patterns.mjs",
