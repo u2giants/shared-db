@@ -95,6 +95,27 @@ export const REVIEW_RETURN_REF_PREFIX = 'refs/db-review-returns'
 export const REVIEW_RETIRED_VERDICT_REF_PREFIX = 'refs/db-review-retired-verdicts'
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
 export const REVIEW_OPERATION_REQUEST_LIMIT = 25, REVIEW_MUTEX_SECTION_RESERVE = 15 // slot 2 = 10 pre-mutex + this reserve; slot 1 = 7 + reserve. RE-DERIVED, NOT WIDENED (issue #2075): every reviewer operation now proves 'a verdict exists for this head' from the create-only durable verdict refs instead of from comment prose. That costs exactly ONE listing of refs/db-review-verdict pre-mutex (cached for the rest of the operation by reviewOperationIo) and ONE uncached re-listing inside the mutex section, so each half grew by exactly one request. Measured totals moved 21->23 (slot-2 assignment), 18->20 (slot-2 replacement), and 8->9 pre-mutex for the first replacement, with the post-mutex replacement section going 10->11. Issue #2550 keeps this ceiling fixed by carrying predecessor failure refs in the replacement batch and treating absence in the complete active-lease snapshot as proved absence. The bounded per-PR exclusion read is inside the mutex so it cannot race assignment. This entry gate refuses to acquire the mutex unless the whole mutex-held section still fits. Release is guaranteed separately by cleanupReserve. Derivation: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812, #1833, #2550)
+// SILENT-RECLAIM BUDGET, DERIVED NOT WIDENED (issue #2697). `--reclaim-silent-reviewer`
+// was added after REVIEW_OPERATION_REQUEST_LIMIT was derived, and its request count was
+// never measured against it, so every reclaim refused at request 24 and a dead lease could
+// never be released. Measured on the wire-attempt fixture in
+// Initial current-key measurement in scripts/manage-migration-author-lanes.test.mjs:
+// 14 pre-mutex requests + a 14-request
+// mutex-held section (mutex create, in-mutex lease re-resolution, fresh activity
+// fingerprint, uncached durable-verdict re-listing, locked readback, atomic transition,
+// post-transition readback, and the 3-request mutex release) = 28 complete.
+// The one redundancy the measurement found was removed rather than paid for: the
+// post-mutex check read the PR fresh twice for the same PR in the same statement
+// (`__freshGetPr` plus `activityFingerprintForLease({freshPr:true})`). The PR state and
+// head now come from the fingerprint's own facts, which is 29 -> 28.
+// This path costs more than an assignment (23) because it proves the lease AND the
+// silence a second time inside the mutex; that re-proof is the whole safety property and
+// cannot be dropped. The ceiling is therefore this path's own measured total, not a
+// widening of the shared one, and the shared 25 is untouched.
+// Derivation: docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md (#2697)
+// Re-measured after #2694: current keys remain 28; legacy lookup under parallel mode
+// proves the absent v2 key twice, so legacy costs 30 (15 pre-mutex + 15 held).
+export const REVIEW_SILENT_RECLAIM_REQUEST_LIMIT = 30, REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE = 15
 export const REVIEW_QUEUE_ASSIGNMENT_REQUEST_LIMIT = 75
 export const REVIEW_CAPACITY_REQUEST_LIMIT = 64
 export const REVIEW_QUOTA_RESERVE = 100
@@ -165,25 +186,25 @@ export function isReviewRefListingRefusal(error){return Boolean(error?.reviewRef
 // exact wrapper behaviour that was read. Treat an old date as UNVERIFIED and
 // re-read the wrapper before trusting its `true`.
 export const REVIEWERS = Object.freeze([
-  { name:'grok-4.6', wrapper:'ai-grok-review', readsRepository:true,
+  { name:'grok-4.6', provider:'grok', wrapper:'ai-grok-review', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-grok-review: grok --cwd <checkout> with a read-only permission set' } },
-  { name:'glm-5.3', wrapper:'ai-glm', readsRepository:true,
+  { name:'glm-5.3', provider:'glm', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-glm: OpenCode session pinned to the review directory, read-only agent' } },
-  { name:'kimi-k3', wrapper:'ai-kimi', readsRepository:true,
+  { name:'kimi-k3', provider:'kimi', wrapper:'ai-kimi', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-kimi: read-only agent profile over the checkout/worktree' } },
-  { name:'qwen-3.8-max', wrapper:'ai-qwen', readsRepository:true,
+  { name:'qwen-3.8-max', provider:'qwen', wrapper:'ai-qwen', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-07', evidence:'ai-devops/bin/ai-qwen: read-only review over a sealed evidence packet copy of the checkout; the live qualification review of merged commit 795902d8 cited specific file lines from it and returned a well-formed verdict' } },
-  { name:'glm-5.2', wrapper:'ai-glm', readsRepository:true,
+  { name:'glm-5.2', provider:'glm', wrapper:'ai-glm', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-glm wrapper above; same checkout' } },
-  { name:'muse-spark-1.2-contributor', wrapper:'ai-muse', readsRepository:true,
+  { name:'muse-spark-1.2-contributor', provider:'muse', wrapper:'ai-muse', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'historical label for the ai-muse wrapper; durable assignments and verdicts recorded before issue #2285 still resolve through this row' } },
-  { name:'muse-spark-1.3-contributor', wrapper:'ai-muse', readsRepository:true,
+  { name:'muse-spark-1.3-contributor', provider:'muse', wrapper:'ai-muse', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-08', evidence:'ai-devops/bin/ai-muse: sealed evidence-packet checkout; live issue #2285 qualification identified meta-model-api/muse-spark-1.3-contributor and cited the reviewed files' } },
-  { name:'codex-gpt-5.6-sol', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
+  { name:'codex-gpt-5.6-sol', provider:'codex', wrapper:'ai-codex-review', orchestratorEngine:'codex', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-codex-review: codex exec --sandbox read-only over the sandbox copy' } },
-  { name:'deepseek-chat', wrapper:'ai-deepseek-agent', readsRepository:false,
+  { name:'deepseek-chat', provider:'deepseek', wrapper:'ai-deepseek-agent', readsRepository:false,
     readsRepositoryVerified:{ date:'2026-09-01', evidence:'ai-devops/bin/ai-deepseek-agent: HTTP chat completions only; --worktree sets a spawn cwd it never uses' } },
-  { name:'gemini-3.8-flash-high', wrapper:'ai-gemini', readsRepository:true,
+  { name:'gemini-3.8-flash-high', provider:'gemini', wrapper:'ai-gemini', readsRepository:true,
     readsRepositoryVerified:{ date:'2026-09-06', evidence:'ai-devops/bin/ai-gemini: disposable sandbox copy of the checkout under --sandbox with a byte inventory; the live re-qualification review of merged commit 99fbefcb cited specific file lines from it' } },
 ])
 // Keep REVIEWERS as the historical evidence registry. Paused providers remain
@@ -449,6 +470,19 @@ export function reviewersForOrchestrator(engine, reviewers=ACTIVE_REVIEWERS){
   const normalized=String(engine??'').trim().toLowerCase()
   if(!normalized)throw new LaneError('live orchestrator engine is unreadable; reviewer assignment refused')
   return reviewers.filter((row)=>String(row.orchestratorEngine??'').toLowerCase()!==normalized)
+}
+
+export function allocatableReviewers(io){
+  const independent=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  if(!independent.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
+  if(typeof io.reviewerUsability!=='function')throw new LaneError('reviewer allocation cannot read the reconciled ai-review-preflight state; no sequence or lease was consumed')
+  const usability=io.reviewerUsability(independent)
+  if(!(usability instanceof Map))throw new LaneError('reviewer allocation received malformed reconciled ai-review-preflight state; no sequence or lease was consumed')
+  const usable=(row)=>usability.get(row.provider)?.usable===true
+  return {
+    eligible:independent.filter(usable),
+    unusable:new Map(independent.filter((row)=>!usable(row)).map((row)=>[row.name,usability.get(row.provider)??{status:'unreadable',usable:false}]))
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -1002,12 +1036,12 @@ function consumeReviewWireRequest(){
   if(!reviewWireBudget)return
   const limit=reviewWireBudget.limit??REVIEW_OPERATION_REQUEST_LIMIT
   const usable=reviewWireBudget.locked&&!reviewWireBudget.cleanup?limit-(reviewWireBudget.cleanupReserve??0):limit
-  if(reviewWireBudget.count>=usable)throw new LaneError(`reviewer operation request budget exhausted before request ${reviewWireBudget.count+1}`)
+  if(reviewWireBudget.count>=usable)throw new LaneError(`reviewer operation '${reviewWireBudget.operation??'reviewer-operation'}' exhausted its derived ${limit}-request budget before request ${reviewWireBudget.count+1}${usable!==limit?` (${limit-usable} held back as the mutex-release reserve)`:''}. This ceiling is DERIVED for this operation, not a global default: see the derivation cited beside its constant in scripts/manage-migration-author-lanes.mjs. Re-derive it from a written measurement rather than widening it (issue #2075)`)
   reviewWireBudget.count+=1
 }
-export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT){
+export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT,operation='reviewer-operation'){
   if(reviewWireBudget)return fn(reviewWireBudget)
-  reviewWireBudget={count:0,limit}
+  reviewWireBudget={count:0,limit,operation}
   try{return fn(reviewWireBudget)}finally{reviewWireBudget=null;reviewCommitBase=null;freshDurableVerdictRefs=null}
 }
 // Issue #2342: the retry loop, the classifier and the stderr policy now live in
@@ -1315,6 +1349,9 @@ export const githubIo = {
     try{graph=JSON.parse(graphText)?.data?.rateLimit}catch{return null}
     return rest&&graph?{remaining:Number(rest.remaining),limit:Number(rest.limit),reset:Number(rest.reset),graphRemaining:Number(graph.remaining),graphLimit:Number(graph.limit),graphReset:Math.floor(new Date(graph.resetAt).getTime()/1000)}:null
   },previewApplyRun(runId){return{run:ghJson(['api',`repos/${REPO}/actions/runs/${runId}`]),artifacts:ghJson(['api',`repos/${REPO}/actions/runs/${runId}/artifacts`]),logs:runGitHubCommand(['run','view',String(runId),'--repo',REPO,'--log'])}},
+  verifyPreviewApplyArtifact(request){
+    return JSON.parse(execFileSync('python',[path.join(path.dirname(fileURLToPath(import.meta.url)),'verify_preview_apply_artifact.py')],{input:JSON.stringify(request),encoding:'utf8',maxBuffer:1024*1024,stdio:['pipe','pipe','pipe']}))
+  },
   readActiveReviewLeases(){
     // Read every reviewer name the immutable catalog still understands, not
     // only today's drawable roster. Replacement can legitimately be finishing
@@ -1761,6 +1798,26 @@ export const githubIo = {
     // RECORD the proof (reinstateReviewerExclusion) quotes the wrapper verbatim
     // instead of paraphrasing it. Nothing else reads it.
     return {...summarizeDoctorOutput(output),output}
+  },
+  reviewerUsability(reviewers){
+    const command='ai-review-preflight',resolved=resolveCommandPath(command)
+    if(!resolved)throw new LaneError(`${command} is not on PATH; reviewer assignment cannot prove the reconciled provider state`)
+    const args=['usable'], spawn=process.platform==='win32'&&/\.(cmd|bat)$/i.test(resolved)
+      ?{file:process.env.ComSpec||'cmd.exe',args:['/d','/s','/c',resolved,...args]}
+      :{file:resolved,args}
+    let output=''
+    try{output=execFileSync(spawn.file,spawn.args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:REVIEWER_DOCTOR_TIMEOUT_MS})}
+    catch(error){output=String(error?.stdout??'')}
+    const rows=[]
+    for(const line of output.split(/\r?\n/).filter(Boolean)){
+      try{const row=JSON.parse(line);if(typeof row?.provider==='string'&&typeof row?.usable==='boolean')rows.push(row)}catch{/* explanatory output is not provider state */}
+    }
+    const byProvider=new Map(rows.map((row)=>[row.provider,row]))
+    for(const reviewer of reviewers){
+      if(!reviewer?.provider)throw new LaneError(`reviewer ${reviewer?.name??'unknown'} has no ai-review-preflight provider identity`)
+      if(!byProvider.has(reviewer.provider))throw new LaneError(`ai-review-preflight returned no reconciled state for ${reviewer.provider}; reviewer assignment refused`)
+    }
+    return byProvider
   },
   resolveOrchestratorEngine(){
     return orchestratorEngineFromResolution(readOrchestratorResolution(()=>runOrchestratorResolver()))
@@ -3665,7 +3722,11 @@ function parseSilenceProbe(commit){
 function resolveSilentLease(options,io){
   const request={issue:Number(options.issue),pr:Number(options.pr),headSha:String(options.headSha??'').toLowerCase(),sequence:Number(options.failedSequence??options.sequence),slot:Number(options.slot??1)}
   if(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/.test(request.headSha)||!Number.isInteger(request.sequence)||!Number.isInteger(request.slot)||request.slot<1)throw new LaneError('silent reviewer operation requires exact issue, PR, 40-character head SHA, sequence, and review slot')
-  const original=resolveFailedReviewRecord({...request,failedSequence:request.sequence},io),leaseRef=resolveAssignmentLeaseRef({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha),io),leaseSha=io.readRef(leaseRef),leaseCommit=leaseSha?io.getCommit(leaseSha):null,lease=leaseCommit?parseReviewLease(leaseCommit):null
+  // Keep the chosen ref and its SHA from the same resolution snapshot. A second
+  // read paid twice and could change the chosen lease between identity and contents.
+  // This cache is local to this call; the in-mutex call always proves it afresh.
+  const refSnapshot=new Map(),resolutionIo={...io,readRef(ref){if(!refSnapshot.has(ref))refSnapshot.set(ref,io.readRef(ref));return refSnapshot.get(ref)}}
+  const original=resolveFailedReviewRecord({...request,failedSequence:request.sequence},io),leaseRef=resolveAssignmentLeaseRef({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha),resolutionIo),leaseSha=resolutionIo.readRef(leaseRef),leaseCommit=leaseSha?io.getCommit(leaseSha):null,lease=leaseCommit?parseReviewLease(leaseCommit):null
   if(!lease||lease.issue!==request.issue||lease.pr!==request.pr||lease.headSha!==request.headSha||lease.sequence!==request.sequence||lease.slot!==request.slot||lease.reviewer!==original.reviewer)throw new LaneError('silent reviewer active lease does not match the exact durable assignment')
   return {request,original,leaseRef,leaseSha,lease:{...lease,heldSince:leaseCommit?.committedDate??leaseCommit?.committer?.date??leaseCommit?.commit?.committer?.date??null}}
 }
@@ -3706,8 +3767,12 @@ function reclaimSilentReviewerOperation(options,now,io){
   const ownerSha=io.makeOwnerCommit(`db-coordination reviewer-silence-release-lock issue=${request.issue} pr=${request.pr} head=${request.headSha} sequence=${request.sequence}`)
   let acquired=false
   try{
+    requireReviewWireCapacity(REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE)
     acquireReviewMutex(ownerSha,io);acquired=true;requireOwnedRef(MUTEX_REF,ownerSha,io)
-    const current=resolveSilentLease(options,io),pr=io.__freshGetPr(request.pr),fresh=activityFingerprintForLease({...original,slot:request.slot},io,{freshPr:true})
+    // The fingerprint already reads the PR fresh (`freshPr`) and records its state and
+    // head in `facts`. Reading it fresh a second time here cost one request and could
+    // never disagree; issue #2697 removed it and the check now uses those facts.
+    const current=resolveSilentLease(options,io),fresh=activityFingerprintForLease({...original,slot:request.slot},io,{freshPr:true}),pr={state:fresh.facts.prState,head:{sha:fresh.facts.currentHead}}
     if(current.leaseSha!==leaseSha||pr?.state!=='open'||pr?.head?.sha!==request.headSha||hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true,slot:request.slot})||fresh.fingerprint!==probe.fingerprint)throw new LaneError('silent reviewer lease or activity changed after mutex acquisition')
     const locked=io.readReviewRefs([MUTEX_REF,releaseRef,leaseRef])
     if(locked.get(MUTEX_REF)!==ownerSha||locked.get(releaseRef)!==null||locked.get(leaseRef)!==leaseSha)throw new LaneError('silent reviewer reclaim ownership changed after preflight')
@@ -3719,7 +3784,7 @@ function reclaimSilentReviewerOperation(options,now,io){
 }
 
 
-export function reclaimSilentReviewer(options,now=new Date(),io=githubIo){return withReviewRequestBudget(()=>reclaimSilentReviewerOperation(options,now,io))}
+export function reclaimSilentReviewer(options,now=new Date(),io=githubIo){return withReviewRequestBudget(()=>reclaimSilentReviewerOperation(options,now,io),REVIEW_SILENT_RECLAIM_REQUEST_LIMIT,'reclaim-silent-reviewer')}
 
 function reviewerCapacityReportOperation(io,now){
   const busy=findBusyReviewers(io,[],{keepUnreadableLeases:true})
@@ -3778,7 +3843,7 @@ export function describeMovedAssignmentHead(request,recorded){
 // must NOT be reused for a draw without that branch and those filters.
 export function pickReviewer(sequence,io){
   const busy=findBusyReviewers(io)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  const {eligible}=allocatableReviewers(io)
   if(!eligible.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
   const eligibleNames=new Set(eligible.map((row)=>row.name)),start=(sequence-1)%ACTIVE_REVIEWERS.length
   const ordered=Array.from({length:ACTIVE_REVIEWERS.length},(_,offset)=>ACTIVE_REVIEWERS[(start+offset)%ACTIVE_REVIEWERS.length]).filter((row)=>eligibleNames.has(row.name))
@@ -4011,8 +4076,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
   io=reviewOperationIo(io)
   const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha),slot:Number(slot)}
   const concurrentLeases=Boolean(io.requiresExactReviewHeadSha)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
-  if(!eligible.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
+  const {eligible,unusable}=allocatableReviewers(io)
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   // Slot >=2 needs a name to exclude BEFORE the mutex is taken: cheap, and it
   // lets an ungoverned "assign slot 2 with no slot 1" request fail fast.
@@ -4183,6 +4247,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       // provider is now given the reason `notTaken` ACTUALLY rejected it by,
       // tested in the same order the predicate tests them.
       const refusalFor=(name)=>{
+        if(unusable.has(name)){const state=unusable.get(name);return `unusable by ai-review-preflight (${state.status??state.failure_class??'unavailable'})`}
         if(!eligibleNames.has(name))return 'conflicts with the live orchestrator engine, or is retired or quarantined'
         if(!concurrentLeases&&busy.has(name))return 'already holds a live review lease (serial-lease protocol)'
         if(name===excludedProvider)return `already holds slot 1 for this exact head`
@@ -4547,7 +4612,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     :validateTerminalReviewerFailure({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot},'reviewer replacement')
   if(silenceReplacement&&(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/i.test(request.headSha)||!Number.isInteger(request.failedSequence)||!Number.isInteger(request.slot)||request.slot<1||!confirmNoVerdict||!confirmNoArtifact||String(failingCheck??'').trim()))throw new LaneError('silent reviewer replacement requires exact issue, PR, 40-character head SHA, failed sequence, review slot, no failing check, and explicit confirmation of no verdict and no artifact')
   const concurrentLeases=Boolean(io.requiresExactReviewHeadSha)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  const {eligible}=allocatableReviewers(io)
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   // A LOCAL fault is not the reviewer's fault. Replacing on one spends a
   // rotation slot and records permanent evidence against a provider that was
@@ -6415,6 +6480,16 @@ export function validateOriginalPreviewApplyEvidence({issue,pr,versions,mergeCom
       if(fields.length<3||fields[1]!=='Report the preview ledger delta')return[]
       return [fields.slice(2).join('\t').replace(/^\d{4}-\d{2}-\d{2}T\S+Z\s*/, '')]
     })
+    // Archived gh display logs may lose every step name. Never relabel that
+    // text: require the original ZIP's immutable digest, binding, ledger files,
+    // and migration content instead. A present but invalid named step still
+    // refuses; the alternate reader cannot conceal contradictory named proof.
+    if(ledgerLines.length===0&&typeof io.verifyPreviewApplyArtifact==='function'){
+      const artifact=rows[0]
+      const proof=io.verifyPreviewApplyArtifact({run,artifact,binding,versions:expected,previewProjectRef:PROJECT_REFS.preview,verificationCommit:mergeCommitSha??appliedCommit})
+      if(proof?.verified===true&&proof.runId===run.id&&proof.artifactId===artifact.id&&proof.artifactDigest===artifact.digest&&JSON.stringify(proof.versions)===JSON.stringify(expected))matches.push({type:'preview-apply',run_id:String(runId)})
+      continue
+    }
     if(ledgerLines.filter((line)=>line==='### Preview ledger delta').length!==1)continue
     const ledgerAdded=ledgerLines.flatMap((line)=>{
       const match=/- added:\s+((?:\d{14})(?:,\s*\d{14})*)\s*$/.exec(line)

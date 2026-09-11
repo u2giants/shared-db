@@ -4,7 +4,7 @@
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair real cold authenticated blue tag facet/exact-list timeouts through narrow eligibility reads while preserving RLS, exact facet/count semantics and eight-second ceiling.",
-  "base_sha": "439beffc5970b60bc7e1c8e0445f892fae46f8a7",
+  "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
   "dispatcher": "codex orchestrator marker2714",
   "worker": "codex-2714-2501-forward",
   "branch": "codex/2501-forward-performance",
@@ -54,5 +54,5 @@
     "Stop if exact count/filter/authorization parity changes.",
     "Stop if narrow plan still requires broad heap payload reads."
   ],
-  "generation": 6
+  "generation": 7
 }
