@@ -31,5 +31,5 @@
     "No database was read or written by this work; it is static authoring only. The contract permitted a read of core.style_guide that proved unnecessary, so db_reads is reported empty rather than widened to match the contract."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Refreshed onto main 485a0ba5 by MERGING main, never rebasing. The only conflict was the .agent evidence pair, which on main belongs to issue #2724; it was resolved to this pull request's own issue #2802 evidence and no implementation file was touched. Implementation head 69fed8b1; only .agent/completion.json follows it."
+  "evidence_note": "Refreshed onto main 485a0ba5 by MERGING main, never rebasing. The only conflict was the .agent evidence pair, which on main belongs to issue #2724; it was resolved to this pull request's own issue #2802 evidence and no implementation file was touched. Implementation head 69fed8b1; only .agent/completion.json follows it. The .agent pair is re-serialized together in a single commit after the merge head so both evidence files follow it, as the git-evidence rule requires; the contract reformat is whitespace only and its canonical hash is unchanged."
 }
