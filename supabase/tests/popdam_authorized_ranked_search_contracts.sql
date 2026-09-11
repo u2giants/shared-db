@@ -49,17 +49,17 @@ begin
     raise exception 'effective list function must gate on DAM entitlement in its outer WHERE clause';
   end if;
 
-  -- Seven mutually exclusive identity arms, each pinned by its leading guard.
+  -- Nine mutually exclusive identity/tag/thumbnail arms, each pinned by its leading guard.
   -- The bare equality tokens also occur as optional conjuncts on the licensor
   -- pair, so counting arms and pinning guards is what stops a deleted
   -- property- or customer-leading arm from passing while the DAM property and
   -- customer libraries silently return nothing.
   v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
-  if v_arms <> 7 then
-    raise exception 'effective predicates must keep eight UNION arms, found % UNION ALLs', v_arms;
+  if v_arms <> 8 then
+    raise exception 'effective predicates must keep nine UNION arms, found % UNION ALLs', v_arms;
   end if;
   foreach v_pin in array array[
-    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null union all',
+    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null and a.is_deleted = false and (a.modified_at >= public.assets_thumbnail_min_date() or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null) union all',
     'select distinct e.asset_id from public.asset_effective_tags e where nullif(p_filters ->> ''tagfilter'', '''') is not null and e.tag = p_filters ->> ''tagfilter''',
     'where nullif(p_filters ->> ''licensorid'', '''') is not null and a.style_group_id is null and a.licensor_id = (p_filters ->> ''licensorid'')::uuid',
     'from public.style_groups sg join public.assets a on a.style_group_id = sg.id where nullif(p_filters ->> ''licensorid'', '''') is not null and sg.licensor_id = (p_filters ->> ''licensorid'')::uuid',
