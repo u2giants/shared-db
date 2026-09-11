@@ -27,6 +27,17 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 > independence, fresh mutex recheck, atomic transition and cleanup refusals are
 > unchanged.
 
+> **Silent-reclaim budget, 2026-09-10 (issue #2697).** The 25-request ceiling
+> here is unchanged and still governs assignment and replacement. It never
+> governed `--reclaim-silent-reviewer`, which was added later and whose request
+> count was never derived; charged against 25 it refused at request 24 every
+> time, so a dead reviewer lease could not be released. That path is now
+> initially measured at 28 on the current-key path (14 pre-mutex plus a
+> 14-request mutex-held section), with one duplicate fresh PR read removed;
+> the later legacy fallback measurement is 30 (15 plus 15) and controls the ceiling
+> rather than paid for, in
+> `docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md`.
+
 > **Superseded ceiling, 2026-08-29 (issue #1812, PR #1813).** Everything below
 > was verified against a **19**-request ceiling, which was correct for a single
 > reviewer slot only. The mandatory second independent reviewer
@@ -100,3 +111,5 @@ Measured, by the wire-attempt fixtures in `scripts/manage-migration-author-lanes
 | Idempotent replacement retry, pre-mutex | 9 | 10 (reduced back to 9 by #2550 batching) |
 
 The mutex entry gate still refuses to acquire the mutex unless the whole mutex-held section fits, and the behavioural test that adds one extra counted pre-mutex call and requires a refusal BEFORE the mutex exists is unchanged and still passes.
+
+Successor verification (2026-09-11, #2697): the current lease-key path remains 28 requests; legacy fallback under parallel mode costs 30 (15 pre-mutex plus 15 held). The silent-reclaim ceiling is derived as 30, with mutex reserve 15. See the successor section of `reviewer-silent-reclaim-api-budget-2026-09-10.md`; the shared ceiling remains 25.
