@@ -293,13 +293,13 @@ class GuardTests(unittest.TestCase):
             parse_allowlist("20260903200951,20260905024139")
         self.assertEqual(parse_allowlist("20260905024139"), ["20260905024139"])
     def test_character_alias_mismatched_original_is_retired(self) -> None:
-        for allowlist in ("20260906222338", "20260906222338,20260911063554"):
+        for allowlist in ("20260906222338", "20260906222338,20260911152203"):
             with self.subTest(allowlist=allowlist), self.assertRaisesRegex(GuardError, "20260906222338"):
                 parse_allowlist(allowlist)
-        self.assertEqual(parse_allowlist("20260911063554"), ["20260911063554"])
+        self.assertEqual(parse_allowlist("20260911152203"), ["20260911152203"])
         for applied in (set(), {"20260906222338"}):
             self.assertEqual(classify_pending_version("20260906222338", applied, REPO)["kind"], "retired")
-        self.assertEqual(classify_pending_version("20260911063554", set(), REPO)["kind"], "genuinely-pending")
+        self.assertEqual(classify_pending_version("20260911152203", set(), REPO)["kind"], "genuinely-pending")
         import hashlib
         original = REPO / "supabase/migrations/20260906222338_core_character_alias_and_source_provenance.sql"
         self.assertEqual(hashlib.sha256(original.read_text(encoding="utf-8").encode()).hexdigest(),
