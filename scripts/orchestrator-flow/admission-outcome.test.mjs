@@ -145,12 +145,13 @@ test('source PR resolves exactly one linked open issue and independently admits 
   assert.throws(()=>resolveAdmittedIssueForPr(7,io),/exactly one open/)
 })
 
-test('downloaded proof contents bind live assertion and generated types to exact issue and app head',()=>{
-  const evidence={work_issue:41,application_commit_sha:'a'.repeat(40),live_assertion:'create works',environment:'production',generated_types_output_digest:`sha256:${'b'.repeat(64)}`}
+test('downloaded proof contents bind live assertion and generated types to exact issue, app head, and instant',()=>{
+  const evidence={work_issue:41,application_commit_sha:'a'.repeat(40),live_assertion:'create works',environment:'production',verified_at:'2026-09-11T01:00:00Z',generated_types_output_digest:`sha256:${'b'.repeat(64)}`}
   const live={schema_version:1,work_issue:41,application_commit_sha:'a'.repeat(40),live_assertion:'create works',environment:'production',result:'passed',observed_at:'2026-09-11T01:00:00Z'}
   const types={schema_version:1,work_issue:41,application_commit_sha:'a'.repeat(40),result:'passed',generated_types_sha256:`sha256:${'b'.repeat(64)}`}
   assert.equal(matchesLiveProof(live,evidence),true);assert.equal(matchesGeneratedTypesProof(types,evidence),true)
   assert.equal(matchesLiveProof({...live,live_assertion:'something else'},evidence),false)
+  assert.equal(matchesLiveProof({...live,observed_at:'2026-09-11T01:01:00Z'},evidence),false)
   assert.equal(matchesGeneratedTypesProof({...types,application_commit_sha:'c'.repeat(40)},evidence),false)
 })
 

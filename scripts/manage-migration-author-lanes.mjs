@@ -1364,7 +1364,7 @@ function requireClaimCloseReason(reason) {
 }
 
 export function matchesLiveProof(proof,evidence){
-  return proof?.schema_version===1&&proof.work_issue===evidence.work_issue&&proof.application_commit_sha===evidence.application_commit_sha&&proof.live_assertion===evidence.live_assertion&&proof.environment===evidence.environment&&proof.result==='passed'&&typeof proof.observed_at==='string'&&!Number.isNaN(Date.parse(proof.observed_at))
+  return proof?.schema_version===1&&proof.work_issue===evidence.work_issue&&proof.application_commit_sha===evidence.application_commit_sha&&proof.live_assertion===evidence.live_assertion&&proof.environment===evidence.environment&&proof.result==='passed'&&proof.observed_at===evidence.verified_at&&!Number.isNaN(Date.parse(proof.observed_at))
 }
 export function matchesGeneratedTypesProof(proof,evidence){
   return proof?.schema_version===1&&proof.work_issue===evidence.work_issue&&proof.application_commit_sha===evidence.application_commit_sha&&proof.result==='passed'&&proof.generated_types_sha256===evidence.generated_types_output_digest
@@ -1798,7 +1798,7 @@ export const githubIo = {
   },
   verifyLiveAssertion(evidence) {
     const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)$/.exec(String(evidence?.live_evidence??''))
-    if(!match)return false
+    if(!match||match[1].toLowerCase()!==String(evidence.application_repository).toLowerCase())return false
     const run=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}`])
     if(run?.conclusion!=='success'||String(run?.head_sha??'').toLowerCase()!==String(evidence.application_commit_sha).toLowerCase())return false
     const artifacts=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}/artifacts`])?.artifacts
@@ -1811,7 +1811,7 @@ export const githubIo = {
   },
   verifyGeneratedTypes(evidence){
     const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)$/.exec(String(evidence?.generated_types_evidence??''))
-    if(!match)return false
+    if(!match||match[1].toLowerCase()!==String(evidence.application_repository).toLowerCase())return false
     const run=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}`])
     if(run?.conclusion!=='success'||String(run?.head_sha??'').toLowerCase()!==String(evidence.application_commit_sha).toLowerCase())return false
     const artifacts=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}/artifacts`])?.artifacts
