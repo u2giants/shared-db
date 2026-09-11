@@ -1,7 +1,7 @@
 -- Issue #2478; claim #2745; reserved version 20260911075244.
 -- Shared path-to-SKU derivation. No application rows are repaired by this migration.
--- derived-from: 20260906035323_style_group_rebuild_guard_and_ungroup.sql
--- derived-from: 20260907031246_style_group_drift_reconciler.sql
+-- derived-from: 20260906035323
+-- derived-from: 20260907031246
 -- Consumers retain their signatures, settings, SECURITY DEFINER, ACLs and behavior.
 -- CREATE OR REPLACE preserves their current owners and grants. The only body
 -- changes delegate the existing expression to the helper and retire its stale note.
