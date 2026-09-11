@@ -42,7 +42,7 @@ import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; impo
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, assertFindingsRefForPr, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
-import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, assertPrCarriesStructuralChange } from './orchestrator-flow/admission.mjs'
+import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
 import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
 
 export const REPO = 'u2giants/shared-db'
@@ -1598,6 +1598,11 @@ export const githubIo = {
     const connection=data?.data?.repository?.pullRequest?.closingIssuesReferences
     if(!connection||!Array.isArray(connection.nodes)||connection.pageInfo?.hasNextPage!==false)throw new LaneError('pull request closing-issue linkage is unreadable or paginated')
     return connection.nodes
+  },
+  prStructuralObjects(number,headSha){
+    const files=this.getPrFiles(Number(number)).map((file)=>/^supabase\/migrations\/\d{14}_[^/]+\.sql$/.test(String(file?.filename??file?.path??''))&&file?.status!=='removed'
+      ?{...file,content:this.getFileAt(file.filename??file.path,headSha)}:file)
+    return inspectPrStructuralChange(files).objects
   },
   // Issue #2342: the caller reads a whole SET of files at one ref, which used to
   // be a Contents call each. One recursive tree read now answers every path, and
@@ -5354,20 +5359,36 @@ function activateReviewCutoverOperation(io) {
 export function activateReviewCutover(io=githubIo){return withReviewRequestBudget(()=>activateReviewCutoverOperation(reviewOperationIo(io)))}
 
 export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-migration-author-lanes', allowLegacy = false } = {}) {
-  const issue = io.getIssue(Number(number))
-  const scope = parseQueueScope(issue?.body ?? '')
+  let issue = io.getIssue(Number(number))
+  let livePr=null
+  let scope=null
   try {
+    if(pr!==null){
+      livePr=io.getPr(Number(pr))
+      const linked=io.closingIssuesForPr(Number(pr))
+      if(!Array.isArray(linked)||linked.length!==1||Number(linked[0]?.number)!==Number(number))throw new AdmissionError(`pull request #${pr} must close exactly admitted issue #${number}`)
+      if(String(issue?.state??'').toLowerCase()==='closed'){
+        if(!livePr?.merged_at||typeof io.updateIssue!=='function')throw new AdmissionError(`issue #${number} is closed and cannot be admitted`)
+        io.updateIssue(Number(number),{state:'open'})
+        issue=io.getIssue(Number(number))
+        if(String(issue?.state??'').toLowerCase()!=='open')throw new AdmissionError(`issue #${number} did not reopen after its linked merge`)
+      }
+    }
+    scope = parseQueueScope(issue?.body ?? '')
     let admitted
     if(allowLegacy&&scope?.changeType===null){
       if(issue?.state!=='open'||scope.workType!=='structural'||scope.route!=='shared-db-orchestrator'||scope.status!=='ready'||!scope.writes.length)throw new AdmissionError('legacy in-flight work is not an open ready structural issue with exact writes')
       admitted={admitted:true,issue:Number(number),legacy:true,service_class:'standard-application'}
     }else admitted = evaluateAdmission(issue, scope, parseImpactBlock(issue?.body ?? ''))
     if (pr !== null) {
-      const livePr=io.getPr(Number(pr)),head=livePr?.head?.sha
+      const head=livePr?.head?.sha
       if(!head)throw new AdmissionError('pull request exact head is unreadable')
       const files=io.getPrFiles(Number(pr)).map((file)=>/^supabase\/migrations\/\d{14}_[^/]+\.sql$/.test(String(file?.filename??file?.path??''))&&file?.status!=='removed'
         ?{...file,content:io.getFileAt(file.filename??file.path,head)}:file)
-      assertPrCarriesStructuralChange(files)
+      const inspection=inspectPrStructuralChange(files)
+      const declared=[...scope.writes].sort()
+      if(inspection.objects.length!==declared.length||inspection.objects.some((value,index)=>value!==declared[index]))throw new AdmissionError(`pull request #${pr} structural objects must exactly match admitted issue #${number} writes`)
+      admitted={...admitted,actual_objects:inspection.objects,migrations:inspection.migrations}
     }
     if(!admitted.legacy&&io.issueComments&&io.commentIssue){
       let history=outcomeHistory(io.issueComments(Number(number)))
@@ -5405,10 +5426,9 @@ export function resolveAdmittedIssueForPr(pr, io = githubIo) {
   if (!Number.isInteger(Number(pr)) || Number(pr) < 1) throw new LaneError('--resolve-admitted-issue-for-pr requires a pull request number')
   const linked = io.closingIssuesForPr(Number(pr))
   if (!Array.isArray(linked)) throw new LaneError('pull request closing-issue linkage is unreadable')
-  const open = linked.filter((issue)=>String(issue?.state ?? '').toLowerCase() === 'open')
-  if (open.length !== 1) throw new LaneError(`pull request must close exactly one open structural work issue; found ${open.length}`)
-  const result = admitIssue(Number(open[0].number), io, { pr:Number(pr), allowLegacy:false })
-  return { issue:Number(open[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
+  if (linked.length !== 1) throw new LaneError(`pull request must close exactly one structural work issue; found ${linked.length}`)
+  const result = admitIssue(Number(linked[0].number), io, { pr:Number(pr), allowLegacy:false })
+  return { issue:Number(linked[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
 }
 
 function requireAdmission(options, io, { pr = null } = {}) {

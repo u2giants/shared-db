@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { inventoryDdlVerbs } from '../check-pr-object-collisions.mjs'
+import { dispatchObjectKeys, inventoryDdlVerbs } from '../check-pr-object-collisions.mjs'
 
 export class AdmissionError extends Error {
   constructor(message, result = null) {
@@ -111,7 +111,7 @@ export function evaluateAdmission(issue, scope, impact = null) {
   }
 }
 
-export function assertPrCarriesStructuralChange(prFiles = []) {
+export function inspectPrStructuralChange(prFiles = []) {
   if (!Array.isArray(prFiles)) throw new AdmissionError('pull request files are unreadable')
   const migrations = prFiles.filter((file) => /^supabase\/migrations\/\d{14}_[^/]+\.sql$/.test(String(file?.filename ?? file?.path ?? '')) && file?.status !== 'removed')
   if (!migrations.length) {
@@ -130,5 +130,10 @@ export function assertPrCarriesStructuralChange(prFiles = []) {
   if(!ddl.length)throw new AdmissionError('the pull request migration files contain no statement-leading schema DDL, so the actual change is not structural')
   const ambiguous=ddl.filter((row)=>!row.acknowledged)
   if(ambiguous.length)throw new AdmissionError(`the pull request contains unmodelled DDL (${ambiguous.map((row)=>row.verb).join(', ')}); structural admission fails closed`)
-  return migrations.map((file) => file.filename ?? file.path)
+  return {
+    migrations:migrations.map((file) => file.filename ?? file.path),
+    objects:[...new Set(proposedSql.flatMap((sql)=>dispatchObjectKeys(sql)))].sort(),
+  }
 }
+
+export function assertPrCarriesStructuralChange(prFiles = []) { return inspectPrStructuralChange(prFiles).migrations }

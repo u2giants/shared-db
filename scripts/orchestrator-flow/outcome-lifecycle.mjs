@@ -144,6 +144,11 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
     if(!Number.isInteger(evidence.generated_types_artifact_id)||evidence.generated_types_artifact_id<=0||!/^sha256:[0-9a-f]{64}$/i.test(evidence.generated_types_artifact_digest??'')||!/^sha256:[0-9a-f]{64}$/i.test(evidence.generated_types_output_digest??''))throw new OutcomeError('generated types require exact artifact and output sha256 digests')
     if(!io.verifyGeneratedTypes(evidence))throw new OutcomeError('generated types artifact could not be re-derived')
   }
+  const linked=io.closingIssuesForPr(evidence.merge_pr)
+  if(!Array.isArray(linked)||linked.length!==1||Number(linked[0]?.number)!==Number(issue))throw new OutcomeError(`merge PR #${evidence.merge_pr} is not linked exclusively to outcome issue #${issue}`)
+  const actualObjects=io.prStructuralObjects(evidence.merge_pr,evidence.merge_sha)
+  const declared=[...scope.writes].sort()
+  if(!Array.isArray(actualObjects)||actualObjects.length!==declared.length||actualObjects.some((value,index)=>value!==declared[index]))throw new OutcomeError('merge PR structural objects do not match the admitted issue writes')
   const pr = io.getPr(evidence.merge_pr)
   if (!pr?.merged_at || !sameSha(evidence.merge_sha, pr.merge_commit_sha ?? '')) throw new OutcomeError('merge evidence does not match GitHub')
   if (!io.mergeCommitInMain(evidence.merge_sha)) throw new OutcomeError('merge commit is not in current shared-db main history')
