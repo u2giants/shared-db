@@ -112,7 +112,7 @@ with params as not materialized (
   ), active_children as materialized (
     select
       d.style_guide_file_id, d.root_label, d.licensor_name, d.property_folder, d.style_guide_folder, d.style_guide_name, d.filename, d.file_extension, d.tag_names, d.modified_at, d.pdf_text_length,
-      
+
       case when f.has_preview then 'available' else 'missing' end as preview_state,
       case
         when f.has_preview then 'none'
@@ -286,7 +286,7 @@ with params as not materialized (
   ), active_children as materialized (
     select
       d.style_guide_file_id, d.root_label, d.licensor_name, d.property_folder, d.style_guide_folder, d.style_guide_name, d.file_extension, d.tag_names, d.modified_at, d.pdf_text_length,
-      
+
       case when f.has_preview then 'available' else 'missing' end as preview_state,
       case
         when f.has_preview then 'none'
