@@ -60,8 +60,14 @@ export function outcomeHistory(comments = []) {
     if (seen.has(event.event_id)) { problems.push(`duplicate outcome event ${event.event_id}`); continue }
     seen.add(event.event_id)
     if (event.result === 'refused') continue
-    if (event.event_type === 'blocked') { blocked = true; continue }
-    if (event.event_type === 'yielded') { blocked = false; continue }
+    if (event.event_type === 'blocked') {
+      if(blocked)problems.push('blocked repeats before yielded')
+      blocked = true; continue
+    }
+    if (event.event_type === 'yielded') {
+      if(!blocked)problems.push('yielded without an active blocked state')
+      blocked = false; continue
+    }
     const index = LINEAR.indexOf(event.event_type)
     if (index < 0) continue
     if (index > highest + 1) problems.push(`${event.event_type} skips ${LINEAR[highest + 1]}`)
@@ -90,6 +96,7 @@ export function assertOutcomeTransition(comments, next) {
     if(!history.blocked)throw new OutcomeError('outcome can yield only from blocked')
     return history
   }
+  if(history.blocked)throw new OutcomeError('outcome must record yielded before another lifecycle advance')
   const expected = LINEAR[(history.state ? LINEAR.indexOf(history.state) : -1) + 1]
   if (next !== expected) throw new OutcomeError(`cannot advance outcome from ${history.state ?? 'none'} to ${next}; next state is ${expected ?? 'none'}`)
   return history

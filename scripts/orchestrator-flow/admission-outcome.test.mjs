@@ -173,6 +173,16 @@ test('outcome lifecycle refuses every skip and merge is not live completion', ()
   assert.equal(outcomeHistory(eventComments('live_verified')).complete,true)
 })
 
+test('blocked outcomes must yield before advancing and malformed block events invalidate history',()=>{
+  const comments=eventComments('classified')
+  comments.push({body:formatEventComment(outcomeEvent({issue:41,state:'blocked',actor:'test',timestamp:'2026-09-11T00:03:00Z'}))})
+  assert.throws(()=>advanceOutcome({issue:41,state:'dispatched',actor:'test',timestamp:'2026-09-11T00:04:00Z'}, {issueComments:()=>comments,commentIssue:()=>{}}),/record yielded/)
+  comments.push({body:formatEventComment(outcomeEvent({issue:41,state:'yielded',actor:'test',timestamp:'2026-09-11T00:04:00Z'}))})
+  assert.equal(outcomeHistory(comments).valid,true)
+  const stray=[...eventComments('classified'),{body:formatEventComment(outcomeEvent({issue:41,state:'yielded',actor:'test',timestamp:'2026-09-11T00:03:00Z'}))}]
+  assert.deepEqual(outcomeHistory(stray).problems,['yielded without an active blocked state'])
+})
+
 test('every linear outcome transition records exactly once and every skip refuses',()=>{
   const comments=[],io={issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body})}
   linear.forEach((state,index)=>{
