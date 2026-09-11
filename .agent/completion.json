@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/23",
-  "contract_sha256": "7e0f31d5c44f0710d75898a93d17169bd1a8b5691fff635b6f21a4cb8def132f",
-  "head_sha": "3d76b1bac4e9a0253950d4021634eb75390c85bd",
+  "contract_ref": "refs/db-contracts/2727/24",
+  "contract_sha256": "b45182b72db872979b3b85c2441f682f8e17f86ddae5476bd8fe582650f6ea87",
+  "head_sha": "206a91ee1b91430b1623ba8094f8dc95ae017a64",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -36,7 +36,7 @@
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "709 tests passed; zero failed, skipped, cancelled, or todo, including forged completion refusal, durable lifecycle evidence, marker handoff races, command routing, and operation-owned mutex paths."
+      "evidence": "710 tests passed; zero failed, skipped, cancelled, or todo, including forged completion refusal, nonempty durable lifecycle evidence, marker handoff races, zero-valued command routing, and operation-owned mutex paths."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
