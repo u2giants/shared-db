@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2768,
-  "generation": 1,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Register preview apply run 34281856111 and the exact bytes of migration 20260908202651 as a historical restoration so the governed production promotion can accept that immutable pre-merge claim apply, without weakening any other guard.",
-  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
+  "base_sha": "b68a1900a6c287bd16adcbdacc8a3e4a8db543b1",
   "dispatcher": "claude shared-db orchestrator route local_ceb221ac-1746-4836-9306-6839c18dbced (marker #2758)",
   "worker": "claude issue-2768 historical restoration author",
   "branch": "claude/restore-2535-run",
