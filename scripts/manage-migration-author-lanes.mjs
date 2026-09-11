@@ -1327,6 +1327,31 @@ function requireClaimCloseReason(reason) {
   return reason
 }
 
+export function buildDatabasePreviewFileSnapshot(files,base,head,readContent){
+  const allowed=new Set(['added','modified','removed','renamed','copied','changed','unchanged']),seen=new Set()
+  const inspect=(tree,path,side)=>{
+    const entry=tree.get(path)
+    if(!entry?.blob_sha||!/^[0-9a-f]{40}$/i.test(String(entry.blob_sha))||typeof entry.mode!=='string'||typeof entry.type!=='string')throw new LaneError(`live Git identity is unavailable for ${side} file ${path}`)
+    let content
+    try{content=readContent(path,side)}catch(error){throw new LaneError(`live Git content is unavailable for ${side} file ${path}: ${error.message}`)}
+    if(typeof content!=='string')throw new LaneError(`live Git content is not text for ${side} file ${path}`)
+    return {mode:entry.mode,type:entry.type,blob_sha:entry.blob_sha,sha256:sha256(content),content}
+  }
+  return files.map((file)=>{
+    const path=String(file?.filename??'').replaceAll('\\','/'),status=String(file?.status??''),previousPath=String(file?.previous_filename??path).replaceAll('\\','/')
+    if(!path||seen.has(path)||!allowed.has(status)||((status==='renamed'||status==='copied')&&!file?.previous_filename))throw new LaneError(`live Git identity is unavailable for changed file ${path||'(missing path)'}`)
+    seen.add(path)
+    const oldSide=status==='added'?null:inspect(base,previousPath,'base'),newSide=status==='removed'?null:inspect(head,path,'head')
+    const sides=[oldSide,newSide].filter(Boolean),regular=sides.every((side)=>side.type==='blob'&&side.mode==='100644'),text=sides.every((side)=>!side.content.includes('\0'))
+    const databaseSignal=sides.some((side)=>/(?:\b(?:create|alter|drop|grant|revoke|insert|update|delete)\b[\s\S]{0,40}\b(?:table|view|function|policy|role|schema|into|from)\b|\bsupabase\b|\bpsql\b|\bapply_migration\b|\bdb\s+push\b)/i.test(side.content))
+    const databasePath=[path,previousPath].some((candidate)=>/(?:^|\/)(?:supabase|migrations?|policies)(?:\/|$)|\.sql$/i.test(candidate)),safeDocumentation=/^(?:docs\/.*\.(?:md|txt)|HANDOFF\.d\/.*\.md|plan_[^/]*\.md|README\.md)$/i.test(path)
+    const unsafeHistory=['renamed','removed'].includes(status)||!regular||!text
+    const impact=databaseSignal||databasePath?'database-behavior':unsafeHistory?'ambiguous':safeDocumentation?'documentation':'ambiguous'
+    const selected=newSide??oldSide
+    return {path,status,...(previousPath!==path?{previous_path:previousPath}:{}),mode:selected.mode,blob_sha:selected.blob_sha,sha256:selected.sha256,base:oldSide?{mode:oldSide.mode,type:oldSide.type,blob_sha:oldSide.blob_sha,sha256:oldSide.sha256}:null,head:newSide?{mode:newSide.mode,type:newSide.type,blob_sha:newSide.blob_sha,sha256:newSide.sha256}:null,impact}
+  }).sort((a,b)=>a.path.localeCompare(b.path))
+}
+
 export const githubIo = {
   // Owner ruling 2026-09-11 (marker #2758): no global FIFO for reviewer draws. Any PR
   // draws any free usable provider immediately; the per-provider lease, engine
@@ -1544,11 +1569,10 @@ export const githubIo = {
   getPr(number) { return ghJson(['api', `repos/${REPO}/pulls/${number}`]) },
   getPrFiles(number) { return ghPaginated(`repos/${REPO}/pulls/${number}/files?per_page=100`) },
   databasePreviewFileSnapshot(pr,baseSha,headSha){
-    const readTree=(ref)=>{const body=ghJson(['api',`repos/${REPO}/git/trees/${ref}?recursive=1`]);if(body?.truncated===true||!Array.isArray(body?.tree))throw new LaneError(`live Git tree is incomplete for ${ref}`);return new Map(body.tree.filter((row)=>row?.type==='blob').map((row)=>[row.path,{blob_sha:row.sha,mode:row.mode}]))}
+    const readTree=(ref)=>{const body=ghJson(['api',`repos/${REPO}/git/trees/${ref}?recursive=1`]);if(body?.truncated===true||!Array.isArray(body?.tree))throw new LaneError(`live Git tree is incomplete for ${ref}`);return new Map(body.tree.map((row)=>[row.path,{blob_sha:row.sha,mode:row.mode,type:row.type}]))}
     const base=readTree(baseSha),head=readTree(headSha),files=this.getPrFiles(pr)
     if(!Array.isArray(files)||!files.length)throw new LaneError('live pull request changed-file set is empty or unreadable')
-    const seen=new Set()
-    return files.map((file)=>{const path=String(file?.filename??'').replaceAll('\\','/'),status=String(file?.status??''),tree=status==='removed'?base:head,entry=tree.get(path);if(!path||seen.has(path)||!['added','modified','removed','renamed','copied','changed','unchanged'].includes(status)||!entry?.blob_sha||!/^100(?:644|755)$/.test(String(entry.mode??'')))throw new LaneError(`live Git identity is unavailable for changed file ${path||'(missing path)'}`);seen.add(path);const content=this.getFileAt(path,status==='removed'?baseSha:headSha),databaseSignal=/(?:\b(?:create|alter|drop|grant|revoke|insert|update|delete)\b[\s\S]{0,40}\b(?:table|view|function|policy|role|schema|into|from)\b|\bsupabase\b|\bpsql\b|\bapply_migration\b|\bdb\s+push\b)/i.test(content),databasePath=/(?:^|\/)(?:supabase|migrations?|policies)(?:\/|$)|\.sql$/i.test(path),safeDocumentation=/^(?:docs\/.*\.(?:md|txt)|HANDOFF\.d\/.*\.md|plan_[^/]*\.md|README\.md)$/i.test(path),impact=status==='removed'||databaseSignal||databasePath?(databaseSignal||databasePath?'database-behavior':'ambiguous'):safeDocumentation&&entry.mode==='100644'?'documentation':'ambiguous';return{path,status,mode:entry.mode,blob_sha:entry.blob_sha,sha256:sha256(content),impact}}).sort((a,b)=>a.path.localeCompare(b.path))
+    return buildDatabasePreviewFileSnapshot(files,base,head,(path,side)=>this.getFileAt(path,side==='base'?baseSha:headSha))
   },
   comparePullRequestFiles(baseSha,headSha) {
     const comparison=ghJson(['api',`repos/${REPO}/compare/${baseSha}...${headSha}`])
