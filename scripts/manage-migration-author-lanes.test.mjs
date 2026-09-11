@@ -2589,12 +2589,15 @@ test('issue 1688 routes non-migration pull requests through the guarded merge la
   )
 })
 
-test('issue 1688 never leaves a durable ordinary-merge authorization before the merge lock', () => {
+test('issue 1688 permits success only after the appropriate merge lock is acquired', () => {
   const leaseWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/migration-author-lease.yml',import.meta.url)),'utf8')
   const mergeWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/guarded-migration-merge.yml',import.meta.url)),'utf8')
+  const documentsWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/documents-only-merge-authorization.yml',import.meta.url)),'utf8')
   const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
   assert.doesNotMatch(leaseWorkflow,/state=success[^\n]+Migration guarded merge authorization/)
   assert.match(mergeWorkflow,/--acquire-merge[\s\S]+state=success[^\n]+Migration guarded merge authorization/)
+  assert.match(documentsWorkflow,/check-documents-only-merge-authorization\.mjs[\s\S]+--authorize-repository-maintenance-status/)
+  assert.doesNotMatch(documentsWorkflow,/--acquire-(?:preview|merge|production)/)
   const acquire=productionWorkflow.indexOf('name: Acquire the exclusive production lane and freeze merges')
   const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')
   const release=productionWorkflow.indexOf('name: Release the exclusive production lane with ownership proof')
@@ -3227,6 +3230,12 @@ test('stranded reviewer queue and silence-release mutexes are recoverable',()=>{
 // acquire and release wedges every author lane with no sanctioned way out.
 test('stranded duplicate-claim-release mutex is recognized and safely recoverable',()=>{
   const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination duplicate-claim-release 1f0c3a2e-0000-4000-8000-000000000000',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('stranded repository-maintenance authorization mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:`db-coordination repository-maintenance-authorization pr=2715 head=${'a'.repeat(40)}`,committer:{date:'2026-08-14T19:55:00Z'}})
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
   assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
 })
@@ -5032,6 +5041,31 @@ function immutablePreviewReconciliationIo({sourcePr=1748,replacement='2026083001
     }),
   }
 }
+
+test('archived unnamed steps require an exact artifact receipt and never override contradictory named proof',()=>{
+  const input={issue:1769,pr:1809,versions:['20260828232207'],mergeCommitSha:'b'.repeat(40)}
+  const fixture=immutablePreviewApplyIo(), evidence=fixture.previewApplyRun()
+  evidence.artifacts.artifacts[0].id=456
+  evidence.logs=evidence.logs.replaceAll('Report the preview ledger delta','UNKNOWN STEP')
+  const io={...fixture,previewApplyRun:()=>evidence}
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+  let calls=0
+  io.verifyPreviewApplyArtifact=(request)=>{
+    calls++
+    assert.equal(request.verificationCommit,input.mergeCommitSha)
+    return {verified:true,runId:request.run.id,artifactId:456,artifactDigest:request.artifact.digest,versions:request.versions}
+  }
+  assert.deepEqual(validateOriginalPreviewApplyEvidence(input,io),{type:'preview-apply',run_id:'33308168016'})
+  assert.equal(calls,1)
+  const valid=io.verifyPreviewApplyArtifact
+  io.verifyPreviewApplyArtifact=(request)=>({...valid(request),artifactId:457})
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+  io.verifyPreviewApplyArtifact=()=>{throw new Error('digest mismatch')}
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+  evidence.logs+='\npreview\tReport the preview ledger delta\t- added: 20260101000000'
+  io.verifyPreviewApplyArtifact=()=>assert.fail('contradictory named proof must not use artifact fallback')
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+})
 
 test('immutable original preview-apply evidence validates only the exact run',()=>{
   const input={issue:1769,pr:1809,versions:['20260828232207'],mergeCommitSha:'b'.repeat(40)}
