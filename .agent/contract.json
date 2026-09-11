@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2785,
-  "generation": 2,
+  "generation": 3,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Cut GitHub Actions installation API quota use so production applies stop failing at about ten active PRs, without weakening any safety check or changing which collisions are found.",
-  "base_sha": "9b02ad489d09427fc0556248c0a85b7cc78807ff",
+  "base_sha": "5761bc5e8763817c6deb722cac627f8924b5baaf",
   "dispatcher": "Claude coordinator session",
   "worker": "Claude api-quota-reduction worker",
   "branch": "claude/api-quota-reduction",
@@ -79,7 +79,9 @@
   ],
   "assumptions": [
     "Quota exhaustion is the primary rate limit (403/429 with remaining 0); secondary limits and other 403s must keep failing immediately.",
-    "The shared open-PR file snapshot proves completeness exactly as each check did before."
+    "The shared open-PR file snapshot proves completeness exactly as each check did before.",
+    "The GitHub quota wait is opt-in: unset means no wait, and only steps that hold no lock set GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS.",
+    "The dispatch collision check proves changed_files for every open PR, unchanged from main."
   ],
   "stop_conditions": [
     "Any collision test finds a different set of conflicts than the previous algorithm.",
