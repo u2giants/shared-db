@@ -10,9 +10,11 @@ from __future__ import annotations
 
 import argparse
 import hashlib
+import functools
 import json
 import re
 import subprocess
+import sys
 import tempfile
 import time
 import zipfile
@@ -91,7 +93,56 @@ class PreviewProducerMismatch(RiskGateError):
     """Two readable, proved commits carry different preview-producer bytes."""
 
 
-def gh_json(endpoint: str, *, runner=subprocess.run, sleep=time.sleep, attempts=4) -> Any:
+RATE_LIMIT_WAIT_CAP_SECONDS = 15 * 60
+
+
+def rate_limit_exhausted(error: str) -> bool:
+    """A PRIMARY quota exhaustion: "rate limit exceeded" with HTTP 403 or 429.
+
+    A secondary (abuse) limit, "Resource not accessible", or any other 403 is not
+    this, and is never waited on.
+    """
+    lowered = error.lower()
+    return "rate limit exceeded" in lowered and "secondary rate limit" not in lowered and bool(
+        re.search(r"http (?:403|429)\b", lowered)
+    )
+
+
+def rate_limit_reset_seconds(runner, now: float) -> float | None:
+    """Seconds until the REST quota resets, from the free `rate_limit` endpoint.
+
+    None when the answer cannot be read: an unknown reset is never guessed.
+    """
+    probe = runner(
+        ["gh", "api", "rate_limit"], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
+    )
+    if probe.returncode != 0:
+        return None
+    try:
+        core = json.loads(probe.stdout)["resources"]["core"]
+        remaining, reset = core["remaining"], core["reset"]
+    except (json.JSONDecodeError, KeyError, TypeError):
+        return None
+    if not isinstance(remaining, int) or not isinstance(reset, (int, float)):
+        return None
+    return 0.0 if remaining > 0 else max(0.0, reset - now)
+
+
+def gh_json(
+    endpoint: str, *, runner=subprocess.run, sleep=time.sleep, attempts=4,
+    rate_limit_wait_seconds: float = 0, clock=time.time,
+) -> Any:
+    # RATE LIMIT (bounded, opt-in). With `rate_limit_wait_seconds` > 0 a primary
+    # quota exhaustion ("rate limit exceeded", HTTP 403/429) waits ONCE for the
+    # stated reset when that reset is within the budget (capped at 15 minutes),
+    # then re-reads. A reset further away, an unreadable reset, a second
+    # exhaustion, or any other 403 fails closed exactly as before. Only the
+    # pre-lane invocation passes a budget; the invocation that already holds the
+    # production lane keeps the default 0 and fails fast. The wait never changes
+    # what is read or how it is judged.
+    budget = max(0.0, min(float(rate_limit_wait_seconds or 0), RATE_LIMIT_WAIT_CAP_SECONDS))
+    rate_limit_waited = False
     # The live owner-comment read and the recursive tree read receive transport
     # retries. The tree read carries the producer pin for a whole promotion
     # (issue #2191), so one spurious 500/504 there would stop production for a
@@ -101,7 +152,8 @@ def gh_json(endpoint: str, *, runner=subprocess.run, sleep=time.sleep, attempts=
     # governed evidence reads preserve their existing single-attempt behavior.
     retry_transport = "/issues/comments/" in endpoint or "/git/trees/" in endpoint
     effective_attempts = attempts if retry_transport else 1
-    for attempt in range(effective_attempts):
+    attempt = 0
+    while True:
         result = runner(
             ["gh", "api", endpoint], text=True,
             stdout=subprocess.PIPE, stderr=subprocess.PIPE, encoding="utf-8",
@@ -110,10 +162,18 @@ def gh_json(endpoint: str, *, runner=subprocess.run, sleep=time.sleep, attempts=
             try: return json.loads(result.stdout)
             except json.JSONDecodeError as exc: raise RiskGateError("GitHub returned invalid JSON") from exc
         error = (result.stderr or "GitHub API request failed").strip()
+        if budget > 0 and not rate_limit_waited and rate_limit_exhausted(error):
+            delay = rate_limit_reset_seconds(runner, clock())
+            if delay is not None and delay <= budget:
+                rate_limit_waited = True
+                print(f"GitHub API quota exhausted; waiting {int(delay) + 1}s for its reset, then re-reading once.", file=sys.stderr)
+                sleep(delay + 1)
+                continue  # the wait does not spend a transport attempt
         transient = any(marker in error.lower() for marker in TRANSIENT_GITHUB_ERRORS)
-        if not transient or attempt == effective_attempts - 1:
+        if not transient or attempt >= effective_attempts - 1:
             raise RiskGateError(f"GitHub API request failed: {error}")
         sleep(2 ** attempt)
+        attempt += 1
 
 
 def api_object(api: Callable[[str], Any], endpoint: str) -> dict[str, Any]:
@@ -519,6 +579,9 @@ PREVIEW_PRODUCER_PATHS = (
     # Static import of check-dispatch-collision.mjs. Its module body evaluates
     # before the entry point runs, so hop three is as executable as hop one.
     "scripts/check-pr-object-collisions.mjs",
+    # Static import of check-pr-object-collisions.mjs: supplies the open pull
+    # request file lists that check judges, so it is as executable as its importer.
+    "scripts/lib/open-pr-files.mjs",
     # Executes in preview-recovery mode. Safe today only because that path
     # separately demands run head == exact main; pinned so that coupling cannot
     # silently loosen later.
@@ -1940,9 +2003,14 @@ def main() -> int:
     # reach assess(); a material-risk path still rejects the missing value.
     parser.add_argument("--owner-decision-run-id")
     parser.add_argument("--owner-decision-digest")
+    # Default 0: fail fast on a GitHub quota exhaustion. Only the pre-lane
+    # invocation passes a budget (capped at 900s inside gh_json); the invocation
+    # that holds the production lane must never sit on it waiting.
+    parser.add_argument("--rate-limit-wait-seconds", type=float, default=0)
     args = parser.parse_args()
+    api = functools.partial(gh_json, rate_limit_wait_seconds=args.rate_limit_wait_seconds) if args.rate_limit_wait_seconds > 0 else gh_json
     try:
-        result = assess(args)
+        result = assess(args, api=api)
     except (RiskGateError, OSError, ValueError, subprocess.CalledProcessError, zipfile.BadZipFile) as exc:
         print(f"::error::Production business-risk gate rejected evidence: {exc}")
         return 2

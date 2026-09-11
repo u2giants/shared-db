@@ -243,6 +243,85 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 sleep=lambda _: self.fail("permanent absence slept"))
         self.assertEqual(len(calls),1)
 
+    RATE_LIMITED = "gh: API rate limit exceeded for installation ID 1234. (HTTP 403)"
+
+    def rate_limit_runner(self, calls, *, reset_in, failures=1, stderr=None, probe_ok=True):
+        now = 1_800_000_000.0
+        state = {"failed": 0}
+        def runner(argv, **kwargs):
+            calls.append(argv[2])
+            if argv[2] == "rate_limit":
+                if not probe_ok:
+                    return subprocess.CompletedProcess([], 1, "", "HTTP 502")
+                return subprocess.CompletedProcess([], 0, json.dumps(
+                    {"resources": {"core": {"limit": 5000, "remaining": 0, "reset": int(now + reset_in)}}}), "")
+            if state["failed"] < failures:
+                state["failed"] += 1
+                return subprocess.CompletedProcess([], 1, "", stderr or self.RATE_LIMITED)
+            return subprocess.CompletedProcess([], 0, '{"ok": true}', "")
+        return runner, (lambda: now)
+
+    def test_pre_lane_rate_limit_403_waits_for_the_reset_then_succeeds(self):
+        calls, sleeps = [], []
+        runner, clock = self.rate_limit_runner(calls, reset_in=300)
+        result = gh_json("repos/u2giants/shared-db/pulls/1108", runner=runner, sleep=sleeps.append,
+                         rate_limit_wait_seconds=900, clock=clock)
+        self.assertEqual(result, {"ok": True})
+        self.assertEqual(calls, ["repos/u2giants/shared-db/pulls/1108", "rate_limit", "repos/u2giants/shared-db/pulls/1108"])
+        self.assertEqual(sleeps, [301])
+
+    def test_lane_held_default_fails_fast_on_a_rate_limit(self):
+        calls = []
+        runner, clock = self.rate_limit_runner(calls, reset_in=60)
+        with self.assertRaisesRegex(RiskGateError, "rate limit exceeded"):
+            gh_json("repos/u2giants/shared-db/pulls/1108", runner=runner,
+                    sleep=lambda _: self.fail("the lane-held invocation waited"), clock=clock)
+        self.assertEqual(calls, ["repos/u2giants/shared-db/pulls/1108"])
+
+    def test_rate_limit_wait_is_bounded_and_never_applies_to_other_403s(self):
+        # A reset past 15 minutes fails closed even with a larger budget.
+        calls = []
+        runner, clock = self.rate_limit_runner(calls, reset_in=16 * 60)
+        with self.assertRaisesRegex(RiskGateError, "rate limit exceeded"):
+            gh_json("repos/u2giants/shared-db/pulls/1108", runner=runner,
+                    sleep=lambda _: self.fail("waited past the cap"), rate_limit_wait_seconds=3600, clock=clock)
+        # Any other 403, including a SECONDARY limit, costs one call and no probe.
+        for stderr in ("HTTP 403: Forbidden", "HTTP 403: Resource not accessible by integration",
+                       "You have exceeded a secondary rate limit (HTTP 403)"):
+            with self.subTest(stderr=stderr):
+                calls = []
+                runner, clock = self.rate_limit_runner(calls, reset_in=60, failures=5, stderr=stderr)
+                with self.assertRaises(RiskGateError):
+                    gh_json("repos/u2giants/shared-db/pulls/1108", runner=runner,
+                            sleep=lambda _: self.fail(f"{stderr} slept"), rate_limit_wait_seconds=900, clock=clock)
+                self.assertEqual(calls, ["repos/u2giants/shared-db/pulls/1108"])
+        # An unreadable reset is never guessed; a second exhaustion is not waited on again.
+        calls = []
+        runner, clock = self.rate_limit_runner(calls, reset_in=60, probe_ok=False)
+        with self.assertRaises(RiskGateError):
+            gh_json("repos/u2giants/shared-db/pulls/1108", runner=runner,
+                    sleep=lambda _: self.fail("guessed a reset"), rate_limit_wait_seconds=900, clock=clock)
+        calls, sleeps = [], []
+        runner, clock = self.rate_limit_runner(calls, reset_in=60, failures=2)
+        with self.assertRaises(RiskGateError):
+            gh_json("repos/u2giants/shared-db/pulls/1108", runner=runner, sleep=sleeps.append,
+                    rate_limit_wait_seconds=900, clock=clock)
+        self.assertEqual(sleeps, [61])
+
+    def test_only_the_pre_lane_workflow_invocation_may_wait(self):
+        workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/shared-supabase-migrations.yml").read_text(encoding="utf-8")
+        invocations = []
+        for chunk in workflow.split("python scripts/production_business_risk_gate.py")[1:]:
+            block = []
+            for line in chunk.splitlines():
+                block.append(line)
+                if not line.rstrip().endswith("\\"):
+                    break
+            invocations.append("\n".join(block))
+        self.assertEqual(len(invocations), 2)
+        self.assertEqual(["--rate-limit-wait-seconds 900" in block for block in invocations], [True, False],
+                         "the lane-held invocation must fail fast")
+
     def atomic_preview_fixture(self):
         temp = tempfile.TemporaryDirectory()
         root = Path(temp.name)
