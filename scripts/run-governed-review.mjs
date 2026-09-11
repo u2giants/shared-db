@@ -298,7 +298,14 @@ export function wrapperFailureReason(run){
   if(run.error)reasons.push('the wrapper process could not complete')
   if(run.signal)reasons.push('the wrapper process was terminated by a signal')
   if(/unknown option/i.test(stderr))reasons.push('the wrapper rejected an unsupported option; check its --help')
-  if(/cancelled without a final answer/i.test(stderr))reasons.push('the provider cancelled without a final answer')
+  if(/\bprovider_cancelled\b|cancelled without a final answer/i.test(stderr))reasons.push('provider_cancelled: the provider cancelled without a final answer')
+  if(/\bturn_limit_cancelled\b/i.test(stderr))reasons.push('turn_limit_cancelled: the provider exhausted its declared turn budget')
+  if(/\bunknown_terminal_reason\b/i.test(stderr))reasons.push('unknown_terminal_reason: the provider returned an unrecognized terminal state')
+  if(/\bstart_failed\b/i.test(stderr)){
+    reasons.push(/\bcaller_identity_missing\b|\binvalid_caller_identity\b/i.test(stderr)
+      ?'start_failed: the wrapper caller identity is missing or invalid'
+      :'start_failed: the wrapper refused before a session was created')
+  }
   if(/timed-out|timed out|deadline|time limit/i.test(stderr))reasons.push('the wrapper reported a timeout')
   if(/local_dependency_unavailable/i.test(stderr))reasons.push('a local reviewer dependency is unavailable')
   if(/execution-context-denied/i.test(stderr))reasons.push('the wrapper reported execution-context-denied')

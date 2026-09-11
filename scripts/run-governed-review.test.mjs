@@ -110,6 +110,11 @@ test('wrapper failure preserves a safe cause without publishing a verdict or raw
   for(const [stderr,expected] of [
     ["unknown option '--review-kind'; token=private-value",/unsupported option/],
     ['ai-grok-review: Grok cancelled without a final answer. private-value',/provider cancelled/],
+    ['reason: provider_cancelled private-value',/provider_cancelled:.*cancelled/],
+    ['reason: turn_limit_cancelled private-value',/turn_limit_cancelled:.*turn budget/],
+    ['ai-muse: error: start_failed: caller_identity_missing private-value',/start_failed:.*caller identity/],
+    ['ai-muse: error: start_failed: private-value',/start_failed:.*before a session/],
+    ['reason: unknown_terminal_reason private-value',/unknown_terminal_reason:.*unrecognized/],
     ['timed-out private-value',/reported a timeout/],
     ['terminal reason: content-filter private-value',/provider_unavailable: content-filter/],
     ['[API Error: 400 InternalError.Algo.DataInspectionFailed: private-value]',/provider_unavailable: content-filter/],
