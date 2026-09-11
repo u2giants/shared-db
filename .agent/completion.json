@@ -1,46 +1,66 @@
 {
   "schema_version": 1,
-  "work_issue": 2766,
+  "work_issue": 2712,
   "outcome": "ready-for-merge",
-  "pr": 2767,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2766/7",
-  "contract_sha256": "c7325f650f6ec0e781929f0a35bc6ea8895a7c421698971675d8bec5345074da",
-  "head_sha": "97c6251d39e651c075c5983a84867c2a888a3ab3",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/agents/section-4-anti-collision-rules.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+  "pr": 2765,
+  "migration_versions": [
+    "20260911124845"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2712/1",
+  "contract_sha256": "4606f577186f7a3a3d21b9fed8f4311f595e33e6f9014d828e2b83d0bbd41067",
+  "head_sha": "8b1a617b07adff4c8fc8437c5684e5772d496b13",
+  "files_changed": [
+    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql"
+  ],
+  "db_reads": [
+    "function app.set_updated_at"
+  ],
+  "db_writes": [
+    "schema hts_rag",
+    "role designflow_hts_prod_runtime",
+    "role designflow_hts_alsand_runtime",
+    "role designflow_hts_prod_worker",
+    "role designflow_hts_alsand_worker",
+    "table hts_rag.hts_rag_rulings",
+    "table hts_rag.hts_rag_product_examples",
+    "table hts_rag.hts_rag_precedents",
+    "table hts_rag.hts_rag_precedent_rulings",
+    "table hts_rag.hts_rag_extraction_jobs",
+    "table hts_rag.hts_rag_determinations",
+    "table hts_rag.hts_rag_provider_responses",
+    "table hts_rag.hts_rag_review_events",
+    "table hts_rag.hts_rag_product_family_allowlist",
+    "table hts_rag.hts_rag_debate_runs",
+    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
+  ],
   "checks": [
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors at implementation head 8b1a617b07adff4c8fc8437c5684e5772d496b13."
     },
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "524 tests passed, 0 failed, 0 skipped."
+      "evidence": "SQL migration guards job passed on PR 2765 (run 34603204304 and at c8c557174c84794716bd0e3448369bc9b03c2259); the migration file is unchanged since."
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "command": "psql contract test in a rolled-back transaction",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=275"
+      "evidence": "hts_rag_shared_schema_contract.sql passed at 8314a3b8dc375a2772a40bce67d0e26a083b99c7 (migration and test byte-identical at implementation head 8b1a617b07adff4c8fc8437c5684e5772d496b13) against a local PostgreSQL 17 cluster with migration 20260911124845 applied; a negative control granting EXECUTE on the promotion-gate trigger function to designflow_hts_alsand_worker made it fail as intended."
     },
     {
-      "command": "node scripts/check-github-transport-conformance.mjs",
+      "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "212 files scanned, all calls governed."
+      "evidence": "Database Contract Tests run 34614159509 passed at c8c557174c84794716bd0e3448369bc9b03c2259 with the previous test revision; migration 20260911124845 replayed from empty. The hosted run for this head is produced by CI on push."
     }
   ],
   "assumptions_resolved": [
-    "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
+    "Production qsllyeztdwjgirsysgai verified read-only on 2026-09-11: no hts_rag schema and no designflow_hts roles exist.",
+    "The migration is self-contained and does not depend on unapplied public.hts_rag_* migrations; public.hts_rag_* is untouched.",
+    "All four roles are NOLOGIN; no password is committed. Granting login credentials to the application is a separate governed follow-up."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Muse REVISE on 5ecafd35 addressed in 451575a5 (stale eight-lane wording, non-mutex zero-wait test). Ready for exact-head review, required CI, and guarded merge."
+  "evidence_note": "Implementation is tested. Independent governed review, guarded merge, preview apply, production apply and live verification remain pending and are not asserted by this record."
 }
