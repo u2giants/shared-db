@@ -4,13 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2527,
   "migration_versions": [
-    "20260907154630"
+    "20260910223429"
   ],
-  "contract_ref": "refs/db-contracts/2501/1",
-  "contract_sha256": "0d679ca506b6ab4e813dcb8f11a4325703ca14e9771c9a5f13c1486d3416ae65",
-  "head_sha": "6af9f8c1f8b3a938469f0811e877c53edd311318",
+  "contract_ref": "refs/db-contracts/2501/2",
+  "contract_sha256": "42fb06eeadb07ef6af636afabfb621e756c784f7bb0542c5beea1d232fc3b89d",
+  "head_sha": "5d5181246058cf6f3678f6aa92fdf689633c4473",
   "files_changed": [
-    "supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql",
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260910223429_popdam_tag_totals_cold_plan.sql",
     "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_effective_count_performance_contracts.sql"
   ],
@@ -36,20 +38,18 @@
     {
       "command": "PYTHONPATH=scripts python3 -m unittest scripts.test_check_pass2_routine_supersession scripts.test_migration_derivation scripts.test_production_catalog_verification",
       "exit_code": 0,
-      "evidence": "247 tests passed in 4.708s, including the successful-routine provenance regression that prevents pass-2 from restoring obsolete helper bodies."
+      "evidence": "250 tests passed, zero failures on current merged implementation."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
       "exit_code": 0,
-      "evidence": "44 passed, 0 failed, 0 cancelled, 0 skipped, 0 todo on the refreshed implementation."
+      "evidence": "44 passed, zero failed, skipped, cancelled or todo on current merged implementation."
     }
   ],
   "assumptions_resolved": [
-    "Current origin/main fe5fa74db889652768029116e636f8cbe69b955e was integrated by normal merge at implementation head 6af9f8c1f8b3a938469f0811e877c53edd311318; current main is its second parent and a proven ancestor.",
-    "PR #2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3 remains in ancestry, preserving the successful-routine provenance repair.",
-    "The migration and two contract-test Git blobs remain exactly 27d0e83f2eab3375c6ca182fc08dd3bd7b44cea7, 2f0f3db38b639a124dcdc2698c615b43e4b6e7a0, and c45a25a84356e5340a84e73e36a2cef2c8bc8a6a; no implementation bytes, object scope, claim, or reserved version changed.",
-    "No local or recorded remote worker remained for this branch, and no active reviewer/ref targeted the inherited c952b31f head before ownership was taken.",
-    "Independent exact-head review, representative authenticated cold/warm preview, guarded merge, production apply, and authenticated API count/latency acceptance remain pending under the coordinator."
+    "Current main71dca7b3 and PR head99f3d4ed are both ancestors of implementation head5d518124. Migration and test bytes are unchanged; only stale contract/version evidence is repaired.",
+    "Claim2525 remains active under inherited identity; no protected claims were changed.",
+    "No database writes, preview, merges or production promotion are performed by this worker."
   ],
   "stop_conditions_hit": []
 }

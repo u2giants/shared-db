@@ -1,22 +1,26 @@
 {
   "schema_version": 1,
   "work_issue": 2501,
-  "generation": 1,
+  "generation": 2,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Recover inherited tag-filtered facet and exact list-total optimization after the separate replay-provenance repair lands, preserving count parity, access control and the existing viewer timeout.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "dispatcher": "codex coordinator #2536",
-  "worker": "codex repair_2501",
+  "base_sha": "71dca7b3deae7eea2ab0c2e47a320e1291dc0580",
+  "dispatcher": "Codex orchestrator marker2714",
+  "worker": "Codex issue2501 successor",
   "branch": "codex/issue-2501-popdam-tag-totals",
-  "worktree": "/tmp/shared-db-orch-2517-2501",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2501-successor-2714",
   "allowed_paths": [
-    "supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql",
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260910223429_popdam_tag_totals_cold_plan.sql",
     "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_effective_count_performance_contracts.sql"
   ],
   "file_writes": [
-    "supabase/migrations/20260907154630_popdam_tag_totals_cold_plan.sql",
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260910223429_popdam_tag_totals_cold_plan.sql",
     "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_effective_count_performance_contracts.sql"
   ],
@@ -47,7 +51,8 @@
     "This adopts pre-contract work transparently; no claim that publication predates existing implementation.",
     "Replay-provenance repair2537 landed as PR2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3; scoped real-SQL regression verifies the old restoration failure and repaired helper preservation.",
     "Claim2525 retains original owner, branch, remote worktree and immutable version.",
-    "Independent exact-head review, representative authenticated cold/warm preview and production acceptance remain separate gates."
+    "Independent exact-head review, representative authenticated cold/warm preview and production acceptance remain separate gates.",
+    "Successor preserves remote PR ancestry at 99f3d4ed713ae9dd0bd471ffa05cfe7b4c7b9900 by merging into current-main worktree. This generation only repairs stale evidence and reserved-version references; existing claim2525 identity is retained and remains active."
   ],
   "stop_conditions": [
     "Stop before final evidence if current main is not an ancestor of implementation.",
