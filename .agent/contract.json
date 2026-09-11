@@ -1,52 +1,63 @@
 {
   "schema_version": 1,
-  "work_issue": 2664,
-  "generation": 4,
-  "work_type": "structural",
+  "work_issue": 2781,
+  "generation": 1,
+  "work_type": "tooling",
   "route": "shared-db-orchestrator",
-  "goal": "One authenticated invoker-safe OrderList Find position lookup preserving full filtered/sorted-grid semantics.",
-  "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
-  "dispatcher": "Codex orchestrator marker2714",
-  "worker": "Codex issue2664 worker",
-  "branch": "codex/issue-2664-orderlist-find",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2664-orderlist-find",
+  "goal": "Keep reviewer approvals, guarded-merge freshness and production preview proofs valid across main refreshes that leave the pull request's own change untouched, while still refusing any overlap, conflict, version collision or change of the pull request's own diff.",
+  "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
+  "dispatcher": "Claude shared-db orchestrator marker2758",
+  "worker": "Claude approval-carry-forward worker",
+  "branch": "claude/approval-carry-over-main-refresh",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production-verification-sidecars/20260911081204.json",
-    "scripts/production_business_risk_gate.py"
+    ".github/workflows/migration-author-lease.yml",
+    "AGENTS.md",
+    "scripts/check-exact-head-approval.mjs",
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/check-main-tip-freshness.mjs",
+    "scripts/check-main-tip-freshness.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/lib/pr-content-equivalence.mjs",
+    "scripts/lib/pr-content-equivalence.test.mjs"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production-verification-sidecars/20260911081204.json",
-    "scripts/production_business_risk_gate.py"
+    ".github/workflows/migration-author-lease.yml",
+    "AGENTS.md",
+    "scripts/check-exact-head-approval.mjs",
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/check-main-tip-freshness.mjs",
+    "scripts/check-main-tip-freshness.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/lib/pr-content-equivalence.mjs",
+    "scripts/lib/pr-content-equivalence.test.mjs"
   ],
-  "db_reads": ["view api.dam_order_list"],
-  "db_writes": [
-    "function public.find_dam_order_list_row"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "No shared database writes, application changes, paid review or merge in this preparation."
+    "No shared database reads or writes, no production or preview apply, no migration files, no fabricated reviews."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "python scripts/test_order_list_find_position.py"
+    "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
+    "node --test scripts/check-exact-head-approval.test.mjs",
+    "node --test scripts/manage-migration-author-lanes.test.mjs"
   ],
   "assumptions": [
-    "Claim2747 reserves20260911081204 and exact function.",
-    "Live PopDAM helpers define normalized filters and sorts; duplicate2665 shares this contract.",
-    "Implementation committed and local synthetic contracts passed; draft2748 is held for parent priority work.",
-    "CI requires a hash-bound disposition for the runtime dynamic SELECT; it creates no additional durable catalog object and retains normal function/grant verification."
+    "The byte-level PR diff against its merge base, .agent evidence aside, is the right identity for an approved change.",
+    "A later sidecar of another migration version is not a producer for the promoted version unless their migrations share a schema-qualified object."
   ],
   "stop_conditions": [
-    "Object collision or missing material application contract.",
-    "Any authorization/filter/sort/search parity failure."
+    "Any required check fails.",
+    "A relaxation would accept a change of the pull request's own diff, an overlapping file, a migration version collision, a merge conflict, or a shared database object."
   ]
 }
