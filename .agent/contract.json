@@ -1,49 +1,50 @@
 {
   "schema_version": 1,
-  "work_issue": 2753,
   "generation": 3,
+  "work_issue": 2769,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Expose exact canonical ColdLion UUID and source identity for the PIM item picker without changing compatibility views.",
-  "base_sha": "d530f85bc54d2b3c1f3ac52fcb9ee8d57c17fe3e",
-  "dispatcher": "Codex orchestrator marker2714",
-  "worker": "Codex issue2753 worker",
-  "branch": "codex/issue-2753-pim-item-picker",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2753-pim-item-picker",
+  "goal": "Restrict EXECUTE on public.queue_nightly_rebuild_style_groups() so PUBLIC, anon and authenticated cannot run the #2440 rebuild-queue function; keep service_role and postgres (the cron caller).",
+  "base_sha": "b68a1900a6c287bd16adcbdacc8a3e4a8db543b1",
+  "dispatcher": "Claude orchestrator #2758",
+  "worker": "claude-2758-2769",
+  "branch": "claude/issue-2769-rebuild-queue-grants",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2769",
   "allowed_paths": [
+    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
-    "supabase/tests/pim_item_picker_contract.sql",
-    "scripts/test_pim_item_picker.py"
+    ".agent/completion.json"
   ],
   "file_writes": [
+    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
-    "supabase/tests/pim_item_picker_contract.sql",
-    "scripts/test_pim_item_picker.py"
+    ".agent/completion.json"
   ],
-  "db_reads": [
-    "table plm.item"
-  ],
+  "db_reads": [],
   "db_writes": [
-    "view api.pim_item_picker"
+    "function public.queue_nightly_rebuild_style_groups"
   ],
   "prohibited_actions": [
-    "No shared database writes, merges, main movement or paid review until parent coordination."
+    "No direct production DDL; production changes only through the governed promotion workflow.",
+    "No fabricated reviews or verdicts; no deleting locks, audit rows or history.",
+    "Do not touch #2705, #2709, #2290, #2678 or the #2543 residual."
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
-    "python scripts/test_pim_item_picker.py"
+    "git diff --check"
   ],
   "assumptions": [
-    "Claim2754 reserves20260911170650.",
-    "Existing authenticated plm.item policy and grants are retained through security_invoker.",
-    "The legacy21column item view remains unchanged."
+    "The only runtime caller is the nightly cron job running as postgres; no app (including popdam3) calls the function as anon or authenticated.",
+    "Revoking authenticated does not change the function body or its signature."
   ],
   "stop_conditions": [
-    "Object collision or canonical identity mismatch.",
-    "Inherited RLS or anonymous denial failure."
+    "An application caller that runs as anon or authenticated is found.",
+    "Exact object collision with another active claim."
   ]
 }
