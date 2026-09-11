@@ -1,4 +1,7 @@
--- derived-from: 20260906222338
+-- derived-from: none
+-- Self-contained replacement: pre-2355 production shape -> final contract is
+-- verified alongside historical-preview upgrade by the forward repair tests.
+-- The retired timestamp is provenance, not an execution prerequisite.
 -- Issue #2741; claim #2742. Reconcile the genuinely older preview body with
 -- the final reviewed #2355 contract; also closes the #2426 integrity gap.
 -- The old migration file is immutable here. No curated/source rows are rewritten.

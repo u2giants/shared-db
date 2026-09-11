@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 4,
+  "generation": 5,
   "work_issue": 2741,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -16,7 +16,8 @@
     ".agent/contract.json",
     ".agent/completion.json",
     "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py"
+    "scripts/test_production_migration_guard.py",
+    "scripts/test_post_batch_app_verification.py"
   ],
   "file_writes": [
     "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
@@ -24,7 +25,8 @@
     ".agent/contract.json",
     ".agent/completion.json",
     "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py"
+    "scripts/test_production_migration_guard.py",
+    "scripts/test_post_batch_app_verification.py"
   ],
   "db_reads": [
     "table core.licensor",
@@ -69,12 +71,12 @@
   "required_checks": [
     "bash scripts/check-sql.sh",
     "git diff --check",
-    "python -m unittest scripts/test_production_migration_guard.py -q"
+    "python -m unittest discover -s scripts -p test_*.py -q"
   ],
   "assumptions": [
     "Old preview applied67dc237a body; final reviewed2355 bodycb7bf087 differs.",
     "Only legacy generated is_current=(missing_since IS NULL) may be removed RESTRICT; all independently held rows remain untouched.",
-    "Existing HARD_BLOCKED/RETIRED_VERSION_REASONS policy retains oldhistory and permits only newforwardversion; standaloneheader waits actualpre2355shape proof."
+    "Existing retirement policy retains oldhistory and permits only newforwardversion; CI34573081462 proves standaloneconstruction frompre2355shape withoutoldmigration."
   ],
   "stop_conditions": [
     "Unexpected legacy column definition or dependent consumer.",

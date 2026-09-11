@@ -299,6 +299,11 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(parse_allowlist("20260911063554"), ["20260911063554"])
         for applied in (set(), {"20260906222338"}):
             self.assertEqual(classify_pending_version("20260906222338", applied, REPO)["kind"], "retired")
+        self.assertEqual(classify_pending_version("20260911063554", set(), REPO)["kind"], "genuinely-pending")
+        import hashlib
+        original = REPO / "supabase/migrations/20260906222338_core_character_alias_and_source_provenance.sql"
+        self.assertEqual(hashlib.sha256(original.read_text(encoding="utf-8").encode()).hexdigest(),
+                         "cb7bf087c6fd2eb2c21faaee786bdf8103ca8cf9f7bed37af0da2367f8c9d438")
 
     def test_stranded_coldlion_division_reissue_is_byte_identical(self) -> None:
         """The reissue is only safe because it is the SAME executable SQL.
