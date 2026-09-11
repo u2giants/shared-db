@@ -58,17 +58,26 @@ export function buildOrchestratorSnapshot(input, { capturedAt } = {}) {
   }
 }
 
-export function verifyOrchestratorSnapshot(snapshot, currentInput) {
-  requireObject(snapshot, 'snapshot')
+function validateSnapshotSeal(snapshot, label = 'snapshot') {
+  requireObject(snapshot, label)
   if (snapshot.schema_version !== ORCHESTRATOR_SNAPSHOT_SCHEMA_VERSION) {
-    throw new OrchestratorSnapshotError('snapshot schema version is unsupported')
+    throw new OrchestratorSnapshotError(`${label} schema version is unsupported`)
   }
+  if (typeof snapshot.captured_at !== 'string' || Number.isNaN(Date.parse(snapshot.captured_at))) {
+    throw new OrchestratorSnapshotError(`${label} captured_at must be an ISO instant`)
+  }
+  const state = snapshotInputs(snapshot.state)
+  const sealedDigest = sha256(canonicalJson(state))
+  if (snapshot.snapshot_id !== snapshot.state_digest || snapshot.state_digest !== sealedDigest) {
+    throw new OrchestratorSnapshotError(`${label} seal is invalid`)
+  }
+  return sealedDigest
+}
+
+export function verifyOrchestratorSnapshot(snapshot, currentInput) {
+  validateSnapshotSeal(snapshot)
   const current = snapshotInputs(currentInput)
   const currentDigest = sha256(canonicalJson(current))
-  const sealedDigest = sha256(canonicalJson(snapshot.state))
-  if (snapshot.snapshot_id !== snapshot.state_digest || snapshot.state_digest !== sealedDigest) {
-    throw new OrchestratorSnapshotError('snapshot seal is invalid')
-  }
   if (currentDigest !== snapshot.state_digest) {
     throw new OrchestratorSnapshotError(`snapshot is stale: current state digest is ${currentDigest}`)
   }
@@ -76,8 +85,8 @@ export function verifyOrchestratorSnapshot(snapshot, currentInput) {
 }
 
 export function transitionNotification(previousSnapshot, nextSnapshot) {
-  requireObject(previousSnapshot, 'previous snapshot')
-  requireObject(nextSnapshot, 'next snapshot')
+  validateSnapshotSeal(previousSnapshot, 'previous snapshot')
+  validateSnapshotSeal(nextSnapshot, 'next snapshot')
   if (previousSnapshot.snapshot_id === nextSnapshot.snapshot_id) return null
   const notification = {
     event_type: 'orchestrator_state_changed',

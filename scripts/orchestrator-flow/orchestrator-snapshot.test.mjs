@@ -92,6 +92,33 @@ test('unchanged state produces no notification and a transition wakes once', () 
   assert.match(notification.event_id,/^[0-9a-f]{64}$/)
 })
 
+test('forged equal previous snapshot id cannot suppress a real transition', () => {
+  const previous = buildOrchestratorSnapshot(input())
+  const changed = input()
+  changed.eligible_queue.push({ issue: 31, priority: 4 })
+  const next = buildOrchestratorSnapshot(changed)
+  previous.snapshot_id = next.snapshot_id
+  previous.state_digest = next.snapshot_id
+  assert.throws(() => transitionNotification(previous, next), /previous snapshot seal is invalid/)
+  assert.throws(() => publishSnapshotTransition(changed, { previousSnapshot: previous, publish: () => assert.fail('must not publish') }), /previous snapshot seal is invalid/)
+})
+
+test('corrupt previous snapshot state refuses before publication', () => {
+  const previous = buildOrchestratorSnapshot(input())
+  previous.state.claims = null
+  const changed = input()
+  changed.claims.push({ issue: 99, writes: ['core.z'] })
+  let published = false
+  assert.throws(() => publishSnapshotTransition(changed, { previousSnapshot: previous, publish: () => { published = true } }), /claims must be an array/)
+  assert.equal(published, false)
+})
+
+test('capture-time-only differences are not a state transition', () => {
+  const previous = buildOrchestratorSnapshot(input(), { capturedAt: '2026-09-11T17:00:00Z' })
+  const next = buildOrchestratorSnapshot(input(), { capturedAt: '2026-09-11T18:00:00Z' })
+  assert.equal(transitionNotification(previous, next), null)
+})
+
 test('unroutable marker and unreadable collections fail closed', () => {
   const missingRoute = input()
   missingRoute.marker.route_id = ''
