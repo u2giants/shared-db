@@ -1,5 +1,6 @@
 -- Issue #2753: exact canonical identity for the existing PIM product item FK.
 -- The compatibility ID in api.plm_item_list must not be used for this purpose.
+-- derived-from: none
 begin;
 
 create view api.pim_item_picker
