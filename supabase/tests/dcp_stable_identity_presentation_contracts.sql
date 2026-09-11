@@ -153,8 +153,8 @@ begin
   -- the existing signed studio assertion belonging to this stable identity.
   insert into plm.dcp_opa_property_resolution(source_system,source_table,source_property_id,
     decision_version,approval_status,evidence_reference,evidence_sha256,decision_reason,approved_at,approved_by)
-  values('lucasfilm_dcpvault','plm.lucasfilm_dcp_property',k||'-studio',2,'approved',
-    'synthetic-2706-studio-copy',repeat('c',64),'synthetic member-equivalent copy',now(),'contract')
+  values('lucasfilm_dcpvault','plm.lucasfilm_dcp_property',k||'-studio',1,'approved',
+    'synthetic-2706-studio-copy',repeat('c',64),'synthetic member-equivalent copy',now()+interval '1 second','contract')
   returning resolution_id into conflict_id;
   insert into plm.dcp_opa_property_resolution_member(resolution_id,licensed_property_id,
     member_ordinal,submission_source_system,submission_source_table,submission_source_id)
@@ -173,7 +173,7 @@ begin
   insert into plm.dcp_opa_property_resolution(source_system,source_table,source_property_id,
     decision_version,supersedes_resolution_id,approval_status,evidence_reference,evidence_sha256,decision_reason,
     contract_asserted_studio_code,contract_evidence_reference,contract_evidence_sha256,approved_at,approved_by)
-  values('lucasfilm_dcpvault','plm.lucasfilm_dcp_property',k||'-studio',3,conflict_id,'approved',
+  values('lucasfilm_dcpvault','plm.lucasfilm_dcp_property',k||'-studio',2,conflict_id,'approved',
     'synthetic-2706-studio-conflict',repeat('d',64),'synthetic conflicting signed studio',
     'lucasfilm','synthetic-contract-conflict',repeat('e',64),now(),'contract')
   returning resolution_id into conflict_id;
