@@ -115,10 +115,16 @@ export function assertPrCarriesStructuralChange(prFiles = []) {
   if (!migrations.length) {
     throw new AdmissionError('the pull request contains no added or modified migration, so its actual change is not structural')
   }
-  for(const file of migrations){
-    if(typeof file.content!=='string')throw new AdmissionError(`migration ${file.filename??file.path} content is unreadable; structural admission refuses filename-only evidence`)
-  }
-  const ddl=inventoryDdlVerbs(migrations.map((file)=>file.content))
+  const proposedSql=migrations.map((file)=>{
+    const name=file.filename??file.path
+    if(file.status==='added'){
+      if(typeof file.content!=='string')throw new AdmissionError(`migration ${name} content is unreadable; structural admission refuses filename-only evidence`)
+      return file.content
+    }
+    if(typeof file.patch!=='string')throw new AdmissionError(`migration ${name} patch is unreadable; structural admission refuses full-file evidence for a modified migration`)
+    return file.patch.split(/\r?\n/).filter((line)=>line.startsWith('+')&&!line.startsWith('+++')).map((line)=>line.slice(1)).join('\n')
+  })
+  const ddl=inventoryDdlVerbs(proposedSql)
   if(!ddl.length)throw new AdmissionError('the pull request migration files contain no statement-leading schema DDL, so the actual change is not structural')
   const ambiguous=ddl.filter((row)=>!row.acknowledged)
   if(ambiguous.length)throw new AdmissionError(`the pull request contains unmodelled DDL (${ambiguous.map((row)=>row.verb).join(', ')}); structural admission fails closed`)
