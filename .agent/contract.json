@@ -29,6 +29,7 @@
     "scripts/orchestrator-flow/outcome-lifecycle.mjs",
     "scripts/orchestrator-flow/reconcile.mjs",
     "scripts/orchestrator-flow/reconcile.test.mjs",
+    "scripts/test_production_owner_decision_evidence.py",
     "scripts/test_production_migration_guard.py"
   ],
   "file_writes": [
@@ -51,6 +52,7 @@
     "scripts/orchestrator-flow/outcome-lifecycle.mjs",
     "scripts/orchestrator-flow/reconcile.mjs",
     "scripts/orchestrator-flow/reconcile.test.mjs",
+    "scripts/test_production_owner_decision_evidence.py",
     "scripts/test_production_migration_guard.py"
   ],
   "db_reads": [],
@@ -64,6 +66,7 @@
     "git diff --check",
     "node --test scripts/agent-work-contract.test.mjs",
     "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
+    "python -m unittest scripts.test_production_owner_decision_evidence",
     "python -m unittest scripts.test_production_migration_guard",
     "node scripts/check-throughput-truth-audit.mjs",
     "node scripts/check-github-transport-conformance.mjs"
@@ -87,12 +90,13 @@
     "Generation 39 repairs workflow execution at 6f8b4b15: only admission-calling workflows receive issues write so validated merge-closed issues can reopen, and standalone PR-backed admission uses the same bounded legacy policy as resolver and acquisition paths.",
     "Generation 40 refreshes the completed repair onto current main 3ff51ae8; only the evidence pair conflicted, and all admission, permission, unlimited-lane, disabled-reviewer-queue, and no-Step-7 guarantees remain intact.",
     "Generation 41 repairs effective job permissions at 66b9ca83 and seals the effective-scope regression at 590eb037: preview and production-apply explicitly retain issues write despite job-level overrides, and the Python permission regression is included in the sealed work scope.",
-    "Generation 42 refreshes the completed repair onto current main 9ea5c664; only the sealed evidence pair conflicted, and every substantive file merged without conflict."
+    "Generation 42 refreshes the completed repair onto current main 9ea5c664; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
+    "Generation 43 aligns the existing production-owner permission regression with the required effective production-apply issues write scope while preserving production-apply-review as read-only."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 42
+  "generation": 43
 }
