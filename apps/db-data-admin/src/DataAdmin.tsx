@@ -321,7 +321,7 @@ export function DataAdmin({ client, email, environmentLabel, onSignOut }: Props)
       <button className={section === 'entity' && kind === 'customer' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('customer') }}>Customers</button>
       <button className={section === 'entity' && kind === 'vendor' ? 'active' : ''} onClick={() => { setSection('entity'); setKind('vendor') }}>Vendors</button>
       <button className={section === 'scraped-property' ? 'active' : ''} onClick={() => setSection('scraped-property')}>Scraped Properties</button>
-      <button className={section === 'property-match' ? 'active' : ''} onClick={() => setSection('property-match')}>Property Matches</button>
+      <button className={section === 'property-match' ? 'active' : ''} onClick={() => setSection('property-match')}>Property Matching</button>
       <button className={section === 'product-depth' ? 'active' : ''} onClick={() => setSection('product-depth')}>Product Depth</button>
       <button className={section === 'property-status' ? 'active' : ''} onClick={() => setSection('property-status')}>Property Status</button>
     </nav>

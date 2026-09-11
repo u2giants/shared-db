@@ -36,7 +36,10 @@ h1 { margin: 18px 0 12px; font-size: clamp(36px, 6vw, 62px); line-height: 1; let
 .grid-wrap { height: calc(100vh - 285px); min-height: 360px; background: #fff; border: 1px solid #ccd5e3; position: relative; } revo-grid { height: 100%; width: 100%; }
 .scraped-property-group { margin: 24px 0 32px; }
 .scraped-property-group h2 { margin-bottom: 4px; }
-.scraped-property-group .grid-wrap { height: 280px; min-height: 280px; }
+.scraped-inventory-section { margin: 16px 0 24px; }
+.scraped-inventory-section h3 { margin: 0 0 4px; }
+.scraped-inventory-section .grid-wrap { height: 280px; min-height: 280px; }
+.empty-inventory { padding: 16px; border: 1px dashed var(--border); border-radius: 8px; color: var(--muted); }
 .scraped-properties revo-grid .unmapped-creative-cell { background: #fff0f0; color: #8a1c1c; }
 revo-grid .inactive-property-cell { background: #f2f4f7; color: #838da0; }
 .property-status-target { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; padding: 10px 12px; background: #f5f7fb; border: 1px solid #dbe2ee; border-radius: 8px; }
