@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2781,
-  "generation": 2,
+  "generation": 3,
   "work_type": "tooling",
   "route": "shared-db-orchestrator",
   "goal": "Keep reviewer approvals, guarded-merge freshness and production preview proofs valid across main refreshes that leave the pull request's own change untouched, while still refusing any overlap, conflict, version collision or change of the pull request's own diff.",
-  "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
+  "base_sha": "2662aa1a114821e9f8917b3ec3fdfe3fdc10b636",
   "dispatcher": "Claude shared-db orchestrator marker2758",
   "worker": "Claude approval-carry-forward worker",
   "branch": "claude/approval-carry-over-main-refresh",
