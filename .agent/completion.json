@@ -8,6 +8,8 @@
   "contract_sha256": "c116551d0a1b126e51e3e017a581410a48a446b2936767c9a34f30cb01b96ded",
   "head_sha": "86ff7f45133a873653123d28c75b8281e75d1eb6",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "plan_author_lane_abandonment_lifecycle.md",
     "scripts/coordination-scenarios.test.mjs",
     "scripts/manage-migration-author-lanes.mjs",
