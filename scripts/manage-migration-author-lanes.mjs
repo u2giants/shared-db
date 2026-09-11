@@ -44,6 +44,7 @@ import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightwe
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
 import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
+import { isContentPreservingRefresh } from './lib/pr-content-equivalence.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // NO AUTHOR LANE CAP. The cap was three (2026-08-14), five (2026-08-25), eight
@@ -1645,6 +1646,15 @@ export const githubIo = {
     return ghJson(args)
   },
   mainSha() { return ghJson(['api', `repos/${REPO}/git/ref/heads/main`])?.object?.sha ?? null },
+  // Fetches the exact commits it compares, so a stale local checkout cannot answer.
+  // Any failure answers "not equivalent" and the exact-head rule stands.
+  contentPreservingRefresh(approvedHead,head){
+    try{
+      const main=this.mainSha();if(!/^[0-9a-f]{40}$/.test(String(main)))return{ok:false,reason:'main tip unreadable'}
+      execFileSync('git',['fetch','--no-tags','-q','origin',String(head),main],{stdio:['ignore','pipe','pipe']})
+      return isContentPreservingRefresh({approvedHead,head,mainRef:main})
+    }catch(error){return{ok:false,reason:`could not fetch the heads to compare: ${String(error?.message??error).split('\n')[0]}`}}
+  },
   getCommit(sha) { return ghJson(['api', `repos/${REPO}/git/commits/${sha}`]) },
   // ARGUMENT ORDER IS THE WHOLE CHECK. GitHub's compare endpoint is
   // `compare/{base}...{head}` and reports how HEAD relates to BASE. Passing the
@@ -3649,7 +3659,39 @@ export function headVerdictBlocksReplacement(issue,pr,headSha,io,options={}){
   })
 }
 
+// A MERGE FROM MAIN DOES NOT VOID AN APPROVAL (orchestrator marker #2758). The
+// same rule `evaluateApprovalWithRefresh` applies at the merge gate: an APPROVE
+// that fully satisfies an earlier head A stands for head B when A is an ancestor
+// of B and the pull request's own diff is identical at both (`.agent/` aside).
+// A refusal at B, or at any content-identical earlier head, still blocks. With no
+// `io.contentPreservingRefresh` nothing is carried.
 export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
+  const head=String(headSha).toLowerCase()
+  try{return assertExactDurableReviewApproval(issue,pr,head,io)}catch(exactError){
+    if(!(exactError instanceof LaneError)||typeof io.contentPreservingRefresh!=='function')throw exactError
+    if(/durable reviewer refusal/.test(exactError.message))throw exactError
+    // A head with reviewer records of its own (assignment, replacement, return or
+    // verdict) is judged on those alone: carrying a prior head's sign-off past
+    // them would bypass a slot returned or newly drawn here (muse review, #2780).
+    const own=[REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_RETURN_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX].flatMap((p)=>io.listRefs(`${p}/${Number(issue)}-${Number(pr)}-${head}`)??[])
+    if(own.length)throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because this head has reviewer records of its own (assignment, return or verdict), so it is judged on those alone`)
+    const prefix=(p)=>`${p}/${Number(issue)}-${Number(pr)}-`
+    // Prior heads come from verdicts and returns too, not only live assignments:
+    // an exclusion clears a refused head's assignment and leaves its verdict,
+    // and that refusal must still block (grok review of PR #2780).
+    const priors=[...new Set([REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_RETURN_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX].flatMap((p)=>(io.listRefs(prefix(p))??[]).map(({ref})=>new RegExp(`^${Number(issue)}-${Number(pr)}-([0-9a-f]{40})`).exec(String(ref).slice(p.length+1))?.[1])).filter(Boolean))].filter((sha)=>sha!==head)
+    const equivalent=priors.filter((sha)=>io.contentPreservingRefresh(sha,head)?.ok===true)
+    for(const sha of equivalent){
+      let rows
+      try{rows=readReviewVerdicts(issue,pr,sha,io)}catch(error){throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because the reviewer records at head ${sha}, whose pull request diff is identical to this head, could not be read: ${error?.message??error}`)}
+      if(rows.some((row)=>row.verdict!=='APPROVE'))throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because head ${sha}, whose pull request diff is identical to this head, carries a durable reviewer refusal`)
+    }
+    for(const sha of equivalent){try{return assertExactDurableReviewApproval(issue,pr,sha,io)}catch(error){if(!(error instanceof LaneError))throw error}}
+    throw exactError
+  }
+}
+
+function assertExactDurableReviewApproval(issue,pr,headSha,io){
   const head=String(headSha).toLowerCase(),allVerdicts=readReviewVerdicts(issue,pr,head,io,{includeDisregarded:true})
   const disregarded=allVerdicts.filter((row)=>row.disregarded),verdicts=allVerdicts.filter((row)=>!row.disregarded)
   // #2079. A verdict recorded before the write-side guard existed, by a reviewer

@@ -163,6 +163,40 @@ test('durable preview approval rejects an older slot verdict after replacement',
   assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 has no durable APPROVE for its latest exact-head assignment/)
 })
 
+// APPROVAL CARRY-FORWARD AT THE PREVIEW GATE (#2758): the same rule as the merge gate.
+test('#2758: durable approval at a prior head carries to a content-identical refreshed head',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40),calls=[]
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,fixture.io))
+  const verdicts=assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,contentPreservingRefresh:(a,b)=>{calls.push([a,b]);return{ok:true}}})
+  assert.equal(verdicts.filter((row)=>row.verdict==='APPROVE').length,3)
+  assert.deepEqual(calls,[[fixture.headSha,refreshed]])
+})
+
+test('POSITIVE CONTROL #2758: a refreshed head whose PR diff changed is not carried',()=>{
+  const fixture=durableApprovalFixture()
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,'c'.repeat(40),{...fixture.io,contentPreservingRefresh:()=>({ok:false,reason:'diff changed'})}))
+})
+
+test('POSITIVE CONTROL #2758: a prior head known only by its verdict is inspected before any carry',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40),orphan=`refs/db-review-verdicts/${fixture.issue}-${fixture.pr}-${'d'.repeat(40)}`
+  const listRefs=(prefix)=>[...fixture.io.listRefs(prefix),...(orphan.startsWith(prefix)?[{ref:orphan,sha:'5'.repeat(40)}]:[])]
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,listRefs,contentPreservingRefresh:()=>({ok:true})}),/could not be read|durable reviewer refusal/)
+})
+
+test('POSITIVE CONTROL #2758: a refreshed head with an assignment of its own is never carried past',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40)
+  const listRefs=(prefix)=>prefix===`${REVIEW_ASSIGNMENT_REF_PREFIX}/${fixture.issue}-${fixture.pr}-${refreshed}`?[{ref:prefix,sha:'1'.repeat(40)}]:fixture.io.listRefs(prefix)
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,listRefs,contentPreservingRefresh:()=>({ok:true})}),/reviewer records of its own/)
+})
+
+test('POSITIVE CONTROL #2758: a refreshed head with a return of its own is never carried past',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40)
+  const returned='2'.repeat(40),returnSha='6'.repeat(40)
+  const listRefs=(prefix)=>`${REVIEW_RETURN_REF_PREFIX}/${fixture.issue}-${fixture.pr}-${refreshed}`.startsWith(prefix)&&prefix.includes(refreshed)?[{ref:`${REVIEW_RETURN_REF_PREFIX}/${fixture.issue}-${fixture.pr}-${refreshed}-${returned}`,sha:returnSha}]:fixture.io.listRefs(prefix)
+  const getCommit=(sha)=>sha===returnSha?{message:`db-coordination reviewer-return reviewer=kimi-k3 issue=${fixture.issue} pr=${fixture.pr} head=${refreshed} slot=1 assignment=${returned} sequence=1 reason=independence-conflict`}:fixture.io.getCommit(sha)
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,listRefs,getCommit,contentPreservingRefresh:()=>({ok:true})}),/reviewer records of its own/)
+})
+
 // THE MULTI-SLOT RETURN HOLE (grok-4.6 review of PR #2077, high finding 2).
 //
 // Dropping a returned assignment from the gate is fail-CLOSED with one slot --
