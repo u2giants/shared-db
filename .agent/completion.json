@@ -1,59 +1,56 @@
 {
   "schema_version": 1,
-  "work_issue": 2493,
+  "work_issue": 2501,
   "outcome": "ready-for-merge",
-  "pr": 2526,
+  "pr": 2734,
   "migration_versions": [
-    "20260911045438"
+    "20260911052640"
   ],
-  "contract_ref": "refs/db-contracts/2493/3",
-  "contract_sha256": "c39be8af16a8dd521e2565d1d065d9850dae47d407387fd1f9397402541b579e",
-  "head_sha": "3ddbf9eff36d3d8941944218b659249e892e2616",
+  "contract_ref": "refs/db-contracts/2501/6",
+  "contract_sha256": "affb9f334836539d450964444757893eefe85031b54f1c776f78a357c239f5a3",
+  "head_sha": "76dbba1ed2f4c9c0b18da85fa017b718ca1cdd6e",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "scripts/production-verification-sidecars/20260911045438.json",
-    "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
-    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql",
+    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
   ],
   "db_reads": [
-    "table core.property",
-    "table core.character",
-    "table core.style_guide",
-    "table dam.asset",
-    "table core.licensor",
-    "table core.franchise",
-    "table plm.source_resolution",
-    "function plm.set_source_resolution",
-    "function api.set_source_resolution"
+    "table public.asset_effective_tags",
+    "table public.style_groups",
+    "table public.admin_config"
   ],
   "db_writes": [
-    "function plm.source_resolution_target_missing",
-    "view api.source_resolution"
+    "function public.filter_effective_assets",
+    "function public.get_effective_filter_counts_unchecked_1703",
+    "index public.idx_assets_tag_visible_facets",
+    "index public.idx_assets_tag_pending_facets",
+    "table public.assets",
+    "index public.idx_assets_tag_rls_visible_ids"
   ],
   "checks": [
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors after normal integration of current main fe5fa74db889652768029116e636f8cbe69b955e."
+      "evidence": "No whitespace errors."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs",
+      "command": "synthetic PostgreSQL parity and index-only plan test",
       "exit_code": 0,
-      "evidence": "Hash-bound sidecar validation succeeded: status OK, 45 sidecars."
+      "evidence": "Owned PostgreSQL18 fixture on localhost55486:40000 wide assets,327680000-byte heap,3964928-byte three-index footprint.16 scenarios preserved exact counts,IDs,legacy and own-facet maps. Actual production SELECT policies reproduced under authenticated role; prepared force_generic_plan tagcount33.502ms with narrow indexes. New rollback eligibility test and catalog guards passed. This is diagnostic mechanism proof, not production acceptance."
     },
     {
-      "command": "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
+      "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "Retained synthetic PostgreSQL 17 container database case2493runtime; all assertions passed at line 653 and rolled back, including five/seven-argument helper behavior, ten/twelve-argument setter compatibility, six-kind existing/missing/null targets, authenticated reads, dangling visibility, and anonymous denial."
+      "evidence": "Database Contract Tests run34567517090 completed success at exact implementation76dbba1ed2f4c9c0b18da85fa017b718ca1cdd6e; every migration and every supabase/tests SQL test passed, including authenticated prepared tag access and non-DAM denial."
     }
   ],
   "assumptions_resolved": [
-    "Inherited implementation retained; original work predates recovery contract publication.",
-    "Migration SHA256 remains 7cff10dcf68d2ba8993201790e8c276d517fd2410efa049e3e2026504abf6c50 after current-main integration.",
-    "Implementation is ready for coordinator review gates; independent exact-head review, fresh CI, preview and production/consumer acceptance remain pending and are not asserted by this report."
+    "Production qsllyeztdwjgirsysgai target verified read-only; underlying blue count timed out at8s and showed primary-key heap lookups into2.12GBassets. Existing tag RLS requires visible asset existence; policy bytes remain unchanged.",
+    "Simple tag/facet-only requests have guarded narrow generic-plan arms; other filters retain complete original fallback. Existing API eight-second configurations remain unchanged.",
+    "Ordinary atomic index builds use lock_timeout2s and statement_timeout30s per build. Three full heap passes may hold write-blocking locks for roughly90s; preview must measure actual build duration. No concurrent/ad-hoc production DDL.",
+    "Applied migration bytes preserved. Parent owns final-main integration,one independent exact-head review,guarded merge,preview,production and real authenticated acceptance."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Historical runtime evidence retained. Final reconciliation incorporates main f3eff56d and supported version supersession; SQL bytes remain unchanged. Fresh CI and one independent exact-head review required."
+  "evidence_note": "Implementation is tested. Final-main reviewer approval and real shared-target performance acceptance remain pending, not asserted by this completion record."
 }

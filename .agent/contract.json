@@ -1,63 +1,58 @@
 {
   "schema_version": 1,
-  "work_issue": 2493,
+  "work_issue": 2501,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Recover inherited PR2526 under enforced contract governance, preserving its four-file implementation and adding six-kind helper and role runtime tests. This records prospective recovery authority; original implementation predates publication.",
-  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
-  "dispatcher": "codex shared-db orchestrator marker2714",
-  "worker": "codex finish_2493 successor",
-  "branch": "codex/issue-2493-source-resolution-new-kinds",
-  "worktree": "C:/repos/shared-db-worktrees/finish-2493-2714",
+  "goal": "Repair real cold authenticated blue tag facet/exact-list timeouts through narrow eligibility reads while preserving RLS, exact facet/count semantics and eight-second ceiling.",
+  "base_sha": "439beffc5970b60bc7e1c8e0445f892fae46f8a7",
+  "dispatcher": "codex orchestrator marker2714",
+  "worker": "codex-2714-2501-forward",
+  "branch": "codex/2501-forward-performance",
+  "worktree": "C:\\repos\\shared-db-worktrees\\2501-forward-performance",
   "allowed_paths": [
-    "scripts/production-verification-sidecars/20260911045438.json",
-    "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
-    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
+    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "scripts/production-verification-sidecars/20260911045438.json",
-    "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
-    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
   ],
   "db_reads": [
-    "table core.property",
-    "table core.character",
-    "table core.style_guide",
-    "table dam.asset",
-    "table core.licensor",
-    "table core.franchise",
-    "table plm.source_resolution",
-    "function plm.set_source_resolution",
-    "function api.set_source_resolution"
+    "table public.asset_effective_tags",
+    "table public.style_groups",
+    "table public.admin_config"
   ],
   "db_writes": [
-    "function plm.source_resolution_target_missing",
-    "view api.source_resolution"
+    "function public.filter_effective_assets",
+    "function public.get_effective_filter_counts_unchecked_1703",
+    "index public.idx_assets_tag_visible_facets",
+    "index public.idx_assets_tag_pending_facets",
+    "table public.assets",
+    "index public.idx_assets_tag_rls_visible_ids"
   ],
   "prohibited_actions": [
-    "Do not edit applied migration bytes.",
-    "Do not rewrite or retire either existing setter or five-argument helper.",
-    "No production or preview writes outside governed coordinator gates.",
-    "No merge or preview/production write by worker; parent orchestrator serializes those stages."
+    "No production or shared-preview writes by this worker.",
+    "Do not change existing migration bytes, timeout, RLS, filter semantics or exact counts.",
+    "No warm-only retry as acceptance."
   ],
   "required_checks": [
     "git diff --check",
-    "node scripts/check-production-verification-sidecars.mjs",
-    "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+    "synthetic PostgreSQL parity and index-only plan test",
+    "hosted ephemeral migration regression suite"
   ],
   "assumptions": [
-    "Inherited implementation and earlier test patch predate this recovery contract; no retrospective publication claim.",
-    "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record.",
-    "Generation 3 binds supported unapplied version supersession to 20260911045438 and final main reconciliation after PR2527. SQL bytes unchanged. Fresh hosted CI and one governed exact-head reviewer required."
+    "Current actual viewer failure is reproduced by underlying tag count timeout at8s.",
+    "Parent owns preview, merge, production and real authenticated acceptance."
   ],
   "stop_conditions": [
-    "Stop if migration bytes or setter definitions change.",
-    "Stop if test assertions fail.",
-    "Stop if scope extends beyond the four implementation files."
+    "Stop if exact count/filter/authorization parity changes.",
+    "Stop if narrow plan still requires broad heap payload reads."
   ],
-  "generation": 3
+  "generation": 6
 }
