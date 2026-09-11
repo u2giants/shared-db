@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911170526"
   ],
-  "contract_ref": "refs/db-contracts/2744/2",
-  "contract_sha256": "6db07986c7204048561950bcadb2ffaf06872e6da2003ba63129887ea23d0921",
-  "head_sha": "db2b97e0148bb5a3430f1adddca8b5d7b5d8f312",
+  "contract_ref": "refs/db-contracts/2744/3",
+  "contract_sha256": "95e988aebdfa68043007942d20457a3a815cd94b6adfce1f79398cb17c30b095",
+  "head_sha": "faf7642d1629a78a60a47678c6bf3a04ff3bf0ea",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
