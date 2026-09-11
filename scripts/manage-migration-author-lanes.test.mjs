@@ -2403,6 +2403,10 @@ test('a reviewer draw retries only a briefly occupied review mutex',()=>{
   assert.ok(waits[0]>=300000,'lock-contention retry waits at least five minutes')
   const io2=reviewIo();io2.enableReviewerQueue=false;io2.getPr=()=>({number:313,state:'open',head:{sha:request.headSha}});io2.createRef=(ref,sha)=>ref===MUTEX_REF?false:true
   assert.throws(()=>assignWithMutexRetry(request,io2,{attempts:3,wait:()=>{}}),/is occupied/)
+  const io3=reviewIo();io3.enableReviewerQueue=false
+  const waits3=[]
+  assert.throws(()=>assignWithMutexRetry({...request,headSha:'not-a-sha'},io3,{attempts:3,wait:(ms)=>waits3.push(ms)}),(error)=>!/is occupied/.test(error.message))
+  assert.equal(waits3.length,0,'a failure other than mutex occupation is never retried')
 })
 
 test('capacity report distinguishes an unreadable verdict from no verdict and keeps the other rows visible (issue #2157)',()=>{

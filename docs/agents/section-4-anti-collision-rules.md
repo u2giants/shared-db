@@ -48,7 +48,7 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
 
    Allocation is serialized across computers by a GitHub-backed lock. The command
    fails closed if claims are unreadable, objects overlap an open claim or pull
-   request, GitHub is unavailable, version reservation fails, or eight active-author
+   request, GitHub is unavailable, version reservation fails, or twenty-four active-author
    leases are occupied. Older claims protect objects until explicitly released;
    only a guarded capacity relinquishment removes their author-slot use.
    The created issue body is authoritative and machine-readable. Never hand-edit
@@ -227,7 +227,7 @@ summary and points here; where the two differ in wording, `AGENTS.md` wins.
    only the status after Albert answers can never change its owner route.
 
    Exact object overlap forms a serial queue; unrelated object
-   groups fill up to eight active-author slots. A relinquished claim stays visible
+   groups fill up to twenty-four active-author slots. A relinquished claim stays visible
    in its collision component without occupying a slot. When capacity releases, rerun the queue
    audit and dispatch every reported `REFILL REQUIRED NOW` issue in the same
    turn. Never wait for Albert to ask or approve routine dispatch. Ask him only

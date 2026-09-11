@@ -53,11 +53,11 @@ export const REPO = 'u2giants/shared-db'
 // acquisition mutex (`MUTEX_REF`), permanent per-version refs
 // (`refs/db-claims/<version>`), and the exclusive single-holder stage refs in
 // `EXCLUSIVE_REFS`. Preview, guarded merge and production stay strictly serial
-// at eight lanes exactly as they were at three -- more authors never means more
-// sessions touching a live database.
+// at twenty-four lanes exactly as they were at three -- more authors never means
+// more sessions touching a live database.
 //
-// WHAT THE RAISE ACTUALLY COSTS. Downstream capacity, not correctness. Eight
-// authors finishing together queue in front of the single preview stage. The
+// WHAT THE RAISE ACTUALLY COSTS. Downstream capacity, not correctness. Up to
+// twenty-four authors finishing together queue in front of the single preview stage. The
 // owner approved six active reviewers, including Codex GPT-5.6 Sol and DeepSeek,
 // before this cap was activated. DeepSeek was retired on 2026-09-01 (#2078),
 // leaving five; the cap is unaffected -- it bounds authors, not reviewers. Ref writes are ~6/hour per lane, so eight lanes
