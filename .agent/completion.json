@@ -1,57 +1,39 @@
 {
   "schema_version": 1,
-  "work_issue": 2703,
+  "work_issue": 2769,
   "outcome": "ready-for-merge",
-  "pr": 2740,
+  "pr": 2776,
   "migration_versions": [
-    "20260911061539"
+    "20260911145659"
   ],
-  "contract_ref": "refs/db-contracts/2703/6",
-  "contract_sha256": "89e5ad2bb883f83f248226b378df039b9836eb1877df7ecbc8e53f8bae509919",
-  "head_sha": "bb8dcce7440e323e5dc2097778539d2d92a106cd",
+  "contract_ref": "refs/db-contracts/2769/1",
+  "contract_sha256": "a2439b7aec0caa3852426bf6d1f6fe956b478e65f43575963be09e153c1409de",
+  "head_sha": "dccca07b6b7164cc3eba61aed1f91b9213a11db1",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
-    "docs/business-rules/licensing-master-data.md",
-    "supabase/migrations/20260911061539_opa_route_compliance.sql",
-    "supabase/tests/opa_route_compliance_contracts.sql"
+    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
   ],
   "db_reads": [],
   "db_writes": [
-    "column plm.opa_property_scope_membership.compliance_status",
-    "function api.db_data_admin_scraped_properties",
-    "function plm.finalize_opa_property_compliance_capture",
-    "function plm.guard_opa_property_compliance_capture",
-    "function plm.guard_opa_property_compliance_membership",
-    "index plm.opa_compliance_capture_route_time_idx",
-    "index plm.opa_compliance_membership_capture_idx",
-    "table plm.opa_property_compliance_capture",
-    "table plm.opa_property_current_compliance",
-    "table plm.opa_property_scope_membership",
-    "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
-    "trigger opa_compliance_capture_truncate_guard on plm.opa_property_compliance_capture",
-    "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
-    "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
-    "view plm.opa_property_current_compliance"
+    "function public.queue_nightly_rebuild_style_groups"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards passed. No local disposable database configured; PR database CI remains required."
+      "evidence": "Run at dccca07b in C:/repos/shared-db-worktrees/issue-2769: 'Static checks passed.' No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "git diff --check b68a1900 dccca07b reported no whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "Exact route/account latest approved complete explicit observations define current rights; retained source identity is separate.",
-    "Private loader contract requires reviewed companion route/authentication proof; no rows loaded.",
-    "Final database CI and independent review remain required; production timeout investigation remains open before final review.",
-    "Initial database replay34569988648 passed; supported claim expansions account for GRANT view/table alias, column comment and explicit capture truncate guard."
+    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
+    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
+    "Disclosure: this contract was published after the implementation commit dccca07b, because the Agent work contract check flagged its absence; its content describes the work as claimed in #2774."
   ],
   "stop_conditions_hit": []
 }
