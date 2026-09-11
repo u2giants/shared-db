@@ -29,7 +29,10 @@ function validateCohort(cohort,outcomes,io){
   const expected=`sha256:${sha256(canonicalJson(identity))}`
   if(cohort.cohort_digest!==expected)throw new AcceptanceReportError('authoritative cohort digest does not match its exact identity')
   const authoritative=io.readCohortArtifact(cohort.source_evidence,cohort.artifact_id)
-  if(!authoritative||canonicalJson(authoritative)!==canonicalJson(identity)||`sha256:${sha256(canonicalJson(authoritative))}`!==cohort.cohort_digest)throw new AcceptanceReportError('authoritative cohort artifact readback does not match the claimed exact identity')
+  if(!authoritative||authoritative.source_evidence!==cohort.source_evidence||authoritative.artifact_id!==cohort.artifact_id||authoritative.ledger_head_sha!==cohort.ledger_head_sha||!authoritative.content||typeof authoritative.content!=='object')throw new AcceptanceReportError('authoritative cohort artifact readback does not match the requested source, id, or head')
+  if(`sha256:${sha256(canonicalJson(authoritative.content))}`!==cohort.artifact_digest)throw new AcceptanceReportError('authoritative cohort artifact digest does not match its canonical content')
+  const authoritativeIdentity={schema_version:authoritative.content.schema_version,source_evidence:authoritative.source_evidence,artifact_id:authoritative.artifact_id,artifact_digest:cohort.artifact_digest,ledger_head_sha:authoritative.ledger_head_sha,ordered_work_issues:authoritative.content.ordered_work_issues}
+  if(canonicalJson(authoritativeIdentity)!==canonicalJson(identity))throw new AcceptanceReportError('authoritative cohort artifact readback does not match the claimed exact identity')
   if(outcomes.some((row,index)=>row.issue!==cohort.ordered_work_issues[index]))throw new AcceptanceReportError('caller outcome order does not match the authoritative consecutive cohort')
   return identity
 }
@@ -44,13 +47,34 @@ function validateSamples(name,value){
 
 function boundDigest(value,keys){return `sha256:${sha256(canonicalJson(Object.fromEntries(keys.map((key)=>[key,value[key]]))))}`}
 
+function artifactFile(root,sourceEvidence,artifactId){
+  if(typeof root!=='string'||!path.isAbsolute(root))throw new AcceptanceReportError('trusted acceptance artifact root is not configured as an absolute path')
+  const key=sha256(canonicalJson({source_evidence:sourceEvidence,artifact_id:artifactId}))
+  const resolvedRoot=path.resolve(root),file=path.resolve(resolvedRoot,`artifact-${key}.json`)
+  if(!file.startsWith(`${resolvedRoot}${path.sep}`))throw new AcceptanceReportError('artifact path escaped the trusted acceptance root')
+  return file
+}
+
+function readTrustedArtifact(root,sourceEvidence,artifactId){
+  let value
+  try{value=JSON.parse(readFileSync(artifactFile(root,sourceEvidence,artifactId),'utf8'))}catch{throw new AcceptanceReportError(`trusted artifact ${artifactId} is unreadable`)}
+  if(value?.source_evidence!==sourceEvidence||value?.artifact_id!==artifactId||!SHA.test(value?.ledger_head_sha??'')||!value.content||typeof value.content!=='object'||Array.isArray(value.content))throw new AcceptanceReportError('trusted artifact does not return the requested source, id, head, and content')
+  return value
+}
+
+export function trustedArtifactReaders(root){return{
+  readCohortArtifact:(sourceEvidence,artifactId)=>readTrustedArtifact(root,sourceEvidence,artifactId),
+  readRefusalLedger:(sourceEvidence,artifactId)=>readTrustedArtifact(root,sourceEvidence,artifactId),
+}}
+
 function validateRefusalLedger(refusalLedger,refusalEvidence,io){
   if(typeof io?.readRefusalLedger!=='function')throw new AcceptanceReportError('authoritative refusal ledger reader is required')
   if(!refusalLedger||!EVIDENCE.test(refusalLedger.source_evidence??'')||!Number.isInteger(refusalLedger.artifact_id)||refusalLedger.artifact_id<1||!DIGEST.test(refusalLedger.artifact_digest??'')||!SHA.test(refusalLedger.ledger_head_sha??'')||!Number.isInteger(refusalLedger.count)||refusalLedger.count<1||!DIGEST.test(refusalLedger.set_digest??''))throw new AcceptanceReportError('authoritative refusal ledger identity is incomplete')
   const authoritative=io.readRefusalLedger(refusalLedger.source_evidence,refusalLedger.artifact_id)
-  if(!authoritative||authoritative.ledger_head_sha!==refusalLedger.ledger_head_sha||authoritative.artifact_digest!==refusalLedger.artifact_digest||!Array.isArray(authoritative.entries))throw new AcceptanceReportError('authoritative refusal ledger readback does not match its identity')
-  if(authoritative.entries.length!==refusalLedger.count||`sha256:${sha256(canonicalJson(authoritative.entries))}`!==refusalLedger.set_digest)throw new AcceptanceReportError('authoritative refusal ledger count or set digest does not match readback')
-  if(canonicalJson(authoritative.entries)!==canonicalJson(refusalEvidence))throw new AcceptanceReportError('refusal evidence is a filtered or changed subset of the authoritative refusal ledger')
+  if(!authoritative||authoritative.source_evidence!==refusalLedger.source_evidence||authoritative.artifact_id!==refusalLedger.artifact_id||authoritative.ledger_head_sha!==refusalLedger.ledger_head_sha||!authoritative.content||!Array.isArray(authoritative.content.entries))throw new AcceptanceReportError('authoritative refusal ledger readback does not match the requested source, id, or head')
+  if(`sha256:${sha256(canonicalJson(authoritative.content))}`!==refusalLedger.artifact_digest)throw new AcceptanceReportError('authoritative refusal ledger artifact digest does not match its canonical content')
+  if(authoritative.content.entries.length!==refusalLedger.count||`sha256:${sha256(canonicalJson(authoritative.content.entries))}`!==refusalLedger.set_digest)throw new AcceptanceReportError('authoritative refusal ledger count or set digest does not match readback')
+  if(canonicalJson(authoritative.content.entries)!==canonicalJson(refusalEvidence))throw new AcceptanceReportError('refusal evidence is a filtered or changed subset of the authoritative refusal ledger')
 }
 
 export function buildFiveOutcomeAcceptanceReport({outcomes,cohort,baseline,refusal_evidence=[],refusal_ledger},io={}){
@@ -85,5 +109,5 @@ export function buildFiveOutcomeAcceptanceReport({outcomes,cohort,baseline,refus
   return{schema_version:1,status:'accepted',cohort:{...cohortIdentity,cohort_digest:cohort.cohort_digest},sample:{n:rows.length,issues:cohort.ordered_work_issues},baseline:{n:baseline.n,samples:[...baseline.samples],median_request_to_live_minutes:baselineMedian},current:{n:rows.length,samples:currentSamples,median_request_to_live_minutes:currentMedian,improvement_percent:Number((improvement*100).toFixed(1))},outcomes:rows,refusal_evidence,exceptions:rows.flatMap((row)=>row.exceptions.map((value)=>({issue:row.issue,detail:value})))}
 }
 
-export function main(argv){const index=argv.indexOf('--input'),cohortIndex=argv.indexOf('--cohort-artifact'),refusalIndex=argv.indexOf('--refusal-ledger');if(index<0||!argv[index+1]||cohortIndex<0||!argv[cohortIndex+1]||refusalIndex<0||!argv[refusalIndex+1]){console.error('REFUSED: --input, --cohort-artifact, and --refusal-ledger files are required');return 2}try{const cohortArtifact=JSON.parse(readFileSync(argv[cohortIndex+1],'utf8')),refusalLedger=JSON.parse(readFileSync(argv[refusalIndex+1],'utf8'));console.log(JSON.stringify(buildFiveOutcomeAcceptanceReport(JSON.parse(readFileSync(argv[index+1],'utf8')),{readCohortArtifact:()=>cohortArtifact,readRefusalLedger:()=>refusalLedger}),null,2));return 0}catch(error){console.error(`REFUSED: ${error.message}`);return 2}}
+export function main(argv,{artifactRoot=process.env.DB_ACCEPTANCE_ARTIFACT_ROOT}={}){if(argv.length!==2||argv[0]!=='--input'||!argv[1]){console.error('REFUSED: exactly --input <five-outcome.json> is required; cohort and refusal paths come only from the trusted artifact store');return 2}try{console.log(JSON.stringify(buildFiveOutcomeAcceptanceReport(JSON.parse(readFileSync(argv[1],'utf8')),trustedArtifactReaders(artifactRoot)),null,2));return 0}catch(error){console.error(`REFUSED: ${error.message}`);return 2}}
 if(process.argv[1]&&path.resolve(process.argv[1])===fileURLToPath(import.meta.url))process.exitCode=main(process.argv.slice(2))
