@@ -95,6 +95,27 @@ export const REVIEW_RETURN_REF_PREFIX = 'refs/db-review-returns'
 export const REVIEW_RETIRED_VERDICT_REF_PREFIX = 'refs/db-review-retired-verdicts'
 export const REVIEW_ACTIVE_CUTOVER_REF = 'refs/db-coordination/reviewer-index-cutover'
 export const REVIEW_OPERATION_REQUEST_LIMIT = 25, REVIEW_MUTEX_SECTION_RESERVE = 15 // slot 2 = 10 pre-mutex + this reserve; slot 1 = 7 + reserve. RE-DERIVED, NOT WIDENED (issue #2075): every reviewer operation now proves 'a verdict exists for this head' from the create-only durable verdict refs instead of from comment prose. That costs exactly ONE listing of refs/db-review-verdict pre-mutex (cached for the rest of the operation by reviewOperationIo) and ONE uncached re-listing inside the mutex section, so each half grew by exactly one request. Measured totals moved 21->23 (slot-2 assignment), 18->20 (slot-2 replacement), and 8->9 pre-mutex for the first replacement, with the post-mutex replacement section going 10->11. Issue #2550 keeps this ceiling fixed by carrying predecessor failure refs in the replacement batch and treating absence in the complete active-lease snapshot as proved absence. The bounded per-PR exclusion read is inside the mutex so it cannot race assignment. This entry gate refuses to acquire the mutex unless the whole mutex-held section still fits. Release is guaranteed separately by cleanupReserve. Derivation: docs/verification/reviewer-assignment-api-budget-2026-08-28.md (#1812, #1833, #2550)
+// SILENT-RECLAIM BUDGET, DERIVED NOT WIDENED (issue #2697). `--reclaim-silent-reviewer`
+// was added after REVIEW_OPERATION_REQUEST_LIMIT was derived, and its request count was
+// never measured against it, so every reclaim refused at request 24 and a dead lease could
+// never be released. Measured on the wire-attempt fixture in
+// Initial current-key measurement in scripts/manage-migration-author-lanes.test.mjs:
+// 14 pre-mutex requests + a 14-request
+// mutex-held section (mutex create, in-mutex lease re-resolution, fresh activity
+// fingerprint, uncached durable-verdict re-listing, locked readback, atomic transition,
+// post-transition readback, and the 3-request mutex release) = 28 complete.
+// The one redundancy the measurement found was removed rather than paid for: the
+// post-mutex check read the PR fresh twice for the same PR in the same statement
+// (`__freshGetPr` plus `activityFingerprintForLease({freshPr:true})`). The PR state and
+// head now come from the fingerprint's own facts, which is 29 -> 28.
+// This path costs more than an assignment (23) because it proves the lease AND the
+// silence a second time inside the mutex; that re-proof is the whole safety property and
+// cannot be dropped. The ceiling is therefore this path's own measured total, not a
+// widening of the shared one, and the shared 25 is untouched.
+// Derivation: docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md (#2697)
+// Re-measured after #2694: current keys remain 28; legacy lookup under parallel mode
+// proves the absent v2 key twice, so legacy costs 30 (15 pre-mutex + 15 held).
+export const REVIEW_SILENT_RECLAIM_REQUEST_LIMIT = 30, REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE = 15
 export const REVIEW_QUEUE_ASSIGNMENT_REQUEST_LIMIT = 75
 export const REVIEW_CAPACITY_REQUEST_LIMIT = 64
 export const REVIEW_QUOTA_RESERVE = 100
@@ -1002,12 +1023,12 @@ function consumeReviewWireRequest(){
   if(!reviewWireBudget)return
   const limit=reviewWireBudget.limit??REVIEW_OPERATION_REQUEST_LIMIT
   const usable=reviewWireBudget.locked&&!reviewWireBudget.cleanup?limit-(reviewWireBudget.cleanupReserve??0):limit
-  if(reviewWireBudget.count>=usable)throw new LaneError(`reviewer operation request budget exhausted before request ${reviewWireBudget.count+1}`)
+  if(reviewWireBudget.count>=usable)throw new LaneError(`reviewer operation '${reviewWireBudget.operation??'reviewer-operation'}' exhausted its derived ${limit}-request budget before request ${reviewWireBudget.count+1}${usable!==limit?` (${limit-usable} held back as the mutex-release reserve)`:''}. This ceiling is DERIVED for this operation, not a global default: see the derivation cited beside its constant in scripts/manage-migration-author-lanes.mjs. Re-derive it from a written measurement rather than widening it (issue #2075)`)
   reviewWireBudget.count+=1
 }
-export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT){
+export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT,operation='reviewer-operation'){
   if(reviewWireBudget)return fn(reviewWireBudget)
-  reviewWireBudget={count:0,limit}
+  reviewWireBudget={count:0,limit,operation}
   try{return fn(reviewWireBudget)}finally{reviewWireBudget=null;reviewCommitBase=null;freshDurableVerdictRefs=null}
 }
 // Issue #2342: the retry loop, the classifier and the stderr policy now live in
@@ -3665,7 +3686,11 @@ function parseSilenceProbe(commit){
 function resolveSilentLease(options,io){
   const request={issue:Number(options.issue),pr:Number(options.pr),headSha:String(options.headSha??'').toLowerCase(),sequence:Number(options.failedSequence??options.sequence),slot:Number(options.slot??1)}
   if(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/.test(request.headSha)||!Number.isInteger(request.sequence)||!Number.isInteger(request.slot)||request.slot<1)throw new LaneError('silent reviewer operation requires exact issue, PR, 40-character head SHA, sequence, and review slot')
-  const original=resolveFailedReviewRecord({...request,failedSequence:request.sequence},io),leaseRef=resolveAssignmentLeaseRef({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha),io),leaseSha=io.readRef(leaseRef),leaseCommit=leaseSha?io.getCommit(leaseSha):null,lease=leaseCommit?parseReviewLease(leaseCommit):null
+  // Keep the chosen ref and its SHA from the same resolution snapshot. A second
+  // read paid twice and could change the chosen lease between identity and contents.
+  // This cache is local to this call; the in-mutex call always proves it afresh.
+  const refSnapshot=new Map(),resolutionIo={...io,readRef(ref){if(!refSnapshot.has(ref))refSnapshot.set(ref,io.readRef(ref));return refSnapshot.get(ref)}}
+  const original=resolveFailedReviewRecord({...request,failedSequence:request.sequence},io),leaseRef=resolveAssignmentLeaseRef({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha),resolutionIo),leaseSha=resolutionIo.readRef(leaseRef),leaseCommit=leaseSha?io.getCommit(leaseSha):null,lease=leaseCommit?parseReviewLease(leaseCommit):null
   if(!lease||lease.issue!==request.issue||lease.pr!==request.pr||lease.headSha!==request.headSha||lease.sequence!==request.sequence||lease.slot!==request.slot||lease.reviewer!==original.reviewer)throw new LaneError('silent reviewer active lease does not match the exact durable assignment')
   return {request,original,leaseRef,leaseSha,lease:{...lease,heldSince:leaseCommit?.committedDate??leaseCommit?.committer?.date??leaseCommit?.commit?.committer?.date??null}}
 }
@@ -3706,8 +3731,12 @@ function reclaimSilentReviewerOperation(options,now,io){
   const ownerSha=io.makeOwnerCommit(`db-coordination reviewer-silence-release-lock issue=${request.issue} pr=${request.pr} head=${request.headSha} sequence=${request.sequence}`)
   let acquired=false
   try{
+    requireReviewWireCapacity(REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE)
     acquireReviewMutex(ownerSha,io);acquired=true;requireOwnedRef(MUTEX_REF,ownerSha,io)
-    const current=resolveSilentLease(options,io),pr=io.__freshGetPr(request.pr),fresh=activityFingerprintForLease({...original,slot:request.slot},io,{freshPr:true})
+    // The fingerprint already reads the PR fresh (`freshPr`) and records its state and
+    // head in `facts`. Reading it fresh a second time here cost one request and could
+    // never disagree; issue #2697 removed it and the check now uses those facts.
+    const current=resolveSilentLease(options,io),fresh=activityFingerprintForLease({...original,slot:request.slot},io,{freshPr:true}),pr={state:fresh.facts.prState,head:{sha:fresh.facts.currentHead}}
     if(current.leaseSha!==leaseSha||pr?.state!=='open'||pr?.head?.sha!==request.headSha||hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true,slot:request.slot})||fresh.fingerprint!==probe.fingerprint)throw new LaneError('silent reviewer lease or activity changed after mutex acquisition')
     const locked=io.readReviewRefs([MUTEX_REF,releaseRef,leaseRef])
     if(locked.get(MUTEX_REF)!==ownerSha||locked.get(releaseRef)!==null||locked.get(leaseRef)!==leaseSha)throw new LaneError('silent reviewer reclaim ownership changed after preflight')
@@ -3719,7 +3748,7 @@ function reclaimSilentReviewerOperation(options,now,io){
 }
 
 
-export function reclaimSilentReviewer(options,now=new Date(),io=githubIo){return withReviewRequestBudget(()=>reclaimSilentReviewerOperation(options,now,io))}
+export function reclaimSilentReviewer(options,now=new Date(),io=githubIo){return withReviewRequestBudget(()=>reclaimSilentReviewerOperation(options,now,io),REVIEW_SILENT_RECLAIM_REQUEST_LIMIT,'reclaim-silent-reviewer')}
 
 function reviewerCapacityReportOperation(io,now){
   const busy=findBusyReviewers(io,[],{keepUnreadableLeases:true})
