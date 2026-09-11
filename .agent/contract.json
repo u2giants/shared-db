@@ -1,42 +1,49 @@
 {
   "schema_version": 1,
-  "work_issue": 2759,
+  "work_issue": 2772,
+  "generation": 1,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Exempt the non-required Documents-only merge authorization routing diagnostic from the guarded-merge committed-mirror preflight so code pull requests can merge again.",
-  "base_sha": "5eaebe7c09683aef77bdef92aec454af5dddf2cb",
+  "goal": "Let a merged low-risk migration promote to production on exact-head ephemeral database CI evidence instead of a shared-preview apply, keeping preview mandatory for high-risk SQL.",
+  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
   "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
   "worker": "Claude process-unblocking sub-agent of marker 2758",
-  "branch": "claude/fix-2759-docs-diagnostic-blocks-merge",
-  "worktree": "C:/repos/shared-db-worktrees/pr-2760",
+  "branch": "claude/production-without-preview",
+  "worktree": "C:/repos/shared-db-worktrees/preview-skip",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not modify a migration or any database state.",
-    "Do not exempt any context that appears in the required-checks mirror.",
-    "Do not claim an author lane, preview, or production lane."
+    "Do not apply any migration or run any production or preview database write.",
+    "Do not relax exact target proof, the production lane lock, review evidence, or post-apply verification.",
+    "Do not let the ephemeral route promote SQL the classifier cannot positively recognise as low-risk."
   ],
   "required_checks": [
     "git diff --check",
-    "node --test scripts/check-required-checks-preflight.test.mjs"
+    "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py"
   ],
   "assumptions": [
-    "Documents-only merge authorization is a routing diagnostic and is not a required status context in branch protection or the committed mirror."
+    "The required ephemeral database contract-test job applies every migration and records which applied, so its exact-head success is evidence the merged bytes apply cleanly."
   ],
   "stop_conditions": [
-    "Stop if implementation requires a database or production write.",
-    "Stop if the exemption would cover a context present in the required-checks mirror."
+    "Stop if the change requires a database write.",
+    "Stop if skipping preview would require weakening any production guard other than the preview-evidence input."
   ]
 }

@@ -1,32 +1,27 @@
 {
   "schema_version": 1,
-  "work_issue": 2759,
+  "work_issue": 2772,
   "outcome": "ready-for-merge",
-  "pr": 2760,
+  "pr": 2771,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2759/1",
-  "contract_sha256": "915f615a7aa3e69b1c1067a6d806983bb20cf73c253357d278aa608d11d5df18",
-  "head_sha": "443f8254cbdd138c65befcc3cdc90a6262e4e5d5",
+  "contract_ref": "refs/db-contracts/2772/1",
+  "contract_sha256": "8ca2f240877a09050eb8e0df29a3f6c0e6f93374b755310617cbdeb623dee931",
+  "head_sha": "4e653ad7e7cad8657d5f985ceeb3812d73e11d95",
   "files_changed": [
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors between base 5eaebe7c and implementation head 443f8254."
-    },
-    {
-      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
-      "exit_code": 0,
-      "evidence": "48 tests passed, 0 failed, 0 skipped at 443f8254."
-    }
+    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
+    {"command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py", "exit_code": 0, "evidence": "174 passed, 153 subtests passed."}
   ],
   "assumptions_resolved": [
-    "The exemption is filtered against the mirror, so a required context of the same name would still be enforced."
+    "The contract-test workflow now uploads applied-migrations.txt; runs from before this merge are refused, so preview stays required for them."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
