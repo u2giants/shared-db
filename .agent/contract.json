@@ -12,13 +12,15 @@
   "allowed_paths": [
     "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
     "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
     "scripts/production-verification-sidecars/20260911170526.json",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
     "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql"
   ],
   "db_reads": [
     "function api.db_data_admin_scraped_properties",
@@ -52,5 +54,5 @@
     "Stop if the result digest of the default page, Bambi or Cars 2 differs from the current body.",
     "Stop if the authenticated default listing does not finish under 8s on preview or production after apply."
   ],
-  "generation": 1
+  "generation": 2
 }
