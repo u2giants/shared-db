@@ -4,16 +4,17 @@
   "outcome": "ready-for-merge",
   "pr": 2695,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2694/3",
-  "contract_sha256": "501e4f8807d08ce84bc7cd79bea56e69369dd30457230079a54f1493d6f41d01",
-  "head_sha": "6da47f90e7de4904b63e2f1dc4df31ef39423f60",
+  "contract_ref": "refs/db-contracts/2694/4",
+  "contract_sha256": "e650622a8cb8971adcadb34f4e90895ebcc7e816c9621a5d40df5fe0da9dc55a",
+  "head_sha": "a65014230b4307ad5a8b213e1f767f500e756499",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/agents/section-4-anti-collision-rules.md",
     "plan_reviewer_lease_capacity_truth.md",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/record-review-verdict.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -21,12 +22,12 @@
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 502, pass 502, fail 0, skipped 0, todo 0. Against the pre-fix script restored with `git show a1d7f8c5efc7662a6df147e2e0d1c10dc86fc2da:scripts/manage-migration-author-lanes.mjs` (plus the two new exported marker helpers stubbed so the module still loads): tests 502, pass 493, fail 9 - the eight new #2694 round-2 proofs and the tightened #2311 lease-ref assertion. The ninth new test, the transient-failure positive control, passes both before and after and is meant to."
+      "evidence": "tests 503, pass 503, fail 0, skipped 0, todo 0. The new #2710 round-3 test, 'a release retry does not mistake a live sibling job for the outstanding lease of this job (#2694)', was proved to be a real regression test: with the already-released branch of releaseFailedReviewer reverted to the round-1 predicate `io.readRef(failedLeaseRef)!==null`, the suite runs tests 503, pass 502, fail 1 and that test alone fails on 'the sibling lease must not be read as the outstanding lease of this job'. Its positive control -- the ref holding THIS job's own lease again -- still raises 'reconciliation requires manual audit', so the check is not simply disabled."
     },
     {
       "command": "node --test scripts/record-review-verdict.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 18, pass 18, fail 0, skipped 0, todo 0."
+      "evidence": "tests 18, pass 18, fail 0, skipped 0, todo 0. The io fixture now carries a working deleteRef, matching githubIo, so the lease release actually happens and the idempotency assertion is no longer vacuous. Against the pre-fix script (git stash of scripts/manage-migration-author-lanes.mjs) the same fixture runs pass 16, fail 2: 'recording is create-only, bound to the assignment parent, and idempotent' and 'an existing artifact is validated against its own findings comment, not this round's (#2464)' both fail with 'reviewer does not hold the exact active lease; late or conflicting verdict refused' -- issue #2710 exactly."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -49,7 +50,9 @@
     "The release is best-effort by design: it is compare-and-swap where the io offers one, and it never throws, because a failed release must not void a durable verdict artifact whose digest is computed over the findings comment.",
     "A determinate listing refusal (row ceiling or a newly paginated namespace) is now marked on the error and re-raised with its own text; transient failures still fail open. No budget, ceiling or guard was widened or relaxed.",
     "The capacity report and cutover activation read the assignment-keyed view, so one provider holding two live jobs is two rows and two backfilled leases rather than one.",
-    "No database access or mutation occurred."
+    "No database access or mutation occurred.",
+    "#2710. The standing verdict artifact is read before the exact-lease gate, so recording stays idempotent after the verdict has handed its own lease back. The artifact's assignment_sha binding is still enforced by validateVerdictArtifact, so a late or conflicting verdict is refused unchanged, and a request with no standing artifact still meets the lease gate.",
+    "The lease a recorded verdict hands back no longer falls back to the provider-keyed legacy ref when neither name holds it, so the release cannot aim at a ref a live sibling job for the same provider is holding."
   ],
   "stop_conditions_hit": []
 }
