@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2640,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2301/2",
-  "contract_sha256": "945c8eb604496386173512a97a217bd15fb40e27f967e656ca79508fd5b66b61",
-  "head_sha": "1907f42489019f78ea563bdeb61258eb6fc61f5c",
+  "contract_ref": "refs/db-contracts/2301/3",
+  "contract_sha256": "c116551d0a1b126e51e3e017a581410a48a446b2936767c9a34f30cb01b96ded",
+  "head_sha": "86ff7f45133a873653123d28c75b8281e75d1eb6",
   "files_changed": [
     "plan_author_lane_abandonment_lifecycle.md",
     "scripts/coordination-scenarios.test.mjs",
@@ -19,29 +19,30 @@
     {
       "command": "node --test scripts/orchestrator-flow/capacity-state.test.mjs scripts/orchestrator-flow/reconcile.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/check-migration-pr-lease.test.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head 1907f42489019f78ea563bdeb61258eb6fc61f5c: tests 533, pass 533, fail 0, cancelled 0, skipped 0, todo 0."
+      "evidence": "Re-run at implementation head 86ff7f45133a873653123d28c75b8281e75d1eb6 (main 5eaebe7c merged): tests 562, pass 562, fail 0, cancelled 0, skipped 0, todo 0."
     },
     {
       "command": "node --test scripts/lib/exclusive-lease.test.mjs scripts/coordination-scenarios.test.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head 1907f42489019f78ea563bdeb61258eb6fc61f5c: tests 57, pass 57, fail 0, cancelled 0, skipped 0, todo 0."
+      "evidence": "Re-run at implementation head 86ff7f45133a873653123d28c75b8281e75d1eb6: tests 57, pass 57, fail 0, cancelled 0, skipped 0, todo 0."
     },
     {
       "command": "python scripts/test_production_migration_guard.py",
       "exit_code": 0,
-      "evidence": "Re-run at implementation head 1907f42489019f78ea563bdeb61258eb6fc61f5c: Ran 239 tests, OK, plus both BOUNDED OK migration manifest controls."
+      "evidence": "Re-run at implementation head 86ff7f45133a873653123d28c75b8281e75d1eb6: Ran 239 tests, OK, plus both BOUNDED OK migration manifest controls."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors were reported for the Phase A diff at implementation head 1907f42489019f78ea563bdeb61258eb6fc61f5c."
+      "evidence": "No whitespace errors were reported for 5eaebe7c09683aef77bdef92aec454af5dddf2cb..86ff7f45133a873653123d28c75b8281e75d1eb6."
     }
   ],
   "assumptions_resolved": [
     "The live pre-parser census inspected seven open claims and found zero fences declaring expired-unconfirmed; the privacy-safe count and claim numbers are recorded on issue 2301.",
     "Claim 2574 records C:/repos/shared-db-worktrees/issue-2503-bootstrap and that exact EDGE-DEV path was absent; the implementation requires an explicit absent declaration and does not treat absence alone as authorization.",
-    "Muse Spark independently inspected the pre-rebase implementation and recorded durable APPROVE artifact 4e67895e4bad2ab4e17f7630850a89e9008c83a0; rebase invalidates that approval and requires fresh exact-head review.",
-    "Governed review at head 8e94f1148d6946aef87cf8424188d6e169638c5a returned REVISE with seven findings. All seven are addressed at this head: recovery artifacts are now dereferenced through githubIo.verifyArtifact rather than shape-checked, unreadable worktree observations fail closed, remote relinquishment always requires a recovery artifact, the legacy relinquishment freeze is enforced by every claim mutator, the no-worktree-mutation proof is behavioural with a positive control, and the flow-adapter limitation is stated explicitly in the plan.",
+    "Governed review at head 8e94f1148d6946aef87cf8424188d6e169638c5a returned REVISE with three High findings. Head 1907f42489019f78ea563bdeb61258eb6fc61f5c addresses them in code: recovery artifacts are dereferenced through githubIo.verifyArtifact rather than shape-checked, resumeAuthorLease re-verifies a stored artifact and lets an unreadable worktree observation throw, and remote relinquishment always requires a recovery artifact. No exact-head verdict exists yet for this fix; fresh review is required.",
+    "Merge of main 5eaebe7c09683aef77bdef92aec454af5dddf2cb resolved one lane-manager conflict by uniting the argument list (main's --target-url and --description plus the branch's --worktree-state and --recovery-artifact); no behaviour outside Phase A changed.",
+    "Blocking stop condition PR 2634 is merged (ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05).",
     "Issue 2301 remains open for Phase B-D. Fresh exact-head checks and approvals are required before PR 2640 may merge."
   ],
   "stop_conditions_hit": []

@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2301,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Implement only Phase A Steps 1-2 of the author-lane abandonment lifecycle so capacity can be relinquished from any machine while all work authority remains protected and resume is recovery-gated.",
-  "base_sha": "aef1504e7c3c7674a6a9709e42720b8f2a725f43",
+  "base_sha": "5eaebe7c09683aef77bdef92aec454af5dddf2cb",
   "dispatcher": "codex shared-db.orch route 01a085f2-a84f-7963-b474-e5770b149ecd",
   "worker": "codex issue-2301 Phase A repository-maintenance worker",
   "branch": "codex/issue-2301-phase-a",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2301-phase-a-rebuild",
+  "worktree": "C:/repos/shared-db-worktrees/cl2-2640",
   "allowed_paths": [
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/orchestrator-flow/capacity-state.test.mjs",
@@ -44,7 +44,8 @@
   "assumptions": [
     "The parent orchestrator explicitly dispatched this repository-maintenance phase to a fresh isolated worker outside its own context",
     "Issue 2301 was prematurely closed as planning-only work and was reopened because its checked-in Definition of Done requires implementation Steps 1-7",
-    "The immutable contract is being published after the initial implementation because enforced CI first exposed the required evidence pair; it records the original dispatch scope without widening it"
+    "The immutable contract is being published after the initial implementation because enforced CI first exposed the required evidence pair; it records the original dispatch scope without widening it",
+    "Generation 3 rebinds the unchanged scope to main 5eaebe7c after the idle Phase A branch was taken over by the shared-db orchestrator sub-agent (route local_ceb221ac-1746-4836-9306-6839c18dbced); no path, database, or action scope is widened"
   ],
   "stop_conditions": [
     "Stop if implementing Phase A would release object or version protection",
