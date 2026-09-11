@@ -6,17 +6,13 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2707/2",
   "contract_sha256": "68d80ed503743d8ae7f787d545f7a650bcfc8ea57162899d4b0e9f0bb1edbd24",
-  "head_sha": "e00f450e5af8973426d263005d0bd113558764a7",
+  "head_sha": "4515e76dbcc57610fa55cf627108ba09f099d0a2",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/run-governed-review.mjs",
-    "scripts/run-governed-review.test.mjs",
-    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql",
-    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
+    "scripts/run-governed-review.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
