@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Remove the global FIFO reviewer draw queue, retry a briefly occupied review mutex, and raise the author lane cap to 24.",
-  "base_sha": "5eaebe7c09683aef77bdef92aec454af5dddf2cb",
+  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
   "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
   "worker": "Claude process-unblocking sub-agent of marker 2758",
   "branch": "claude/reviewer-draw-no-fifo",
@@ -41,5 +41,6 @@
   ],
   "stop_conditions": [
     "Stop if implementation requires a database or production write."
-  ]
+  ],
+  "generation": 2
 }

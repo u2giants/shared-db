@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2767,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2766/1",
-  "contract_sha256": "0907da5c9c7d83472c40dc1d37939baa9a64396792d0c41e4e833924b27f4479",
-  "head_sha": "5a9c2e54fae177040884f4d7f03a52a1d52c3174",
+  "contract_ref": "refs/db-contracts/2766/2",
+  "contract_sha256": "d7df20ffbe5d7d5eeea2dfb3183fb1f0619596b8ab9782698e2c4082e88fdf21",
+  "head_sha": "68e3d69960ab30f8a20d974b0eb362db797ae72f",
   "files_changed": [
     "docs/agents/section-4-anti-collision-rules.md",
     "scripts/manage-migration-author-lanes.mjs",
@@ -40,5 +40,5 @@
     "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
+  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Ready for exact-head review, required CI, and guarded merge."
 }
