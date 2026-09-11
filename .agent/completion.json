@@ -1,52 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
+  "work_issue": 2664,
   "outcome": "ready-for-merge",
-  "pr": 2746,
+  "pr": 2748,
   "migration_versions": [
-    "20260911075244"
+    "20260911081204"
   ],
-  "contract_ref": "refs/db-contracts/2478/1",
-  "contract_sha256": "adfee00a4d886efb70e6f3f5c46863e47d6fcc65a6ad4c40706df53d206cbd29",
-  "head_sha": "fbd8706448a2eb460890d1c4f02c3892eab621c9",
+  "contract_ref": "refs/db-contracts/2664/4",
+  "contract_sha256": "5b1b3b0d1a96eb5e8f13624ec6041622df51c2c58f5185340b6f404fbe3f85cd",
+  "head_sha": "e0a412e36812b291323394976d87845b6343e96a",
   "files_changed": [
-    "supabase/migrations/20260911075244_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
+    "supabase/tests/dam_order_list_find_position.sql",
+    "scripts/test_order_list_find_position.py",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production-verification-sidecars/20260911081204.json"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "view api.dam_order_list"
+  ],
   "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
+    "function public.find_dam_order_list_row"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
+      "evidence": "Static guards passed; live-ledger check not configured. No shared database writes."
     },
     {
-      "command": "local PostgreSQL helper parity contracts",
+      "command": "python scripts/test_order_list_find_position.py",
       "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
+      "evidence": "TEST_DATABASE_URL pointed to loopback127.0.0.1:55486; fresh uniquely-created database was removed afterward.14 expected-position cases,4 independent ranking parity cases, wildcard/null/JS-trim/RLS/auth/injection contracts passed;0 skipped."
     },
     {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "49 sidecars validated; runtime dynamic SELECT marker96 explicitly covered as no additional durable catalog target.",
+      "command": "python scripts/check_production_verification_sidecars.py --repo . --scan-version 20260911081204",
+      "exit_code": 0
     },
     {
-      "command": "python -m unittest scripts.test_migration_derivation",
-      "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
+      "evidence": "137 tests passed;0 skipped.",
+      "command": "python -m unittest scripts.test_production_business_risk_gate",
+      "exit_code": 0
     }
   ],
   "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
+    "PopDAM main562dc999ac0039e017fd6b0fd0e32c6172ac6893 helpers define9 search fields, normalized filters and ascending-boolean sort, defaultorder_date descending/null-last/id ascending.",
+    "Duplicate2665 closed as duplicate, not delivered;2664 is canonical underclaim2747.",
+    "Draft preparation only: independent paid review, shared-preview plan/runtime proof and merge remain held for parent priority2734 and2703.",
+    "No application code or data writes, no shared database writes, no timeout changes.",
+    "Actual CI failure repaired with hash-bound runtime SELECT disposition and pinned producer sidecar; SQL bytes unchanged."
   ],
   "stop_conditions_hit": []
 }
