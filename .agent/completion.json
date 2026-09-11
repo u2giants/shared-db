@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/28",
-  "contract_sha256": "8cfdde41971c7560cb80f7998e61066f812eec4597ea9da5db31a6fb6fd37d8b",
-  "head_sha": "16f794dda9c6c8af2a97d63ceb2a65c35790163e",
+  "contract_ref": "refs/db-contracts/2727/29",
+  "contract_sha256": "36a5025e3237a96441466087d86c3aa9f31a876cf57cd91304fa72c9468db73d",
+  "head_sha": "f9ea854459d585b15236c9cd796ec7ad5db8568f",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -31,22 +31,27 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 25c4ca3b 16f794dd reports no whitespace errors."
+      "evidence": "git diff --check 153b7754 f9ea8544 reports no whitespace errors."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs",
+      "exit_code": 0,
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at f9ea8544."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "716 tests, 716 pass, 0 fail, 0 skipped at 16f794dd."
+      "evidence": "716 tests, 716 pass, 0 fail, 0 skipped at f9ea8544."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=279 at 16f794dd."
+      "evidence": "truth audit OK: call_sites=279 at f9ea8544."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "GitHub transport conformance: 215 files scanned at 16f794dd."
+      "evidence": "GitHub transport conformance: 219 files scanned at f9ea8544."
     }
   ],
   "assumptions_resolved": [
@@ -59,7 +64,8 @@
     "Reviewer assignment, reviewer replacement, shared-stage acquisition, and preview preparation now revalidate admission inside their own single mutex interval; preview preparation with --admit-issue executes preparation rather than silently returning after admission.",
     "Dependency completion is trusted only from the explicitly identified repository owner; preview marker ownership is rechecked inside the mutex; lifecycle advances require durable references; and unsupported compound commands refuse before any operation runs.",
     "Generation 26 takeover: merged main 9b02ad48 (#2767); the only code conflict was two lane-manager hunks, resolved by keeping requireAdmissionArguments and admissionOptions inside assignWithMutexRetry with enableReviewerQueue:false. No database, preview, or production operation was performed.",
-    "The governed review REJECT at 56ca196e (preview filename-only readiness, open-ended legacy admission, truncated patches) was repaired in 21d86cab with regression tests before this report."
+    "The governed review REJECT at 56ca196e (preview filename-only readiness, open-ended legacy admission, truncated patches) was repaired in 21d86cab with regression tests before this report.",
+    "Current main 153b7754 is integrated; #2777 unlimited author lanes and #2767 reviewer queue removal remain active alongside the admission lifecycle."
   ],
   "stop_conditions_hit": []
 }

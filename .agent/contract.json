@@ -54,6 +54,7 @@
   ],
   "required_checks": [
     "git diff --check",
+    "node --test scripts/agent-work-contract.test.mjs",
     "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
     "node scripts/check-throughput-truth-audit.mjs",
     "node scripts/check-github-transport-conformance.mjs"
