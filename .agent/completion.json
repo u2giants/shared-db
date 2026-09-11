@@ -2,7 +2,7 @@
   "schema_version": 1,
   "work_issue": 2744,
   "outcome": "ready-for-merge",
-  "pr": 2813,
+  "pr": 2818,
   "migration_versions": [
     "20260911222514"
   ],
