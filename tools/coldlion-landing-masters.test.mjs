@@ -137,6 +137,12 @@ test("CLI dry-run failures do not write failure evidence",async()=>{
   assert.deepEqual(calls,[]);
 });
 
+test("CLI records database execution failure without exposing row details",async()=>{
+  const calls=[]; const error=Object.assign(new Error("Database command failed; sensitive row details suppressed"),{code:"DATABASE_COMMAND_FAILED"});
+  await assert.rejects(main([],{proveTarget:()=>({database:"synthetic",host:"local"}),readApiKey:()=>"hidden",collectMasters:async()=>({loads:[],itemSlots:[],affectedItemGrains:[]}),runSql:()=>{throw error},recordMasterFailure:({endpoint,error:recorded})=>calls.push([endpoint,recorded.message])}),/sensitive row details suppressed/);
+  assert.deepEqual(calls,[["/masters-write","Database command failed; sensitive row details suppressed"]]);
+});
+
 test("CLI arguments do not expose history controls",()=>{
   assert.deepEqual(parseArgs([]),{company:"EDGEHOME",dryRun:false}); assert.throws(()=>parseArgs(["--windows","3"]),/unknown argument/);
 });

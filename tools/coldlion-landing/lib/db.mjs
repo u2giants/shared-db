@@ -43,7 +43,11 @@ export function runSql(sql, { url = databaseUrl() } = {}) {
     killSignal: "SIGKILL",
   });
   if (psql.error) throw clientSpawnFaultError("psql", psql.error);
-  if (psql.status !== 0) throw new Error(psql.stderr || "psql failed");
+  if (psql.status !== 0) {
+    const error = new Error("Database command failed; sensitive row details suppressed");
+    error.code = "DATABASE_COMMAND_FAILED";
+    throw error;
+  }
   return psql.stdout;
 }
 

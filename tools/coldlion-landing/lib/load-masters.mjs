@@ -81,8 +81,8 @@ on conflict on constraint item_merch_group_slot_identity do update set
 }
 
 function runStartSql(run) {
-  return `insert into coldlion.sync_run (id,endpoint,company_code,request_params,status,requested_by,started_at,rows_fetched)
-values (${sqlUuid(run.id)},${sqlText(run.endpoint)},${sqlText(run.companyCode)},${sqlText(JSON.stringify(run.requestParams))}::jsonb,'running',${sqlText(run.requestedBy)},${sqlTimestamp(run.startedAt)},${sqlNumber(run.rowsFetched)});`;
+  return `insert into coldlion.sync_run (id,endpoint,company_code,request_params,status,requested_by,started_at,http_status,body_status,rows_fetched)
+values (${sqlUuid(run.id)},${sqlText(run.endpoint)},${sqlText(run.companyCode)},${sqlText(JSON.stringify(run.requestParams))}::jsonb,'running',${sqlText(run.requestedBy)},${sqlTimestamp(run.startedAt)},${sqlNumber(run.httpStatus)},${sqlNumber(run.bodyStatus)},${sqlNumber(run.rowsFetched)});`;
 }
 
 function runFinishSql(table, run) {
