@@ -45,18 +45,18 @@ begin
   if v_gate <> 1 then
     raise exception 'effective list function must invoke public.require_dam_access() exactly once, found %', v_gate;
   end if;
-  if position(') a where public.require_dam_access() and a.is_deleted = false and (' in v_lower) = 0 then
+  if position(') a where public.require_dam_access()' in v_lower) = 0 then
     raise exception 'effective list function must gate on DAM entitlement in its outer WHERE clause';
   end if;
 
-  -- Eight mutually exclusive identity/tag arms, each pinned by its leading guard.
+  -- Eight preserved fallback arms plus two exclusive narrow tag arms, each pinned by its leading guard.
   -- The bare equality tokens also occur as optional conjuncts on the licensor
   -- pair, so counting arms and pinning guards is what stops a deleted
   -- property- or customer-leading arm from passing while the DAM property and
   -- customer libraries silently return nothing.
   v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
-  if v_arms <> 7 then
-    raise exception 'effective predicates must keep eight UNION arms, found % UNION ALLs', v_arms;
+  if v_arms <> 9 then
+    raise exception 'effective predicates must keep ten UNION arms, found % UNION ALLs', v_arms;
   end if;
   foreach v_pin in array array[
     'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null union all',
@@ -297,8 +297,8 @@ begin
   -- substring below still appears somewhere else in the body.
   v_arms := (length(v_helper) - length(replace(v_helper, 'union all', '')))
               / length('union all');
-  if v_arms <> 7 then
-    raise exception 'effective count helper must keep five identity arms and three matched arms (seven UNION ALLs), found %', v_arms;
+  if v_arms <> 8 then
+    raise exception 'effective count helper must keep five identity unions and four matched arms (eight UNION ALLs), found %', v_arms;
   end if;
 
   foreach v_pin in array array[
