@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2694,
   "work_type": "repo-maintenance",
   "route": "repository-maintenance",
   "goal": "Implement Albert Hazan's 2026-09-10 owner policy that governed reviewers may run concurrent independent jobs. Replace the single active lease per reviewer with assignment-keyed leases while preserving exact-head binding, independent slots, durable verdicts, atomic release/replacement, and compatibility for active legacy leases.",
-  "base_sha": "aef1504e7c3c7674a6a9709e42720b8f2a725f43",
+  "base_sha": "5532d2bd401e67af39f0e60c6b08bcd1ebb0723f",
   "dispatcher": "Albert Hazan owner instruction, issue #2694",
   "worker": "Codex reviewer-concurrency-policy",
   "branch": "codex/reviewer-concurrency-policy",
