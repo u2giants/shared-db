@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/4",
-  "contract_sha256": "48f77dd550ae4d463319ea3d1a5bde2f1f621c976f877242f269986d439465d3",
-  "head_sha": "d2ae06d83700904844b37877747a51a2f229ce6c",
+  "contract_ref": "refs/db-contracts/2727/5",
+  "contract_sha256": "87b66e01924c614fc2a0fa2558cc65863fd3b0ac0f9f87c3fa11a94855634731",
+  "head_sha": "54ee6b1b2e3596bced8bc56fb9319c3a25f2ab8c",
   "files_changed": [
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
@@ -30,7 +30,7 @@
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "636 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 997 tests."
+      "evidence": "637 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 998 tests."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
