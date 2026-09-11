@@ -5,9 +5,9 @@
   "pr": 2700,
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2697/6",
-  "contract_sha256": "PENDING",
-  "head_sha": "PENDING",
-  "files_changed": ["docs/verification/reviewer-assignment-api-budget-2026-08-28.md", "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
+  "contract_sha256": "014ce7dbd7b38f94139058e2c4da8186fe0c218ce0c0350a3f80ffc5d471606d",
+  "head_sha": "6cc78b0b694c9dc4402e9e105957dd7c0c40ad4e",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", "docs/verification/reviewer-assignment-api-budget-2026-08-28.md", "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
   "db_reads": [],
   "db_writes": [],
   "checks": [
