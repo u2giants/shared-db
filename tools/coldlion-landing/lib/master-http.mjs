@@ -38,7 +38,16 @@ export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = f
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const response = await fetchImpl(masterUrl(endpoint, params), { headers: { "X-API-Key": apiKey }, signal: controller.signal });
-      const payload = JSON.parse(await response.text());
+      const text = await response.text();
+      let payload;
+      try { payload = JSON.parse(text); }
+      catch {
+        const error = new Error(`${endpoint} returned non-JSON on wire HTTP ${response.status}`);
+        error.httpStatus = response.status;
+        error.bodyStatus = null;
+        error.permanent = response.status >= 400 && response.status < 500 && ![408,429].includes(response.status);
+        throw error;
+      }
       if (!response.ok) {
         const error = new Error(`${endpoint} returned wire HTTP ${response.status}`);
         error.httpStatus = response.status;

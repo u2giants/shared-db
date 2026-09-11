@@ -15,11 +15,9 @@ export const COMPANY_CODE = "EDGEHOME";
 export function parseArgs(argv) {
   const args = { company: COMPANY_CODE, dryRun: false };
   for (let index=0; index<argv.length; index+=1) {
-    if (argv[index] === "--company") { args.company=argv[++index]; continue; }
     if (argv[index] === "--dry-run") { args.dryRun=true; continue; }
     throw new Error(`unknown argument ${argv[index]}`);
   }
-  if (!args.company?.trim()) throw new Error("--company must not be blank");
   return args;
 }
 

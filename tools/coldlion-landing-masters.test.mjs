@@ -60,6 +60,12 @@ test("plain-array endpoints refuse a paged envelope",async()=>{
   await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),/plain array/);
 });
 
+test("plain-array non-JSON 4xx preserves wire status and is not retried",async()=>{
+  let calls=0; const fetchImpl=async()=>{calls+=1;return{ok:false,status:404,text:async()=>"not json"}};
+  await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),error=>error.httpStatus===404 && error.permanent===true);
+  assert.equal(calls,1);
+});
+
 test("plain-array masters use the same serialized request gate",async()=>{
   let gates=0;
   const fetchImpl=async()=>({ok:true,status:200,text:async()=>"[]"});
@@ -104,7 +110,7 @@ test("generated SQL is a re-runnable upsert, reconciles cleared slots, and never
   const loads=order.map((table)=>{ const spec=MASTER_SPECS[table]??ITEM_SPECS[table]; const source=sourceFor(spec); const rows=projectCurrentRows(spec,[source],{runId:RUN,fetchedAt:NOW}).rows; return {table,spec,rows,run:{id:RUN,endpoint:spec.endpoint,companyCode:"SYNCO",requestParams:{fullSnapshot:true},requestedBy:"test",startedAt:NOW,finishedAt:NOW,durationMs:0,rowsFetched:1}}; });
   const source=sourceFor(ITEM_SPECS.item_header,{companyCode:"SYNCO",divisionCode:"SD001",itemNo:"ITEM-A"});
   const sql=buildMasterLoadSql({loads,itemSlots:projectItemSlots([source],{runId:RUN,fetchedAt:NOW}),affectedItemGrains:[{company_code:"SYNCO",division_code:"SD001",item_no:"ITEM-A",item_pkey:null}]});
-  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
+  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/declined or unstored source field changed/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
 });
 
 test("an empty item snapshot still generates valid reconciliation SQL",()=>{
@@ -143,8 +149,8 @@ test("CLI records database execution failure without exposing row details",async
   assert.deepEqual(calls,[["/masters-write","Database command failed; sensitive row details suppressed"]]);
 });
 
-test("CLI arguments do not expose history controls",()=>{
-  assert.deepEqual(parseArgs([]),{company:"EDGEHOME",dryRun:false}); assert.throws(()=>parseArgs(["--windows","3"]),/unknown argument/);
+test("CLI is fixed to EDGEHOME and exposes neither alternate-company nor history controls",()=>{
+  assert.deepEqual(parseArgs([]),{company:"EDGEHOME",dryRun:false}); assert.throws(()=>parseArgs(["--company","SPRUCE"]),/unknown argument/); assert.throws(()=>parseArgs(["--windows","3"]),/unknown argument/);
 });
 
 test("workflow is the sole live path and runs masters before history",()=>{

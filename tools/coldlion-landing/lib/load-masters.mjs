@@ -26,6 +26,9 @@ function currentTableSql(table, spec, rows) {
   const naturalKey = `jsonb_build_object(${keys.flatMap((key) => [sqlText(key), `s.${key}`]).join(", ")})`;
   const projected = `(to_jsonb(s) - array['run_id','fetched_at']::text[])`;
   const previous = `(to_jsonb(t) - array['run_id','fetched_at','first_seen_at','last_seen_at']::text[])`;
+  const comparableProjected = `(to_jsonb(s) - array['run_id','fetched_at','source_hash']::text[])`;
+  const comparablePrevious = `(to_jsonb(t) - array['run_id','fetched_at','source_hash','first_seen_at','last_seen_at']::text[])`;
+  const auditProjection = `${projected} || jsonb_build_object('_source_hash_scope', 'complete source record including declined fields', '_change_basis', case when t.${keys[0]} is null then 'new source row' when ${comparablePrevious} = ${comparableProjected} then 'declined or unstored source field changed' else 'approved projection changed' end)`;
   const updates = [...data.filter((c) => !keys.includes(c)).map((c) => `${c} = excluded.${c}`), "run_id = excluded.run_id", "fetched_at = excluded.fetched_at", "source_hash = excluded.source_hash", "last_seen_at = excluded.last_seen_at"].join(",\n      ");
   return `${stageSql(stage, spec, rows)}
 create temp table _counts_${table} as
@@ -38,7 +41,7 @@ insert into coldlion.change_log
   (table_name, natural_key, change_kind, previous_source_hash, new_source_hash, previous_raw, new_raw, run_id)
 select ${sqlText(table)}, ${naturalKey}, case when t.${keys[0]} is null then 'inserted' else 'updated' end,
        t.source_hash, s.source_hash, case when t.${keys[0]} is null then null else ${previous} end,
-       ${projected}, s.run_id
+       ${auditProjection}, s.run_id
   from ${stage} s left join coldlion.${table} t on ${join}
  where t.${keys[0]} is null or t.source_hash <> s.source_hash;
 
