@@ -463,11 +463,11 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/check-migration-ledger-drift.mjs:247",
-      "semantic_key": "scripts/check-migration-ledger-drift.mjs:10cdacb1f5aa4bb7115edf89810b0ff86865a4ef1850efa37a4b3160aaac3c04:1",
-      "line_sha256": "10cdacb1f5aa4bb7115edf89810b0ff86865a4ef1850efa37a4b3160aaac3c04",
+      "site": "scripts/check-migration-ledger-drift.mjs:266",
+      "semantic_key": "scripts/check-migration-ledger-drift.mjs:b6eb5e5e2dccbc82f9e7f21de952814cdef2773c9da1eeb462fca246c00becb9:1",
+      "line_sha256": "b6eb5e5e2dccbc82f9e7f21de952814cdef2773c9da1eeb462fca246c00becb9",
       "disposition": "excluded",
-      "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+      "reason": "Re-reviewed for issue #2820: this MERGED BUT NOT APPLIED header now counts the promotable slice rather than every merged-not-applied version, because foreign-target migrations are reported in their own clearly-labelled section instead. It still reports presence and is never a derivability claim, so it stays excluded."
     },
     {
       "site": "scripts/check-migration-ledger-drift.mjs:26",
@@ -1976,6 +1976,6 @@
     }
   ],
   "call_site_count": 280,
-  "call_site_sha256": "92f775a4f3f548a33c0be80532e0e90849e6e2671d4ea4de47dcf23dbbde8f14",
+  "call_site_sha256": "9e51861c1a90ff4026a5f6c7cbd88a569e9ecd4c310e7c277f6b8ed1c006b477",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
