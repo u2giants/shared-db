@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2785,
-  "generation": 3,
+  "generation": 4,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Cut GitHub Actions installation API quota use so production applies stop failing at about ten active PRs, without weakening any safety check or changing which collisions are found.",
-  "base_sha": "5761bc5e8763817c6deb722cac627f8924b5baaf",
+  "base_sha": "25c4ca3ba4e50aea22a44fac8116b9e391d9b787",
   "dispatcher": "Claude coordinator session",
   "worker": "Claude api-quota-reduction worker",
   "branch": "claude/api-quota-reduction",

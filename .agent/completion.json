@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2786,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2785/3",
-  "contract_sha256": "1179e4ee36214947d1abfc5abca8952793ff726412465563b76f4ea35771914d",
-  "head_sha": "51b015d96f9a1db6c1640a193fc826d9166cc92b",
+  "contract_ref": "refs/db-contracts/2785/4",
+  "contract_sha256": "6a0b917ab5090675eac198904e26eacacc293505b192ba09a119c9bb303372c5",
+  "head_sha": "58c8cab9a1b577b1d4be2439e67311aa73be548f",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -38,17 +38,17 @@
     {
       "command": "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
       "exit_code": 0,
-      "evidence": "663 tests, 663 pass, 0 fail, 0 skipped after merging main 5761bc5e. Includes: with no opt-in a rate-limit 403 fails after one call with no wait or probe; an opted-in read waits 301 s then succeeds; other 403s fail after one call; every open PR gets the changed_files proof and a short truncated list is refused; the quota preflight never waits with the cap unset, 0, or shorter than the reset."
+      "evidence": "663 tests, 663 pass, 0 fail, 0 skipped after merging main 25c4ca3b. Includes: with no opt-in a rate-limit 403 fails after one call with no wait or probe; an opted-in read waits 301 s then succeeds; other 403s fail after one call; every open PR gets the changed_files proof and a short truncated list is refused; the quota preflight never waits with the cap unset, 0, or shorter than the reset."
     },
     {
       "command": "python -m unittest scripts.test_production_business_risk_gate",
       "exit_code": 0,
-      "evidence": "Ran 141 tests, OK, after merging main 5761bc5e."
+      "evidence": "Ran 141 tests, OK, after merging main 25c4ca3b."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors in the diff from main 5761bc5e to the head."
+      "evidence": "No whitespace errors in the diff from main 25c4ca3b to the head."
     },
     {
       "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
@@ -58,7 +58,7 @@
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=275."
+      "evidence": "truth audit OK: call_sites=276 (main 25c4ca3b added one site in #2789)."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
