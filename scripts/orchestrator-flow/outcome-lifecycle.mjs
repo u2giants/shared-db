@@ -13,7 +13,7 @@ export const OUTCOME_EVIDENCE_FENCE = 'db-outcome-evidence'
 
 const SHA = /^[0-9a-f]{40}$/i
 const REPOSITORY = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/
-const EVIDENCE_REF = /^(?:https:\/\/github\.com\/|artifact:)/
+const EVIDENCE_REF = /^(?:https:\/\/github\.com\/[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+\/(?:issues|pull|actions\/runs|commit)\/[A-Za-z0-9_.#?=&\/-]+|artifact:[A-Za-z0-9][A-Za-z0-9._:\/-]*)$/
 const LINEAR = Object.freeze([
   'entered', 'classified', 'dispatched', 'implementation_complete', 'review_ready',
   'preview_verified', 'merged', 'production_authorized', 'production_applied', 'live_verified',
