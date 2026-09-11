@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/38",
-  "contract_sha256": "e010fc27b0b180db1d0991a91c7a3b08e44c16943d08d53b509e5b8dadfbc9f8",
-  "head_sha": "9b75c623f2d2962dd85f55cb6acbf6f4d8824a1a",
+  "contract_ref": "refs/db-contracts/2727/39",
+  "contract_sha256": "296673aa9b33c133b750e5eed6fc4a4eba92cd8710db046ec87466656cf17fd5",
+  "head_sha": "6f8b4b154fa36019b4e0421b416764edc3a2f2cd",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -34,27 +34,27 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 72c299b8 9b75c623 reports no whitespace errors."
+      "evidence": "git diff --check 72c299b8 6f8b4b15 reports no whitespace errors."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at 9b75c623."
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at 6f8b4b15."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "726 tests, 726 pass, 0 fail, 0 skipped at 9b75c623."
+      "evidence": "727 tests, 727 pass, 0 fail, 0 skipped at 6f8b4b15."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=279 at 9b75c623."
+      "evidence": "truth audit OK: call_sites=279 at 6f8b4b15."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "221 files scanned at 9b75c623; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "221 files scanned at 6f8b4b15; every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
@@ -70,7 +70,8 @@
     "The governed review REJECT at 56ca196e (preview filename-only readiness, open-ended legacy admission, truncated patches) was repaired in 21d86cab with regression tests before this report.",
     "Current main 72c299b8 is integrated; #2780 approval carry-over, #2777 unlimited author lanes, and #2767 reviewer queue removal remain active alongside the admission lifecycle.",
     "Every workflow acquisition caller now supplies authoritative admission and PR identity; the resolver preserves the exact same bounded pre-cutover legacy path as PR-backed acquisition, while post-cutover omissions still refuse.",
-    "Closed-issue admission filters non-owner completion noise before parsing and counting; trusted malformed, duplicate, or mismatched completion evidence still refuses without mutation."
+    "Closed-issue admission filters non-owner completion noise before parsing and counting; trusted malformed, duplicate, or mismatched completion evidence still refuses without mutation.",
+    "The three admission-calling workflow surfaces have issues write and static coverage, while unrelated workflows retain their narrower permissions; standalone PR-backed admission has the same pre-cutover success and post-cutover refusal as resolver and acquisition."
   ],
   "stop_conditions_hit": []
 }

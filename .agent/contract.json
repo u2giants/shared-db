@@ -80,12 +80,13 @@
     "Generation 35 corrects the implementation commit identity after generation 34 recorded an invalid expanded SHA; no implementation bytes changed.",
     "Generation 36 integrates current main f938f36f after PR 2776; only the repository evidence pair conflicted and the implementation remained unchanged.",
     "Generation 37 integrates current main 72c299b8 after PR 2765; only the repository evidence pair conflicted and the implementation remained unchanged.",
-    "Generation 38 repairs exact-head review findings at 9b75c623: the workflow resolver now preserves the same bounded pre-cutover legacy policy as PR-backed acquisition, and closed-issue admission filters untrusted completion comments before parsing or counting."
+    "Generation 38 repairs exact-head review findings at 9b75c623: the workflow resolver now preserves the same bounded pre-cutover legacy policy as PR-backed acquisition, and closed-issue admission filters untrusted completion comments before parsing or counting.",
+    "Generation 39 repairs workflow execution at 6f8b4b15: only admission-calling workflows receive issues write so validated merge-closed issues can reopen, and standalone PR-backed admission uses the same bounded legacy policy as resolver and acquisition paths."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 38
+  "generation": 39
 }
