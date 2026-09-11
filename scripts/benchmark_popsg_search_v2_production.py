@@ -15,6 +15,7 @@ CASES=[('edge-unfiltered', {}), ('edge-child', {'p_query': "'edgechild'::text"})
 
 def main():
     parser=argparse.ArgumentParser()
+    parser.add_argument('--dirty-visibility',action='store_true',help='Change live thumbnail-error state for about two percent of synthetic files without vacuum before timing; exercise index-only heap fetches under rendering churn.')
     parser.add_argument('--parity-only',action='store_true',help='Use 80 synthetic rows and skip the unchanged volume benchmark')
     parser.add_argument('--database-url',default=os.environ.get('POPSG_BENCHMARK_DATABASE_URL'),help='Disposable PostgreSQL to use instead of a docker container. The caller owns creating and dropping it; this script never connects to Supabase.')
     options=parser.parse_args()
@@ -47,6 +48,8 @@ def main():
         require(FORWARD.read_text())
         acl_ok=require("select not has_function_privilege('anon',p.oid,'EXECUTE') and has_function_privilege('authenticated',p.oid,'EXECUTE') and has_function_privilege('service_role',p.oid,'EXECUTE') from pg_proc p where p.oid=to_regprocedure('public.search_style_guide_library_v2(text,text,text[],text[],text[],text[],text[],text[],text[],text[],timestamptz,timestamptz,text,integer,integer)');")
         if acl_ok!='t':raise RuntimeError('Existing RPC execution permissions changed')
+        if options.dirty_visibility:
+            require("update public.style_guide_files set thumbnail_error=case when thumbnail_error is null then 'synthetic newly rendered error' else null end where substring(id::text,1,2) in ('01','35','67','99','cd');")
         for mode in ([] if options.parity_only else ['files','guides']):
             for label,suffix in [('baseline','_baseline'),('forward','')]:
                 start=time.monotonic()
