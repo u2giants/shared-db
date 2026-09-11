@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2507,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Recover the inherited PopSG PDF v2 terminal-outcome change under the current orchestrator, preserving its behavior while re-reserving its migration after current-main reconciliation.",
-  "base_sha": "fe5fa74db889652768029116e636f8cbe69b955e",
-  "dispatcher": "codex orchestrator marker 2629",
-  "worker": "codex issue_2507 recovery",
+  "base_sha": "71dca7b3deae7eea2ab0c2e47a320e1291dc0580",
+  "dispatcher": "codex orchestrator marker 2714",
+  "worker": "codex finish_2507 successor",
   "branch": "codex/issue-2507-popsg-pdf-v2",
-  "worktree": "C:/repos/shared-db-2507",
+  "worktree": "C:/repos/shared-db-worktrees/finish-2507-2714",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
@@ -34,8 +34,8 @@
   "prohibited_actions": [
     "Do not start an extraction workload, corpus rebuild, or data backfill.",
     "Do not change or remove the existing complete_style_guide_pdf_text RPC.",
-    "Do not apply to preview or production, review or merge the pull request, or touch licensed data.",
-    "Do not broaden grants beyond service_role or alter unrelated queue work."
+    "Do not broaden grants beyond service_role or alter unrelated queue work.",
+    "No merge, preview, or production write by worker; parent orchestrator serializes these stages."
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
@@ -46,7 +46,8 @@
   "assumptions": [
     "Migration 20260905104802 remains the base PDF contract and its existing completion RPC remains callable for staggered clients.",
     "The sanctioned claim supersession from 20260908134917 to 20260909162929 changes only the reserved migration identity, not the SQL behavior.",
-    "A failed result remains transiently reclaimable under the existing maximum-attempt policy, while skipped and extracted results remain terminal until content identity changes."
+    "A failed result remains transiently reclaimable under the existing maximum-attempt policy, while skipped and extracted results remain terminal until content identity changes.",
+    "Generation 3 refresh preserves existing implementation ancestry and byte-identical SQL/tests while reconciling only shared evidence files against current main. Claim 2578 renewed by sanctioned manager."
   ],
   "stop_conditions": [
     "Stop if the implementation requires changing claim_style_guide_pdf_text or any database object outside claim 2578.",

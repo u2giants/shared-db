@@ -6,10 +6,10 @@
   "migration_versions": [
     "20260909162929"
   ],
-  "contract_ref": "refs/db-contracts/2507/2",
-  "contract_sha256": "98a098d7bb0b810ce65eab186506eb97ad78bc19fbf348be5812e7331195caf4",
-  "head_sha": "53bf9596e06872d9c4d0645c7b55d7984d6f3417",
-  "evidence_note": "The implementation head follows one merge from current main fe5fa74d and the repository's atomic claim-version supersession. Only this evidence pair follows it. No preview, production, review, or merge action was taken.",
+  "contract_ref": "refs/db-contracts/2507/3",
+  "contract_sha256": "98cf13ade48b394f9cac0d7db5bf7d7d24d2488869ce17c59f883764b8fb7634",
+  "head_sha": "7cddf1eca0ff855a7eb103978cb2296a88ac1823",
+  "evidence_note": "Successor refresh preserves prior implementation ancestry and unchanged SQL/tests. Current implementation head merges current main; only the two evidence files follow. Prior hosted tests remain historical proof; new head CI will be checked separately.",
   "files_changed": [
     "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
     "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
