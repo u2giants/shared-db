@@ -1,59 +1,49 @@
 {
   "schema_version": 1,
-  "work_issue": 2493,
+  "work_issue": 2715,
   "outcome": "ready-for-merge",
-  "pr": 2526,
-  "migration_versions": [
-    "20260911045438"
-  ],
-  "contract_ref": "refs/db-contracts/2493/3",
-  "contract_sha256": "c39be8af16a8dd521e2565d1d065d9850dae47d407387fd1f9397402541b579e",
-  "head_sha": "3ddbf9eff36d3d8941944218b659249e892e2616",
+  "pr": 2735,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2715/2",
+  "contract_sha256": "aa7b365ab0fd952836d0baf928cd71dda5fe32fc11379488b943267a6725292c",
+  "head_sha": "1ce11dea836ae31c0b8f9f997d8b698252dd3c2d",
   "files_changed": [
-    ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/production-verification-sidecars/20260911045438.json",
-    "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
-    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+    ".github/workflows/documents-only-merge-authorization.yml",
+    "AGENTS.md",
+    "scripts/check-documents-only-merge-authorization.mjs",
+    "scripts/check-documents-only-merge-authorization.test.mjs",
+    "scripts/check-documents-only-pull-request.mjs",
+    "scripts/documents-only-merge-authorization.test.mjs",
+    "scripts/lib/documents-only-change.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/write-documents-only-merge-status.mjs",
+    "scripts/write-documents-only-merge-status.test.mjs"
   ],
-  "db_reads": [
-    "table core.property",
-    "table core.character",
-    "table core.style_guide",
-    "table dam.asset",
-    "table core.licensor",
-    "table core.franchise",
-    "table plm.source_resolution",
-    "function plm.set_source_resolution",
-    "function api.set_source_resolution"
-  ],
-  "db_writes": [
-    "function plm.source_resolution_target_missing",
-    "view api.source_resolution"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors after normal integration of current main fe5fa74db889652768029116e636f8cbe69b955e."
+      "evidence": "No whitespace errors on the exact implementation diff."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs",
+      "command": "node --test scripts/lib/documents-only-change.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/check-documents-only-merge-authorization.test.mjs scripts/documents-only-merge-authorization.test.mjs scripts/write-documents-only-merge-status.test.mjs scripts/check-github-transport-conformance.test.mjs scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "Hash-bound sidecar validation succeeded: status OK, 45 sidecars."
+      "evidence": "556 tests passed with zero failures, cancellations, skips, or todos."
     },
     {
-      "command": "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
+      "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "Retained synthetic PostgreSQL 17 container database case2493runtime; all assertions passed at line 653 and rolled back, including five/seven-argument helper behavior, ten/twelve-argument setter compatibility, six-kind existing/missing/null targets, authenticated reads, dangling visibility, and anonymous denial."
+      "evidence": "All GitHub calls in 213 scanned files use the governed transport."
     }
   ],
   "assumptions_resolved": [
-    "Inherited implementation retained; original work predates recovery contract publication.",
-    "Migration SHA256 remains 7cff10dcf68d2ba8993201790e8c276d517fd2410efa049e3e2026504abf6c50 after current-main integration.",
-    "Implementation is ready for coordinator review gates; independent exact-head review, fresh CI, preview and production/consumer acceptance remain pending and are not asserted by this report."
+    "Live issue, pull request, branch, worktree, and Codex task inventory found no prior owner for issue 2715.",
+    "The implementation changes no migration and performs no database or production write.",
+    "Plans and bounded declarative pointer hunks qualify; behavior-changing rulebooks and every executable or unreadable change fail closed."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Historical runtime evidence retained. Final reconciliation incorporates main f3eff56d and supported version supersession; SQL bytes remain unchanged. Fresh CI and one independent exact-head review required."
+  "evidence_note": "Implementation is ready for exact-head independent reviewer-safety review, required CI, guarded merge, and a live prose-only acceptance pull request."
 }
