@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2771,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2772/11",
-  "contract_sha256": "de73398e8721fef2c2a5db2e73f39ee4f4ef2660ce39f9fe779244ef3094a650",
-  "head_sha": "6dbba8dd87743b2c66d214fc2fd6312048f037e9",
+  "contract_ref": "refs/db-contracts/2772/12",
+  "contract_sha256": "bd8b76447cf68ef8632c0e31d119ad9bfaa179d9dced9feaef679c52c4650bb5",
+  "head_sha": "4faae0c522832a6ec33a37f59f507acf44a82b56",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -22,12 +22,12 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors at 4faae0c5."
     },
     {
       "command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py",
       "exit_code": 0,
-      "evidence": "192 passed, 165 subtests passed with scripts/test_production_review_source_pr_preflight.py included (adds producer-pin, type-shadowing after search_path, and CREATE TABLE IF NOT EXISTS cases from the #2771 grok review; the new cases fail against the pre-fix gate)."
+      "evidence": "189 passed, 158 subtests passed at 4faae0c5 (merge of origin/main f15f0f0e); pytest -q on the three named files."
     }
   ],
   "assumptions_resolved": [
