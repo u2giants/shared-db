@@ -1,48 +1,62 @@
 {
   "schema_version": 1,
-  "work_issue": 2775,
+  "work_issue": 2781,
   "outcome": "ready-for-merge",
-  "pr": 2777,
+  "pr": 2780,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2775/5",
-  "contract_sha256": "d5b33355c1121830a481c0804bef9a649fb0c682cb6d9dba181971fbacd26dee",
-  "head_sha": "f0aad106b37f161faf66393259964c13cf0191a8",
+  "contract_ref": "refs/db-contracts/2781/6",
+  "contract_sha256": "cbde92650b63e01d2af3081b671b1b8d44153c670fd3809a7d40afbcebf85aea",
+  "head_sha": "993e37456050ec0e2357926d3436e519815c24af",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
+    ".github/workflows/migration-author-lease.yml",
     "AGENTS.md",
-    "docs/agents/section-4-anti-collision-rules.md",
+    "config/orchestrator-global-invalidators-v1.json",
+    "scripts/check-exact-head-approval.mjs",
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/check-main-tip-freshness.mjs",
+    "scripts/check-main-tip-freshness.test.mjs",
+    "scripts/lib/pr-content-equivalence.mjs",
+    "scripts/lib/pr-content-equivalence.test.mjs",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/capacity-state.test.mjs"
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "git diff --check",
+      "command": "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "tests 31, pass 31, fail 0, skipped 0 at 993e3745: merge-only refresh ok, migration edit refused, main editing the same file outside the hunk context refused (fails against 5edc11f1), .agent-only change ok, nested .agent path compared, independent main move ok, overlapping file, version collision and conflict refused."
     },
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+      "command": "node --test scripts/check-exact-head-approval.test.mjs",
       "exit_code": 0,
-      "evidence": "524 tests passed, 0 failed, 0 skipped."
+      "evidence": "tests 53, pass 53, fail 0, skipped 0 at 993e3745, including approval carried across an equivalent refresh, refused when the diff changed, refused when the new head has its own assignment or return, and refused when an equivalent head known only by its verdict cannot be read (fails against 5edc11f1)."
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=275"
+      "evidence": "tests 522, pass 522, fail 0, skipped 0 at 993e3745, including durable approval carried to an equivalent later head, refused when that head has its own assignment or return, and refused when an equivalent head known only by its verdict is unreadable (fails against 5edc11f1)."
     },
     {
-      "command": "node scripts/check-github-transport-conformance.mjs",
+      "command": "python -m pytest scripts/test_production_business_risk_gate.py",
       "exit_code": 0,
-      "evidence": "212 files scanned, all calls governed."
+      "evidence": "143 passed, 0 failed, 145 subtests passed at 993e3745; the unrelated-sidecar and quoted-identifier tests pass."
+    },
+    {
+      "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 6, pass 6, fail 0, skipped 0 at 993e3745; the invalidator inventory covers the manager import closure including scripts/lib/pr-content-equivalence.mjs, which is also a pinned preview producer path."
     }
   ],
   "assumptions_resolved": [
-    "Owner ruling on marker 2758 removes the lane cap outright; no replacement number was introduced."
+    "The PR diff against its merge base, root .agent/ aside, is compared byte-exactly, and any path main also changed between the two merge bases refuses the carry, so a combined file always gets a new review.",
+    "A later sidecar keeps the preview proof only when its migration shares no schema-qualified object (quoted or bare) with every promoted migration; any doubt refuses.",
+    "A head with reviewer records of its own is judged on those alone; prior heads are found through assignments, returns and verdicts, and an unreadable equivalent head refuses the carry."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Stacked on #2767 (b729dd3b). MAX_AUTHOR_LANES and all capacity refusals deleted; collision locks and version reservations unchanged. Ready for exact-head review, required CI, and guarded merge after #2767 lands."
+  "stop_conditions_hit": []
 }

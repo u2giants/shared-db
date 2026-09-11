@@ -1,50 +1,65 @@
 {
   "schema_version": 1,
-  "work_issue": 2775,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Remove the migration author lane cap entirely: no capacity refusal anywhere, with exact object collision locks and version reservations unchanged.",
-  "base_sha": "120fb6125907386ce2b93bd9ae0a91de700fb738",
-  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
-  "worker": "Claude sub-agent of marker 2758 (no lane cap)",
-  "branch": "claude/author-lanes-no-cap-2775",
+  "work_issue": 2781,
+  "generation": 6,
+  "work_type": "tooling",
+  "route": "shared-db-orchestrator",
+  "goal": "Keep reviewer approvals, guarded-merge freshness and production preview proofs valid across main refreshes that leave the pull request's own change untouched, while still refusing any overlap, conflict, version collision or change of the pull request's own diff.",
+  "base_sha": "153b7754155a22b8541349cc7fe372d14c4e4c96",
+  "dispatcher": "Claude shared-db orchestrator marker2758",
+  "worker": "Claude approval-carry-forward worker",
+  "branch": "claude/approval-carry-over-main-refresh",
   "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "config/orchestrator-global-invalidators-v1.json",
+    ".github/workflows/migration-author-lease.yml",
     "AGENTS.md",
-    "docs/agents/section-4-anti-collision-rules.md",
+    "scripts/check-exact-head-approval.mjs",
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/check-main-tip-freshness.mjs",
+    "scripts/check-main-tip-freshness.test.mjs",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/capacity-state.test.mjs"
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/lib/pr-content-equivalence.mjs",
+    "scripts/lib/pr-content-equivalence.test.mjs"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "config/orchestrator-global-invalidators-v1.json",
+    ".github/workflows/migration-author-lease.yml",
     "AGENTS.md",
-    "docs/agents/section-4-anti-collision-rules.md",
+    "scripts/check-exact-head-approval.mjs",
+    "scripts/check-exact-head-approval.test.mjs",
+    "scripts/check-main-tip-freshness.mjs",
+    "scripts/check-main-tip-freshness.test.mjs",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/capacity-state.test.mjs"
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/lib/pr-content-equivalence.mjs",
+    "scripts/lib/pr-content-equivalence.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not modify a migration or any database state.",
-    "Do not weaken exact object claims, version reservations, the acquisition mutex, or serial stage refs.",
-    "Do not change reviewer leases, exclusions, exact-head binding, or verdict recording."
+    "No shared database reads or writes, no production or preview apply, no migration files, no fabricated reviews."
   ],
   "required_checks": [
-    "git diff --check",
-    "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "node scripts/check-github-transport-conformance.mjs"
+    "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
+    "node --test scripts/check-exact-head-approval.test.mjs",
+    "node --test scripts/manage-migration-author-lanes.test.mjs"
   ],
   "assumptions": [
-    "Owner ruling relayed on marker 2758: there must be no limit on migration author lanes, at all, ever."
+    "The byte-level PR diff against its merge base, .agent evidence aside, is the right identity for an approved change.",
+    "A later sidecar of another migration version is not a producer for the promoted version unless their migrations share a schema-qualified object."
   ],
   "stop_conditions": [
-    "Stop if implementation requires a database or production write."
-  ],
-  "generation": 5
+    "Any required check fails.",
+    "A relaxation would accept a change of the pull request's own diff, an overlapping file, a migration version collision, a merge conflict, or a shared database object."
+  ]
 }
