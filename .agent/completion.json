@@ -2,11 +2,11 @@
   "schema_version": 1,
   "work_issue": 2723,
   "outcome": "ready-for-merge",
-  "pr": null,
+  "pr": 2725,
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2723/1",
   "contract_sha256": "ff2addebc0b9874029e5cca8d5ec7e1050dabed5293a7deea38f1ebc61b268f0",
-  "head_sha": "a671cd47aaf7608c07a9db31822d3c708fda85b3",
+  "head_sha": "b35166996bed0e05d65915dc72cf970861cc068b",
   "files_changed": [
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
