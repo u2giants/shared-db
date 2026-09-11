@@ -8,7 +8,7 @@
   ],
   "contract_ref": "refs/db-contracts/2712/1",
   "contract_sha256": "4606f577186f7a3a3d21b9fed8f4311f595e33e6f9014d828e2b83d0bbd41067",
-  "head_sha": "246f97608bbfdc79caca6619bbae10ec5b337d23",
+  "head_sha": "207019205b602795f9f1141efaf6748ac8ca17d0",
   "files_changed": [
     "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
     "supabase/tests/hts_rag_shared_schema_contract.sql"
@@ -38,17 +38,22 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors at implementation head 70adaa861f672ab86a46297193e65dcc089d1ddc."
+      "evidence": "No whitespace errors at implementation head 207019205b602795f9f1141efaf6748ac8ca17d0."
     },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "SQL migration guards job passed on PR 2765 (run 34603204304 and at the implementation head)."
+      "evidence": "SQL migration guards job passed on PR 2765 (run 34603204304 and at c8c557174c84794716bd0e3448369bc9b03c2259); the migration file is unchanged since."
+    },
+    {
+      "command": "psql contract test in a rolled-back transaction",
+      "exit_code": 0,
+      "evidence": "hts_rag_shared_schema_contract.sql passed at implementation head 207019205b602795f9f1141efaf6748ac8ca17d0 against a local PostgreSQL 17 cluster with migration 20260911124845 applied; a negative control granting EXECUTE on the promotion-gate trigger function to designflow_hts_alsand_worker made it fail as intended."
     },
     {
       "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "Database Contract Tests run 34609342984 passed at implementation head 70adaa861f672ab86a46297193e65dcc089d1ddc; migration 20260911124845 replayed from empty and hts_rag_shared_schema_contract.sql passed: worker provenance, bounded updates, no delete/truncate, immutable promotion gate, runtime visibility limited to qualified operative precedents, anon/authenticated/service_role denied."
+      "evidence": "Database Contract Tests run 34614159509 passed at c8c557174c84794716bd0e3448369bc9b03c2259 with the previous test revision; migration 20260911124845 replayed from empty. The hosted run for this head is produced by CI on push."
     }
   ],
   "assumptions_resolved": [
