@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2781,
-  "generation": 5,
+  "generation": 6,
   "work_type": "tooling",
   "route": "shared-db-orchestrator",
   "goal": "Keep reviewer approvals, guarded-merge freshness and production preview proofs valid across main refreshes that leave the pull request's own change untouched, while still refusing any overlap, conflict, version collision or change of the pull request's own diff.",

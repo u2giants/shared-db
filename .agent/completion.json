@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2780,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2781/5",
-  "contract_sha256": "7897cd8dce892efe9eda514ed4f799a048f3db09fde01e67df0c4a2e916c99d1",
-  "head_sha": "d726f7cfb6437a2da0afefd1b221d3ed27c3d5a0",
+  "contract_ref": "refs/db-contracts/2781/6",
+  "contract_sha256": "cbde92650b63e01d2af3081b671b1b8d44153c670fd3809a7d40afbcebf85aea",
+  "head_sha": "993e37456050ec0e2357926d3436e519815c24af",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -30,33 +30,33 @@
     {
       "command": "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 30, pass 30, fail 0, skipped 0 at d726f7cf: merge-only refresh ok, migration edit refused, .agent-only change ok, nested .agent path compared, independent main move ok, overlapping file, version collision and conflict refused."
+      "evidence": "tests 31, pass 31, fail 0, skipped 0 at 993e3745: merge-only refresh ok, migration edit refused, main editing the same file outside the hunk context refused (fails against 5edc11f1), .agent-only change ok, nested .agent path compared, independent main move ok, overlapping file, version collision and conflict refused."
     },
     {
       "command": "node --test scripts/check-exact-head-approval.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 52, pass 52, fail 0, skipped 0 at d726f7cf, including approval carried across an equivalent refresh, refused when the diff changed, and refused when the new head has its own assignment or return (both new tests fail against e7efa555)."
+      "evidence": "tests 53, pass 53, fail 0, skipped 0 at 993e3745, including approval carried across an equivalent refresh, refused when the diff changed, refused when the new head has its own assignment or return, and refused when an equivalent head known only by its verdict cannot be read (fails against 5edc11f1)."
     },
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 521, pass 521, fail 0, skipped 0 at d726f7cf, including durable approval carried to an equivalent later head and refused when that head has its own assignment or return (both new tests fail against e7efa555)."
+      "evidence": "tests 522, pass 522, fail 0, skipped 0 at 993e3745, including durable approval carried to an equivalent later head, refused when that head has its own assignment or return, and refused when an equivalent head known only by its verdict is unreadable (fails against 5edc11f1)."
     },
     {
       "command": "python -m pytest scripts/test_production_business_risk_gate.py",
       "exit_code": 0,
-      "evidence": "143 passed, 0 failed, 145 subtests passed at d726f7cf; the unrelated-sidecar test passes and the new quoted-identifier test passes (it fails against e7efa555)."
+      "evidence": "143 passed, 0 failed, 145 subtests passed at 993e3745; the unrelated-sidecar and quoted-identifier tests pass."
     },
     {
       "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 6, pass 6, fail 0, skipped 0 at d726f7cf; the invalidator inventory covers the manager import closure including scripts/lib/pr-content-equivalence.mjs, which is now also a pinned preview producer path."
+      "evidence": "tests 6, pass 6, fail 0, skipped 0 at 993e3745; the invalidator inventory covers the manager import closure including scripts/lib/pr-content-equivalence.mjs, which is also a pinned preview producer path."
     }
   ],
   "assumptions_resolved": [
-    "The PR diff against its merge base, root .agent/ aside, is compared byte-exactly so whitespace SQL edits still need review.",
+    "The PR diff against its merge base, root .agent/ aside, is compared byte-exactly, and any path main also changed between the two merge bases refuses the carry, so a combined file always gets a new review.",
     "A later sidecar keeps the preview proof only when its migration shares no schema-qualified object (quoted or bare) with every promoted migration; any doubt refuses.",
-    "A head with reviewer records of its own is judged on those alone; an approval is carried only onto a head no reviewer has touched."
+    "A head with reviewer records of its own is judged on those alone; prior heads are found through assignments, returns and verdicts, and an unreadable equivalent head refuses the carry."
   ],
   "stop_conditions_hit": []
 }
