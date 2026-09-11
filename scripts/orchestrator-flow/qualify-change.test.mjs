@@ -4,7 +4,7 @@ import test from 'node:test'
 import { qualifyChange } from './qualify-change.mjs'
 import { canonicalJson, sha256 } from './evidence-bundle.mjs'
 
-const target={issue:1,pr:2,base_sha:'9'.repeat(40),head_sha:'a'.repeat(40)}
+const target={repository:'u2giants/shared-db',issue:1,pr:2,base_sha:'9'.repeat(40),head_sha:'a'.repeat(40)}
 const classified=(impact)=>{const files=[{path:'change',sha256:'c'.repeat(64),impact,reason:'exact impact evidence'}],applicable_checks=['unit-tests'],required=impact!=='application-only';return{schema_version:1,...target,decision:required?'DATABASE_PREVIEW_REQUIRED':'NO_DATABASE_PREVIEW',reason_code:required?`impact_${impact.replaceAll('-','_')}`:'proven_non_database_change',inspected_digest:sha256(canonicalJson({classifier_version:1,...target,files,applicable_checks})),files,applicable_checks,invalidated_by:['file-content-change','file-set-change','impact-evidence-change','applicable-check-change','classifier-version-change']}}
 const databasePreview=classified('database-structure')
 const preview={...target,bundle_id:'b'.repeat(64),database_preview:databasePreview,inspected_files:databasePreview.files,versions:['20260828030000'],main_versions:['20260828010000'],preview_versions:['20260828010000'],claims:[],dependency_closure_complete:true,merged:false}

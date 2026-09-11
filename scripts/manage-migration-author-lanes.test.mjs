@@ -5031,7 +5031,7 @@ function mergedRehearsalIo({version='20260828232207',migration=`supabase/migrati
 }
 
 test('live no-database-preview returns before claims, pull requests, reviews, or preview evidence are read',()=>{
-  const target={issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40)},files=[{path:'scripts/tool.mjs',sha256:'a'.repeat(64),impact:'reviewer-tooling',reason:'reviewer-only change'}],applicable_checks=['unit-tests']
+  const target={repository:'u2giants/shared-db',issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40)},files=[{path:'scripts/tool.mjs',sha256:'a'.repeat(64),impact:'reviewer-tooling',reason:'reviewer-only change'}],applicable_checks=['unit-tests']
   const database_preview={schema_version:1,...target,decision:'NO_DATABASE_PREVIEW',reason_code:'proven_non_database_change',inspected_digest:sha256(canonicalJson({classifier_version:1,...target,files,applicable_checks})),files,applicable_checks,invalidated_by:['file-content-change','file-set-change','impact-evidence-change','applicable-check-change','classifier-version-change']}
   const forbidden=()=>{throw new Error('late database admission dependency must not run')}
   const evidence={...target,bundle_id:'b'.repeat(64),database_preview,inspected_files:files.map(({path,sha256})=>({path,sha256}))}
@@ -5041,7 +5041,7 @@ test('live no-database-preview returns before claims, pull requests, reviews, or
 })
 
 test('the live adapter reads one explicit classification file once and fails closed on unreadable or ambiguous input',()=>{
-  const evidence={issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40),bundle_id:'b'.repeat(64)}
+  const evidence={repository:'u2giants/shared-db',issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40),bundle_id:'b'.repeat(64)}
   let reads=0
   const io=withDatabasePreviewClassificationFile({databasePreviewClassification:githubIo.databasePreviewClassification},'classification.json',{reader:()=>{reads++;return JSON.stringify(evidence)}})
   assert.deepEqual(io.databasePreviewClassification(433),evidence);assert.deepEqual(io.databasePreviewClassification(433),evidence);assert.equal(reads,1)
@@ -5052,16 +5052,22 @@ test('the live adapter reads one explicit classification file once and fails clo
 })
 
 test('claim, reviewer, and shared-stage admission cannot ignore supplied no-preview evidence',()=>{
-  const target={issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40)},files=[{path:'scripts/tool.mjs',sha256:'a'.repeat(64),impact:'reviewer-tooling',reason:'reviewer-only change'}],applicable_checks=['unit-tests']
+  const target={repository:'u2giants/shared-db',issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40)},files=[{path:'scripts/tool.mjs',sha256:'a'.repeat(64),impact:'reviewer-tooling',reason:'reviewer-only change'}],applicable_checks=['unit-tests']
   const database_preview={schema_version:1,...target,decision:'NO_DATABASE_PREVIEW',reason_code:'proven_non_database_change',inspected_digest:sha256(canonicalJson({classifier_version:1,...target,files,applicable_checks})),files,applicable_checks,invalidated_by:['file-content-change','file-set-change','impact-evidence-change','applicable-check-change','classifier-version-change']}
   const evidence={...target,bundle_id:'b'.repeat(64),database_preview,inspected_files:files.map(({path,sha256})=>({path,sha256}))}
-  const io={databasePreviewClassificationEvidence:evidence,databasePreviewClassification:githubIo.databasePreviewClassification}
-  for(const command of [{claim:true,issue:433},{assignReviewer:true,issue:433},{acquireExclusive:'preview',issue:433},{preparePreviewDispatch:433}]){
+  const live={number:99,state:'open',base:{sha:target.base_sha,repo:{full_name:target.repository}},head:{sha:target.head_sha}}
+  const io={databasePreviewClassificationEvidence:evidence,databasePreviewClassification:githubIo.databasePreviewClassification,getPr:()=>live}
+  for(const command of [{claim:true,issue:433,pr:99},{assignReviewer:true,issue:433,pr:99},{acquireExclusive:'preview',issue:433,pr:99},{preparePreviewDispatch:433,pr:99}]){
     const result=databasePreviewAdmission(command,io);assert.equal(result.decision,'NO_DATABASE_PREVIEW');assert.equal(result.next_action,'return-to-natural-owner')
   }
   for(const command of [{claim:true,issue:433},{assignReviewer:true,issue:433},{acquireExclusive:'merge',issue:433}])assert.equal(databasePreviewAdmission(command,{databasePreviewClassificationEvidence:null}).decision,'DATABASE_PREVIEW_REQUIRED')
-  assert.throws(()=>databasePreviewAdmission({claim:true,issue:434},io),/not #434/)
-  assert.throws(()=>databasePreviewAdmission({assignReviewer:true,issue:433},{...io,databasePreviewClassificationEvidence:{...evidence,database_preview:{...database_preview,head_sha:'7'.repeat(40)}}}),/unverifiable/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:434,pr:99},io),/not #434/)
+  assert.throws(()=>databasePreviewAdmission({assignReviewer:true,issue:433,pr:99},{...io,databasePreviewClassificationEvidence:{...evidence,database_preview:{...database_preview,head_sha:'7'.repeat(40)}}}),/unverifiable/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,getPr:()=>({...live,base:{...live.base,sha:'7'.repeat(40)}})}),/authenticated live pull request/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,getPr:()=>({...live,head:{sha:'7'.repeat(40)}})}),/authenticated live pull request/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,databasePreviewClassificationEvidence:{...evidence,repository:'attacker/fork'}}),/exact command repository/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:100},io),/exact command repository/)
+  assert.throws(()=>databasePreviewAdmission({claim:true,issue:433,pr:99},{...io,getPr:()=>null}),/authenticated live pull request/)
 })
 
 function immutablePreviewApplyIo({sourcePr=1809,artifactRunId='33308168016',mergeCommitSha='b'.repeat(40)}={}){
