@@ -1,42 +1,44 @@
 {
   "schema_version": 1,
-  "work_issue": 2723,
+  "work_issue": 2664,
   "outcome": "ready-for-merge",
-  "pr": 2725,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2723/2",
-  "contract_sha256": "ceb50dd6bbdfb70e359c05ae2b8446461cde49f99033e3e7c452357eda63d936",
-  "head_sha": "3386ff8869180e39f2d92ee9889a045f8d256894",
-  "files_changed": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/verify_preview_apply_artifact.py",
-    "scripts/test_verify_preview_apply_artifact.py",
-    ".agent/contract.json",
-    ".agent/completion.json"
+  "pr": 2748,
+  "migration_versions": [
+    "20260911081204"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2664/1",
+  "contract_sha256": "feb2bb30115ed8d19179e90ab079c8f48cc1f578bfa2021a53c5d3de7bc58d72",
+  "head_sha": "e03eb06923f7d9125e447fa7070caf5529b07f6b",
+  "files_changed": [
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
+    "supabase/tests/dam_order_list_find_position.sql",
+    "scripts/test_order_list_find_position.py"
+  ],
+  "db_reads": [
+    "view api.dam_order_list"
+  ],
+  "db_writes": [
+    "function public.find_dam_order_list_row"
+  ],
   "checks": [
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "514 passed, 0 failed, 0 skipped; combined manager and governed-review suite also passed 563 tests."
+      "evidence": "Static guards passed; live-ledger check not configured. No shared database writes."
     },
     {
-      "command": "python scripts/test_verify_preview_apply_artifact.py",
+      "command": "python scripts/test_order_list_find_position.py",
       "exit_code": 0,
-      "evidence": "4 test groups pass, including altered digest, run, preview target, ledger additions/removals, duplicate ZIP names, historical recovery rejection and changed migration bytes."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "TEST_DATABASE_URL pointed to loopback127.0.0.1:55486; fresh uniquely-created database was removed afterward.14 expected-position cases,4 independent ranking parity cases, wildcard/null/JS-trim/RLS/auth/injection contracts passed;0 skipped."
     }
   ],
   "assumptions_resolved": [
-    "Read-only real2466 proof passed: original run34388774773 artifact10118828990 SHA2561cb18ecb1b7f91ab1d318bcc2434b6345c5166bdfcd3f762a39c212846f0937e; exact ledger addition20260909132734 and migration content checked at ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05.",
-    "One independent review, CI and parent merge remain required."
+    "PopDAM main562dc999ac0039e017fd6b0fd0e32c6172ac6893 helpers define9 search fields, normalized filters and ascending-boolean sort, defaultorder_date descending/null-last/id ascending.",
+    "Duplicate2665 closed as duplicate, not delivered;2664 is canonical underclaim2747.",
+    "Draft preparation only: independent paid review, shared-preview plan/runtime proof and merge remain held for parent priority2734 and2703.",
+    "No application code or data writes, no shared database writes, no timeout changes."
   ],
   "stop_conditions_hit": []
 }
