@@ -2332,6 +2332,71 @@ export function reviewActiveRef(reviewer,assignment=null){
 function reviewLeaseRefForAssignment(assignment,parallel=false){return parallel&&/^[0-9a-f]{40}$/i.test(String(assignment?.headSha??''))?reviewActiveRef(assignment.reviewer,assignment):reviewActiveRef(assignment.reviewer)}
 function reviewLeaseIdentity(assignment){return `${assignment.reviewer}:${assignment.issue}:${assignment.pr}:${String(assignment.headSha).toLowerCase()}:${assignment.slot??1}:${assignment.sequence}`}
 function activeLeaseRecordForAssignment(busy,assignment){return busy?.byAssignment?.get(reviewLeaseIdentity(assignment))??null}
+// Every live lease that matches one assignment TUPLE, read out of the
+// assignment-keyed index rather than the reviewer-keyed `leases` compatibility
+// view. `leases` is Map(reviewer -> LAST record), so the moment one provider may
+// hold two independent jobs it can hide the very job a repair path is fixing
+// (#2694 review, high finding 4). Repair paths ask by tuple, never by identity.
+function activeLeaseRecordsForJob(busy,{issue,pr,headSha,sequence}){
+  const head=String(headSha??'').toLowerCase()
+  return [...(busy?.byAssignment?.values()??[])].filter((row)=>row.lease.issue===issue&&row.lease.pr===pr&&String(row.lease.headSha).toLowerCase()===head&&row.lease.sequence===sequence)
+}
+function activeLeaseRecordForJob(busy,job){return activeLeaseRecordsForJob(busy,job)[0]??null}
+// The names a lease for this assignment can legitimately live under: the new
+// per-assignment v2 ref, and the pre-cutover one-provider ref an in-flight
+// review is still holding. The caller picks whichever one actually HOLDS it.
+function reviewLeaseRefCandidates(assignment,parallel){
+  const refs=[reviewLeaseRefForAssignment(assignment,parallel)]
+  const legacy=reviewActiveRef(assignment.reviewer)
+  if(!refs.includes(legacy))refs.push(legacy)
+  return refs
+}
+// Does `ref` hold the lease for exactly THIS assignment? Returns its SHA, or
+// null. Fail-closed: an unreadable commit, an unparseable lease, or a lease that
+// names any other tuple answers null rather than "close enough".
+function leaseMatchesAssignment(lease,assignment){
+  if(!lease)return false
+  if(lease.reviewer!==assignment.reviewer||lease.issue!==Number(assignment.issue)||lease.pr!==Number(assignment.pr)||String(lease.headSha).toLowerCase()!==String(assignment.headSha??'').toLowerCase())return false
+  if(assignment.sequence!==undefined&&assignment.sequence!==null&&lease.sequence!==Number(assignment.sequence))return false
+  if(lease.slot!==null&&assignment.slot!==undefined&&assignment.slot!==null&&lease.slot!==Number(assignment.slot))return false
+  return true
+}
+function leaseRefHoldsAssignment(ref,assignment,io){
+  let sha
+  try{sha=io.readRef(ref)}catch{return null}
+  if(!sha)return null
+  let lease
+  try{lease=parseReviewLease(io.getCommit(sha))}catch{return null}
+  return leaseMatchesAssignment(lease,assignment)?sha:null
+}
+// The ref that ACTUALLY holds this assignment's lease. `reviewLeaseRefForAssignment`
+// alone always computes the v2 name on production, so every mutation path that
+// used it aimed its compare-and-swap at a ref a legacy in-flight lease does not
+// live in (#2694 review, high finding 2). The looked-up snapshot record's own
+// `.ref` wins; otherwise each candidate is PROVED to hold this exact assignment
+// before it is chosen. When nothing holds it the canonical v2 name is returned,
+// so the caller's existing "lease does not match" refusal still fires.
+function resolveAssignmentLeaseRef(assignment,parallel,io,busy=null){
+  const cached=busy?activeLeaseRecordForAssignment(busy,assignment):null
+  if(cached?.ref)return cached.ref
+  const candidates=reviewLeaseRefCandidates(assignment,parallel)
+  // `leaseSnapshot` is the complete-or-refused listing findBusyReviewers already
+  // paid for. When it is present it ANSWERS this question with no extra wire
+  // read: a candidate it does not carry does not exist.
+  const snapshot=busy?.leaseSnapshot
+  if(snapshot instanceof Map){
+    for(const ref of candidates){
+      const row=snapshot.get(ref)
+      if(!row?.sha)continue
+      let lease=null
+      try{lease=parseReviewLease(row.commit??io.getCommit(row.sha))}catch{lease=null}
+      if(leaseMatchesAssignment(lease,assignment))return ref
+    }
+    return reviewLeaseRefForAssignment(assignment,parallel)
+  }
+  for(const ref of candidates)if(leaseRefHoldsAssignment(ref,assignment,io))return ref
+  return reviewLeaseRefForAssignment(assignment,parallel)
+}
 
 export function parseReviewLease(commit){
   if(!commit)return null
@@ -2835,9 +2900,17 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
       // make the distinction explicit.  Retaining an old approved assignment is
       // mandatory; only the row that still owns its matching active lease may
       // be returned by this exclusion.
-      const leaseRef=reviewLeaseRefForAssignment({...parsed,slot:named.slot},Boolean(io.requiresExactReviewHeadSha))
-      if(io.readRef(leaseRef)!==row.sha)continue
-      held.push({ref:row.ref,sha:row.sha,headSha:named.headSha,slot:named.slot,replacementSequence:named.replacementSequence,sequence:parsed.sequence})
+      // READ KEY AND WRITE KEY ARE THE SAME OBJECT. The scan used to name only
+      // the v2 ref while the release below deleted the one-provider ref, so for
+      // an in-flight legacy lease the two never described the same thing: the
+      // assignment was skipped as "not outstanding" (no return recorded) and the
+      // live legacy lease was dropped anyway, leaving a slot no re-run could
+      // return (#2694 review, critical finding 1). Both candidate names are
+      // probed here, and whichever one actually holds this assignment SHA is
+      // carried on the row and is the one the release deletes.
+      const leaseRef=reviewLeaseRefCandidates({...parsed,slot:named.slot},Boolean(io.requiresExactReviewHeadSha)).find((candidate)=>io.readRef(candidate)===row.sha)??null
+      if(!leaseRef)continue
+      held.push({ref:row.ref,sha:row.sha,headSha:named.headSha,slot:named.slot,replacementSequence:named.replacementSequence,sequence:parsed.sequence,leaseRef})
     }
     // A reviewer that already recorded a durable verdict for an assignment
     // FINISHED that work. Returning it would strip the assignment record the
@@ -2921,8 +2994,19 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
       const returns=scanOutstanding().map((row)=>({...row,
         returnRef:reviewReturnRef({issue,pr,headSha:row.headSha,slot:row.slot,assignmentSha:row.sha}),
         returnSha:(io.makeReviewVerdictCommit??io.makeOwnerCommit).call(io,`db-coordination reviewer-return reviewer=${reviewer} issue=${issue} pr=${pr} head=${row.headSha} slot=${row.slot} assignment=${row.sha} sequence=${row.sequence}${row.replacementSequence===null?'':` replacement=${row.replacementSequence}`} reason=${reason}`,row.sha)}))
-      const leaseRef=reviewActiveRef(reviewer),leaseSha=io.readRef(leaseRef)
-      const releaseLease=Boolean(leaseSha)&&(leaseSha===evidenceSha||returns.some((row)=>row.sha===leaseSha))
+      // Each returned assignment releases ITS OWN lease ref -- the one the scan
+      // proved holds that assignment SHA, legacy or v2. Deleting only the
+      // one-provider name left a post-cutover v2 lease alive after its
+      // assignment was returned, so the slot was both taken and un-redrawable
+      // (#2694 review, high finding 3).
+      const leaseReleases=new Map()
+      for(const row of returns)if(row.leaseRef&&io.readRef(row.leaseRef)===row.sha)leaseReleases.set(row.leaseRef,row.sha)
+      // An orphan one-provider lease sitting at the exclusion evidence SHA with
+      // no outstanding assignment behind it is still released, exactly as before.
+      const legacyLeaseRef=reviewActiveRef(reviewer),legacyLeaseSha=io.readRef(legacyLeaseRef)
+      if(legacyLeaseSha&&legacyLeaseSha===evidenceSha&&!leaseReleases.has(legacyLeaseRef))leaseReleases.set(legacyLeaseRef,legacyLeaseSha)
+      const leaseReleaseRows=[...leaseReleases].map(([ref,sha])=>({ref,sha}))
+      const releaseLease=leaseReleaseRows.length>0
       if(io.atomicReviewRefs){
         io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},...(repeat?[]:[{ref,expected:null,sha}]),
           // Create the return BEFORE clearing the assignment, in the same atomic
@@ -2930,9 +3014,9 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
           // neither does. There is no window where the assignment ref is gone
           // and nothing records why.
           ...returns.flatMap((row)=>[{ref:row.returnRef,expected:null,sha:row.returnSha},{ref:row.ref,expected:row.sha,sha:null}]),
-          ...(releaseLease?[{ref:leaseRef,expected:leaseSha,sha:null}]:[])])
-        const after=io.readReviewRefs([MUTEX_REF,ref,...returns.flatMap((row)=>[row.returnRef,row.ref]),...(releaseLease?[leaseRef]:[])])
-        if(after.get(MUTEX_REF)!==ownerSha||after.get(ref)!==sha||(releaseLease&&after.get(leaseRef)!==null))throw new LaneError('atomic reviewer exclusion readback mismatch')
+          ...leaseReleaseRows.map((row)=>({ref:row.ref,expected:row.sha,sha:null}))])
+        const after=io.readReviewRefs([MUTEX_REF,ref,...returns.flatMap((row)=>[row.returnRef,row.ref]),...leaseReleaseRows.map((row)=>row.ref)])
+        if(after.get(MUTEX_REF)!==ownerSha||after.get(ref)!==sha||leaseReleaseRows.some((row)=>after.get(row.ref)!==null))throw new LaneError('atomic reviewer exclusion readback mismatch')
         for(const row of returns)if(after.get(row.returnRef)!==row.returnSha||after.get(row.ref)!==null)throw new LaneError('atomic reviewer return readback mismatch')
         retireVerdictsOrphanedByReturn({issue,pr,returns:[...returns,...(repeat?.retryReturns??[])],ownerSha},io)
       }
@@ -2942,7 +3026,7 @@ export function excludeReviewerForPr({issue,pr,reviewer,reason,evidenceSha},io=g
         // can quietly reintroduce a non-compare-and-swap retirement.
         if(returns.length)throw new LaneError('returning a review slot requires atomic compare-and-swap ref support')
         if(!repeat&&!io.createRef(ref,sha)&&readRefAfterWrite(ref,sha,io)!==sha)throw new LaneError('reviewer exclusion record could not be proved')
-        if(releaseLease)releaseOwnedRef(leaseRef,leaseSha,io)
+        for(const row of leaseReleaseRows)releaseOwnedRef(row.ref,row.sha,io)
       }
       return {issue,pr,reviewer,reason,evidenceSha,ref,sha,releasedLease:releaseLease,
         returned:returns.map((row)=>({assignmentRef:row.ref,assignmentSha:row.sha,headSha:row.headSha,slot:row.slot,replacementSequence:row.replacementSequence,ref:row.returnRef,sha:row.returnSha}))}
@@ -3462,7 +3546,7 @@ function parseSilenceProbe(commit){
 function resolveSilentLease(options,io){
   const request={issue:Number(options.issue),pr:Number(options.pr),headSha:String(options.headSha??'').toLowerCase(),sequence:Number(options.failedSequence??options.sequence),slot:Number(options.slot??1)}
   if(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/.test(request.headSha)||!Number.isInteger(request.sequence)||!Number.isInteger(request.slot)||request.slot<1)throw new LaneError('silent reviewer operation requires exact issue, PR, 40-character head SHA, sequence, and review slot')
-  const original=resolveFailedReviewRecord({...request,failedSequence:request.sequence},io),leaseRef=reviewLeaseRefForAssignment({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha)),leaseSha=io.readRef(leaseRef),leaseCommit=leaseSha?io.getCommit(leaseSha):null,lease=leaseCommit?parseReviewLease(leaseCommit):null
+  const original=resolveFailedReviewRecord({...request,failedSequence:request.sequence},io),leaseRef=resolveAssignmentLeaseRef({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha),io),leaseSha=io.readRef(leaseRef),leaseCommit=leaseSha?io.getCommit(leaseSha):null,lease=leaseCommit?parseReviewLease(leaseCommit):null
   if(!lease||lease.issue!==request.issue||lease.pr!==request.pr||lease.headSha!==request.headSha||lease.sequence!==request.sequence||lease.slot!==request.slot||lease.reviewer!==original.reviewer)throw new LaneError('silent reviewer active lease does not match the exact durable assignment')
   return {request,original,leaseRef,leaseSha,lease:{...lease,heldSince:leaseCommit?.committedDate??leaseCommit?.committer?.date??leaseCommit?.commit?.committer?.date??null}}
 }
@@ -3842,9 +3926,10 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
       // never be drawn again for this pull request.
       if(exclusions.has(replacement.reviewer))throw new LaneError(`durable replacement reviewer ${replacement.reviewer} is excluded for this PR (${exclusions.get(replacement.reviewer).reason}); re-run the identical --exclude-reviewer to return this slot. The returned record is a REPLACEMENT, so --assign-reviewer will not refill it: draw the new reviewer with --replace-failed-reviewer for the same --failed-sequence.`)
       if(!eligibleNames.has(replacement.reviewer))throw new LaneError(`durable replacement sequence ${replacement.sequence} belongs to a retired, quarantined or orchestrator-conflicting reviewer ${replacement.reviewer}; its active lease was not recreated. Record a new governed replacement for this exact head`)
-      const replacementLeaseRef=reviewLeaseRefForAssignment({...replacement,slot:request.slot},concurrentLeases),liveReplacement=concurrentLeases?activeLeaseRecordForAssignment(preflightBusy,{...replacement,slot:request.slot}):preflightBusy.leases.get(reviewer.name),staleReplacement=preflightBusy.stale.find((row)=>row.ref===replacementLeaseRef)
+      const liveReplacement=concurrentLeases?activeLeaseRecordForAssignment(preflightBusy,{...replacement,slot:request.slot}):preflightBusy.leases.get(reviewer.name)
+      const replacementLeaseRef=liveReplacement?.ref??resolveAssignmentLeaseRef({...replacement,slot:request.slot},concurrentLeases,io,preflightBusy),staleReplacement=preflightBusy.stale.find((row)=>row.ref===replacementLeaseRef)
       if(liveReplacement&&liveReplacement.sha!==replacement.replacementSha&&!staleReplacement)throw new LaneError(`reviewer ${reviewer.name} has an unrelated live lease; assignment retry repair refused`)
-      const failed=[...preflightBusy.leases.values()].find((row)=>row.lease.issue===request.issue&&row.lease.pr===request.pr&&row.lease.headSha===request.headSha&&row.lease.sequence===replacement.failedSequence)
+      const failed=activeLeaseRecordForJob(preflightBusy,{issue:request.issue,pr:request.pr,headSha:request.headSha,sequence:replacement.failedSequence})
       requireOwnedRef(MUTEX_REF,ownerSha,io)
       const freshStates=io.readReviewStates?.([replacement,...(staleReplacement?[staleReplacement.assignment]:[])])
       assertReviewRequestEligible(request,freshStates,io)
@@ -3867,7 +3952,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
     }
     const priorSha=io.readRef(assignmentRef)
     if(priorSha){
-      const prior=parseReviewCursor(io.getCommit(priorSha)),leaseRef=reviewLeaseRefForAssignment({...prior,slot:request.slot},concurrentLeases),preflightLease=activeLeaseRecordForAssignment(preflightBusy,{...prior,slot:request.slot}),stalePrior=preflightBusy.stale.find((row)=>row.ref===leaseRef&&row.sha===priorSha)
+      const prior=parseReviewCursor(io.getCommit(priorSha)),preflightLease=activeLeaseRecordForAssignment(preflightBusy,{...prior,slot:request.slot}),leaseRef=preflightLease?.ref??resolveAssignmentLeaseRef({...prior,slot:request.slot},concurrentLeases,io,preflightBusy),stalePrior=preflightBusy.stale.find((row)=>row.ref===leaseRef&&row.sha===priorSha)
       // Same deliberate refusal as the replacement branch above: the assignment
       // path never retires a slot itself. See the comment there.
       if(exclusions.has(prior.reviewer))throw new LaneError(`durable assignment reviewer ${prior.reviewer} is excluded for this PR (${exclusions.get(prior.reviewer).reason}); re-run the identical --exclude-reviewer to return this slot, then re-run this --assign-reviewer to draw a fresh reviewer for it.`)
@@ -4271,7 +4356,7 @@ export function releaseFailedReviewer(options,io=githubIo){
     if(priorFailureSha){
       const prior=parseReviewRelease(io.getCommit(priorFailureSha))
       if(prior.issue!==request.issue||prior.pr!==request.pr||prior.headSha!==request.headSha||prior.failedSequence!==request.failedSequence||prior.reviewer!==original.reviewer||prior.failureCode!==String(options.failureCode))throw new LaneError('immutable reviewer release evidence does not match this request')
-      if(io.readRef(failedLeaseRef)!==null)throw new LaneError('reviewer release evidence exists but the active lease is still present; reconciliation requires manual audit')
+      if(reviewLeaseRefCandidates({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha)).some((candidate)=>leaseRefHoldsAssignment(candidate,{...original,slot:request.slot},io)))throw new LaneError('reviewer release evidence exists but the active lease is still present; reconciliation requires manual audit')
       throw new LaneError(`reviewer ${original.reviewer} terminal failure was already released with immutable evidence ${priorFailureSha}`)
     }
     const preflightBusy=findBusyReviewers(io,[request])
@@ -4279,7 +4364,7 @@ export function releaseFailedReviewer(options,io=githubIo){
     const state=preflightBusy.states?.get(`${request.issue}:${request.pr}`),issueRow=state?.issue??io.getIssue(request.issue),prRow=state?.pr??io.getPr(request.pr)
     if(!reviewIssueEligible(issueRow,prRow,io)||!reviewTargetEligible(prRow,io)||prRow?.head?.sha!==request.headSha)throw new LaneError('reviewer release requires the exact eligible PR head')
     if(hasVerdictForHead(request.issue,request.pr,request.headSha,io,{slot:request.slot}))throw new LaneError('an existing verdict for the exact head forbids reviewer release')
-    const cached=activeLeaseRecordForAssignment(preflightBusy,{...original,slot:request.slot}),failedLeaseSha=cached?.sha??io.readRef(failedLeaseRef),failedLease=failedLeaseSha?(cached?.sha===failedLeaseSha?cached.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
+    const cached=activeLeaseRecordForAssignment(preflightBusy,{...original,slot:request.slot}),leaseRefForRelease=resolveAssignmentLeaseRef({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha),io,preflightBusy),failedLeaseSha=cached?.sha??io.readRef(leaseRefForRelease),failedLease=failedLeaseSha?(cached?.sha===failedLeaseSha?cached.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
     if(!failedLease||![failedLease.issue,failedLease.pr,failedLease.headSha,failedLease.sequence,failedLease.reviewer].every((value,index)=>value===[request.issue,request.pr,request.headSha,request.failedSequence,original.reviewer][index]))throw new LaneError('failed reviewer active lease does not match the terminal failure evidence')
     if(typeof io.atomicReviewRefs!=='function'||typeof io.readReviewRefs!=='function')throw new LaneError('reviewer release requires atomic compare-and-swap ref support')
     const checkNote=String(options.failingCheck??'').trim()?` failing-check=${String(options.failingCheck).trim().replace(/\s+/g,'_')}`:''
@@ -4290,11 +4375,11 @@ export function releaseFailedReviewer(options,io=githubIo){
       requireReviewWireCapacity(8);acquireReviewMutex(ownerSha,io);acquired=true;requireOwnedRef(MUTEX_REF,ownerSha,io)
       const freshStates=io.readReviewStates([original]),fresh=freshStates?.get(`${request.issue}:${request.pr}`)
       if(!reviewIssueEligible(fresh?.issue,fresh?.pr,io)||!reviewTargetEligible(fresh?.pr,io)||fresh?.pr?.head?.sha!==request.headSha||hasVerdictForHead(request.issue,request.pr,request.headSha,io,{fresh:true,slot:request.slot}))throw new LaneError('reviewer release issue, PR head, or verdict changed after mutex acquisition')
-      const locked=io.readReviewRefs([MUTEX_REF,failureRef,failedLeaseRef])
-      if(locked.get(MUTEX_REF)!==ownerSha||locked.get(failureRef)!==null||locked.get(failedLeaseRef)!==failedLeaseSha)throw new LaneError('reviewer release ownership changed after preflight')
-      io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},{ref:failureRef,expected:null,sha:failureSha},{ref:failedLeaseRef,expected:failedLeaseSha,sha:null}])
-      const after=io.readReviewRefs([MUTEX_REF,failureRef,failedLeaseRef])
-      if(after.get(MUTEX_REF)!==ownerSha||after.get(failureRef)!==failureSha||after.get(failedLeaseRef)!==null)throw new LaneError('atomic reviewer release readback mismatch')
+      const locked=io.readReviewRefs([MUTEX_REF,failureRef,leaseRefForRelease])
+      if(locked.get(MUTEX_REF)!==ownerSha||locked.get(failureRef)!==null||locked.get(leaseRefForRelease)!==failedLeaseSha)throw new LaneError('reviewer release ownership changed after preflight')
+      io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},{ref:failureRef,expected:null,sha:failureSha},{ref:leaseRefForRelease,expected:failedLeaseSha,sha:null}])
+      const after=io.readReviewRefs([MUTEX_REF,failureRef,leaseRefForRelease])
+      if(after.get(MUTEX_REF)!==ownerSha||after.get(failureRef)!==failureSha||after.get(leaseRefForRelease)!==null)throw new LaneError('atomic reviewer release readback mismatch')
       return {...request,reviewer:original.reviewer,failureCode:String(options.failureCode),failureSha,releasedLeaseSha:failedLeaseSha}
     }finally{if(acquired)finalizeReviewMutex(ownerSha,io)}
   })
@@ -4351,10 +4436,10 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       if(parsed.issue!==request.issue||parsed.pr!==request.pr||parsed.headSha!==request.headSha||parsed.failedSequence!==request.failedSequence||!reviewer)throw new LaneError('durable reviewer replacement does not match this retry')
       requireReplacementEvidence(parsed,io,fixedRecords)
       if(!eligibleNames.has(parsed.reviewer))throw new LaneError(`durable replacement sequence ${parsed.sequence} belongs to a retired, quarantined or orchestrator-conflicting reviewer ${parsed.reviewer}; its active lease was not recreated. Record a new governed replacement for this exact head`)
-      const failed=[...preflightBusy.leases.values()].find((row)=>row.lease.issue===request.issue&&row.lease.pr===request.pr&&row.lease.headSha===request.headSha&&row.lease.sequence===request.failedSequence)
-      const replacementLeaseRef=reviewLeaseRefForAssignment({...parsed,slot:request.slot},concurrentLeases)
-      const staleReplacement=preflightBusy.stale.find((row)=>row.ref===replacementLeaseRef)
+      const failed=activeLeaseRecordForJob(preflightBusy,{issue:request.issue,pr:request.pr,headSha:request.headSha,sequence:request.failedSequence})
       const liveReplacement=concurrentLeases?activeLeaseRecordForAssignment(preflightBusy,{...parsed,slot:request.slot}):preflightBusy.leases.get(parsed.reviewer)
+      const replacementLeaseRef=liveReplacement?.ref??resolveAssignmentLeaseRef({...parsed,slot:request.slot},concurrentLeases,io,preflightBusy)
+      const staleReplacement=preflightBusy.stale.find((row)=>row.ref===replacementLeaseRef)
       if(liveReplacement&&liveReplacement.sha!==priorReplacement&&!staleReplacement)throw new LaneError(`reviewer ${parsed.reviewer} has an unrelated live lease; idempotent replacement repair refused`)
       ownerSha=io.makeOwnerCommit(`db-coordination reviewer-replacement-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''}`)
       requireReviewWireCapacity(11);acquireReviewMutex(ownerSha,io);mutexAcquired=true
@@ -4465,7 +4550,8 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     // names one. That lets replacement prove the historical ref's presence or
     // absence without two extra REST reads. Truly unknown legacy names retain
     // the strict direct-read path.
-    const failedLeaseRef=reviewLeaseRefForAssignment({...original,slot:request.slot},concurrentLeases),cachedFailed=activeLeaseRecordForAssignment(preflightBusy,{...original,slot:request.slot})
+    const cachedFailed=activeLeaseRecordForAssignment(preflightBusy,{...original,slot:request.slot})
+    const failedLeaseRef=cachedFailed?.ref??resolveAssignmentLeaseRef({...original,slot:request.slot},concurrentLeases,io,preflightBusy)
     const snapshotFailed=preflightBusy.leaseSnapshot?.get(failedLeaseRef)??null
     const failedReviewerIsCatalogued=[...REVIEWERS,...OVERFLOW_REVIEWERS].some((row)=>row.name===original.reviewer)
     const catalogAbsenceProved=failedReviewerIsCatalogued&&preflightBusy.leaseSnapshot instanceof Map
@@ -4527,7 +4613,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     }
     if(!reviewer){
       const failedList=[...failedNames].filter((name)=>ACTIVE_REVIEWERS.some((row)=>row.name===name))
-      const busyList=[...preflightBusy].filter((name)=>!failedNames.has(name)).map((name)=>{const lease=preflightBusy.leases.get(name)?.lease;return `${name}${lease?` #${lease.issue}/PR #${lease.pr}`:''}`})
+      const busyList=[...preflightBusy].filter((name)=>!failedNames.has(name)).map((name)=>{const rows=preflightBusy.byReviewer?.get(name)??(preflightBusy.leases.get(name)?[preflightBusy.leases.get(name)]:[]);return `${name}${rows.map((row)=>` #${row.lease.issue}/PR #${row.lease.pr}`).join('')}`})
       const unavailable=ACTIVE_REVIEWERS.map((row)=>row.name).filter((name)=>!failedNames.has(name)&&!preflightBusy.has(name)&&(!eligibleNames.has(name)||name===excludedProvider||preflightExclusions.has(name)))
       const releaseCommand=failedReviewerReleaseCommand(request,{failureCode,failingCheck})
       const compatiblePrefix=request.slot===1?'no other reviewer is available':'no other independent reviewer is available for slot '+request.slot

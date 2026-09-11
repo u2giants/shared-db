@@ -5751,6 +5751,7 @@ test('#2694 returns a live exact-head assignment despite the same reviewer havin
   assert.ok(io.refs.get(oldAssignmentRef),'the approved historical assignment remains durable')
   assert.equal(io.refs.get(`refs/db-review-verdicts/${issue}-${pr}-${oldHead}`),oldEvidenceSha,'the historical verdict remains untouched')
   assert.equal(io.refs.get(currentAssignmentRef),undefined,'only the live current assignment is returned')
+  assert.equal(io.refs.get(reviewActiveRef(current.reviewer,current)),undefined,'the returned assignment own exact-head lease is released with it')
 })
 
 // A REPLACEMENT HOLDER STRANDS THE SLOT THE SAME WAY AN ORIGINAL DOES.
@@ -6789,4 +6790,117 @@ test('#2311 a reviewer with no active lease at all is told that, not told it hol
   assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
   assert.match(error.message,/holds no active lease at all/)
   assert.doesNotMatch(error.message,/the assignment for issue/,'there is no other assignment to name')
+})
+
+// #2694 REVIEW (REVISE at 2e4cc55a) -- THE PROOF SET FOR FINDINGS 1-4.
+//
+// Every test below drives a PRODUCTION-SHAPED io: `requiresExactReviewHeadSha`
+// is true, so the lane code names leases exactly as `githubIo` makes it. Each
+// one is red against the reviewed head:
+//   1  legacy exclusion -- the return scan read the v2 name and called the live
+//      one-provider lease "not outstanding", then deleted it anyway.
+//   3  v2 exclusion -- the delete named only the one-provider ref, so the v2
+//      lease outlived the assignment it held.
+//   2  legacy release -- the compare-and-swap named an empty v2 ref and threw.
+//   4  two live jobs -- the reviewer-keyed compatibility view collapsed them,
+//      so the repaired job's lease was never released.
+function productionReviewIo(){
+  const io=withAtomicRefs(reviewIo()),heads=new Map()
+  io.requiresExactReviewHeadSha=true
+  io.heads=heads
+  io.getPr=(number)=>({number:Number(number),state:'open',head:{sha:heads.get(Number(number))??'abcdef9',ref:'codex/x'}})
+  // Production lists the whole active-lease namespace in one complete-or-refused
+  // read; without it `findBusyReviewers` only enumerates the one-provider names
+  // and cannot see a second concurrent job at all.
+  io.readActiveReviewLeases=()=>new Map([...io.refs.entries()].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)).map(([ref,sha])=>[ref,{sha,commit:io.getCommit(sha)}]))
+  return io
+}
+// An assignment drawn before the cutover: its lease sits under the ONE-PROVIDER
+// ref, which is where every in-flight review's lease was when this head shipped.
+function demoteLeaseToLegacy(io,assignment){
+  const v2=reviewActiveRef(assignment.reviewer,assignment),sha=io.refs.get(v2)
+  assert.ok(sha,'the fixture must start from a real exact-head lease')
+  io.refs.delete(v2)
+  io.refs.set(reviewActiveRef(assignment.reviewer),sha)
+  return {legacyRef:reviewActiveRef(assignment.reviewer),leaseSha:sha}
+}
+// A SECOND, independent live job for the same provider, as its own v2 lease.
+function plantConcurrentLease(io,{reviewer,issue,pr,headSha,sequence}){
+  io.heads.set(pr,headSha)
+  const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=${sequence} reviewer=${reviewer} issue=${issue} pr=${pr} head=${headSha}`)
+  const ref=reviewActiveRef(reviewer,{issue,pr,headSha})
+  io.refs.set(ref,sha)
+  return {ref,sha}
+}
+
+test('#2694 excluding the holder of a pre-cutover one-provider lease returns the slot instead of stranding it',()=>{
+  const io=productionReviewIo(),issue=2694,pr=3801,head='1'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const {legacyRef,leaseSha}=demoteLeaseToLegacy(io,first)
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${head}`
+  const evidenceSha=io.refs.get(assignmentRef)
+  assert.equal(evidenceSha,leaseSha,'the lease and the assignment are the same commit')
+  const excluded=excludeReviewerForPr({issue,pr,reviewer:first.reviewer,reason:'terminal-unavailable',evidenceSha},io)
+  // PRE-FIX: `returned` came back empty -- the scan looked at the v2 name, saw
+  // nothing, and skipped the live assignment -- while the one-provider lease was
+  // deleted regardless, leaving a slot that could never be returned or refilled.
+  assert.equal(excluded.returned.length,1,'the live legacy assignment must be returned')
+  assert.equal(excluded.returned[0].assignmentRef,assignmentRef)
+  assert.equal(io.refs.get(assignmentRef),undefined,'the assignment ref is cleared')
+  assert.equal(io.refs.get(legacyRef),undefined,'the one-provider lease it held is released with it')
+  const next=assignNextReviewer({issue,pr,headSha:head},io)
+  assert.notEqual(next.reviewer,first.reviewer,'the returned slot is refillable')
+})
+
+test('#2694 excluding one of two concurrent exact-head jobs frees that job lease and leaves the other alone',()=>{
+  const io=productionReviewIo(),issue=2694,pr=3802,head='2'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const leaseRef=reviewActiveRef(first.reviewer,first)
+  const other=plantConcurrentLease(io,{reviewer:first.reviewer,issue:2695,pr:3803,headSha:'3'.repeat(40),sequence:9001})
+  const assignmentRef=`${REVIEW_ASSIGNMENT_REF_PREFIX}/${issue}-${pr}-${head}`
+  const evidenceSha=io.refs.get(assignmentRef)
+  const excluded=excludeReviewerForPr({issue,pr,reviewer:first.reviewer,reason:'terminal-unavailable',evidenceSha},io)
+  assert.equal(excluded.returned.length,1)
+  assert.equal(io.refs.get(assignmentRef),undefined)
+  // PRE-FIX: the delete named only `refs/db-review-active/<reviewer>`, so this
+  // lease survived its own returned assignment -- a ghost that left the slot
+  // both taken and impossible to redraw.
+  assert.equal(io.refs.get(leaseRef),undefined,'the returned assignment lease is deleted')
+  assert.equal(io.refs.get(other.ref),other.sha,'the reviewer independent concurrent job is untouched')
+})
+
+test('#2694 a terminal failure on a pre-cutover one-provider lease can still be released',()=>{
+  const io=productionReviewIo(),issue=2696,pr=3804,head='4'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const {legacyRef}=demoteLeaseToLegacy(io,first)
+  // PRE-FIX: the compare-and-swap named the v2 ref, which is empty here, so the
+  // post-mutex ownership check threw and the provider could never be freed.
+  const released=releaseFailedReviewer({issue,pr,headSha:head,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true},io)
+  assert.equal(released.reviewer,first.reviewer)
+  assert.equal(io.refs.get(legacyRef),undefined,'the lease that actually held the assignment is released')
+  assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('#2694 a replacement retry repairs the failed job even when its reviewer holds a second live job',()=>{
+  const io=productionReviewIo(),issue=2697,pr=3805,head='5'.repeat(40)
+  io.heads.set(pr,head)
+  const first=assignNextReviewer({issue,pr,headSha:head},io)
+  const failedLeaseRef=reviewActiveRef(first.reviewer,first),failedLeaseSha=io.refs.get(failedLeaseRef)
+  const request={issue,pr,headSha:head,failedSequence:first.sequence,failureCode:'insufficient_quota',confirmNoVerdict:true,confirmNoArtifact:true}
+  const replacement=replaceFailedReviewer(request,io)
+  assert.notEqual(replacement.reviewer,first.reviewer)
+  // A torn first attempt: the failed job lease is still there, and the SAME
+  // failed provider now also holds a second independent live job recorded after
+  // it, so the reviewer-keyed compatibility view answers with the second only.
+  io.refs.set(failedLeaseRef,failedLeaseSha)
+  const other=plantConcurrentLease(io,{reviewer:first.reviewer,issue:2698,pr:3806,headSha:'6'.repeat(40),sequence:9002})
+  // PRE-FIX: `[...preflightBusy.leases.values()].find(...)` could not see the
+  // failed job, so the retry restored the replacement lease while leaving the
+  // failed reviewer a live claim on the same slot.
+  assert.deepEqual(replaceFailedReviewer(request,io),replacement)
+  assert.equal(io.refs.get(failedLeaseRef),undefined,'the failed job lease is released by the retry')
+  assert.equal(io.refs.get(other.ref),other.sha,'the reviewer independent concurrent job is untouched')
 })
