@@ -2072,7 +2072,7 @@ class ApplyLaneTests(unittest.TestCase):
         for required_input in ("target", "mode", "production_allowlist", "preview_allowlist", "claim_pr", "claim_head_sha", "commit_sha", "confirmation"):
             self.assertRegex(header, rf"(?m)^      {re.escape(required_input)}:$")
         self.assertIn("permissions:\n  contents: read", header)
-        self.assertIn("issues: write", header)
+        self.assertIn("issues: read", header)
         self.assertIn("github.event_name == 'pull_request'", header)
         self.assertIn("|| 'shared-supabase-migrations'", header)
         self.assertIn("cancel-in-progress: false", header)
@@ -2085,6 +2085,8 @@ class ApplyLaneTests(unittest.TestCase):
         self.assertIn("--resolve-admitted-issue-for-pr", WORKFLOW_TEXT)
         for job_name in ("preview", "production-apply"):
             self.assertEqual(_effective_permission(WORKFLOW_TEXT, job_name, "issues"), "write", job_name)
+        for job_name in ("validate", "production-dry-run", "production-apply-review"):
+            self.assertEqual(_effective_permission(WORKFLOW_TEXT, job_name, "issues"), "read", job_name)
         overridden = "permissions:\n  issues: write\njobs:\n  preview:\n    permissions:\n      issues: read\n    steps:\n      - run: true\n"
         self.assertEqual(_effective_permission(overridden, "preview", "issues"), "read")
 
