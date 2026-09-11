@@ -1,54 +1,86 @@
 {
-    "schema_version": 1,
-    "generation": 4,
-    "work_issue": 2478,
-    "work_type": "structural",
-    "route": "shared-db-orchestrator",
-    "goal": "Extract one SKU derivation shared by rebuild and read-only drift detector without changing grouping, correction, or drift behavior.",
-    "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
-    "dispatcher": "Codex orchestrator #2714",
-    "worker": "codex-2714-2478",
-    "branch": "codex/issue-2478-shared-sku-key",
-    "worktree": "C:/repos/shared-db-worktrees/issue-2478-shared-sku-key",
-    "allowed_paths": [
-        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "file_writes": [
-        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "db_reads": [],
-    "db_writes": [
-        "function public.style_group_key_for_sku",
-        "function public.rebuild_style_groups_batch",
-        "function public.reconcile_style_group_drift"
-    ],
-    "prohibited_actions": [
-        "No shared database writes by worker.",
-        "No correction of application row drift or change to nightly correction path.",
-        "No paid review, merge or main movement before parent priority window clears.",
-        "No changes to issues2705 or2709."
-    ],
-    "required_checks": [
-        "bash scripts/check-sql.sh",
-        "local PostgreSQL helper parity contracts",
-        "git diff --check"
-    ],
-    "assumptions": [
-        "Parent authorized adapting obsolete inline-token assertion to shared-helper wiring while preserving all existing behavior/security tests.",
-        "Latest consumer definitions derive from migrations20260906035323 and20260907031246.",
-        "Generation 4: claim #2745 version 20260911204023 was superseded to 20260911212849 by the governed --supersede-active-claim-version (supersession 861a3f5cb2c7ce8720c61da0f69ac53c32e0e27b) because main added later version 20260911210709."
-    ],
-    "stop_conditions": [
-        "Object overlap or changed source definitions.",
-        "Old/new grouping parity mismatch.",
-        "Consumer behavior or security changes beyond helper delegation."
-    ]
+  "allowed_paths": [
+    "config/db-data-admin-property-source-coverage.json",
+    "supabase/migrations/20260911210844_retire_erp_items_to_archive.sql",
+    "supabase/tests/erp_items_retirement_contracts.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "supabase/tests/popdam_item_bridge_additive_cutover_contract.sql",
+    "supabase/tests/popdam_item_state_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "assumptions": [
+    "api.plm_item_list keeps its exact 21-column contract, and its row count and id|source_id|division_code hash stay identical (production proof: 19,362 rows, md5 7f214c4a3178143a41d2741c8cad677a).",
+    "Legacy ERP item UUIDs still carried by the view ids, 13,700 bridge erp_item_id values and prediction erp_item_id values keep resolving through a frozen plm.legacy_erp_item_identity crosswalk copied from public.erp_items_current.",
+    "The rewritten plm.refresh_style_tracker_item_bridge and public.resolve_product_category_prediction_item_identity bodies are the current production bodies with only the table reference changed.",
+    "Only the bridge FK constraint is dropped; the erp_item_id column and its values are kept.",
+    "Neither legacy table is dropped: both move to a new archive schema with anon/authenticated access revoked, so retirement is reversible."
+  ],
+  "base_sha": "9ea5c664443f5c3fcdf43c5c40ca355450d0d394",
+  "branch": "claude/issue-2482-retire-erp-items",
+  "db_reads": [
+    "table public.erp_items_current",
+    "table public.erp_items_raw",
+    "view api.plm_item_list",
+    "table plm.item",
+    "table plm.style_tracker_item_bridge",
+    "table public.product_category_predictions"
+  ],
+  "db_writes": [
+    "schema archive",
+    "table plm.legacy_erp_item_identity",
+    "policy legacy_erp_item_identity_admin_read on plm.legacy_erp_item_identity",
+    "view api.plm_item_list",
+    "table api.plm_item_list",
+    "function plm.refresh_style_tracker_item_bridge",
+    "function public.resolve_product_category_prediction_item_identity",
+    "table plm.style_tracker_item_bridge",
+    "table public.erp_items_current",
+    "table public.erp_items_raw",
+    "table archive.erp_items_current",
+    "table archive.erp_items_raw"
+  ],
+  "dispatcher": "claude shared-db orchestrator route local_ceb221ac-1746-4836-9306-6839c18dbced",
+  "file_writes": [
+    "config/db-data-admin-property-source-coverage.json",
+    "supabase/migrations/20260911210844_retire_erp_items_to_archive.sql",
+    "supabase/tests/erp_items_retirement_contracts.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "supabase/tests/popdam_item_bridge_additive_cutover_contract.sql",
+    "supabase/tests/popdam_item_state_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "generation": 14,
+  "goal": "Retire the frozen DesignFlow item feed (public.erp_items_current and public.erp_items_raw) recoverably: repoint every live reader to a frozen identity crosswalk, drop only the bridge legacy FK, and move both tables to a revoked archive schema.",
+  "prohibited_actions": [
+    "No DROP of public.erp_items_current or public.erp_items_raw or their data",
+    "No drop of plm.style_tracker_item_bridge.erp_item_id or its values",
+    "No change to the api.plm_item_list column list, types, row count or key hash",
+    "No direct production DDL; production only through the governed workflow",
+    "No object or path outside claim 2778 and this contract"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-migration-pr-lease.mjs",
+    "git diff --check",
+    "supabase/tests/erp_items_retirement_contracts.sql on a disposable database",
+    "Database Contract Tests CI from empty"
+  ],
+  "route": "shared-db-orchestrator",
+  "schema_version": 1,
+  "stop_conditions": [
+    "Claim 2778, reserved version 20260911210844, or coordinator route changes",
+    "A competing change touches any claimed object or contracted path",
+    "Any other view, function, FK or policy is found still reading the legacy tables",
+    "The api.plm_item_list row count or key hash would change",
+    "Implementation requires an object or path outside claim 2778 or this contract"
+  ],
+  "work_issue": 2482,
+  "work_type": "structural",
+  "worker": "claude issue2482-author holding claim 2778",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2482-retire-erp-items"
 }
