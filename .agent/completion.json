@@ -6,15 +6,17 @@
   "migration_versions": [
     "20260911222514"
   ],
-  "contract_ref": "refs/db-contracts/2744/7",
-  "contract_sha256": "f19ae3dcbf27012ee24eb40625a9df1fc9586219da7d75f80f49f2d97a0da256",
-  "head_sha": "3417106f01d9b2a1999c55a1b86b484a4803b678",
+  "contract_ref": "refs/db-contracts/2744/8",
+  "contract_sha256": "270d02096c6a233c84ca3fe0258115020869174a5067243519b4b0dd44def174",
+  "head_sha": "47b33be702fd972fa793df0cd6d17dccc85f11b1",
   "files_changed": [
-    ".agent/contract.json",
     ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/production-verification-sidecars/20260911222514.json",
+    "scripts/production_business_risk_gate.py",
     "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
-    "scripts/production-verification-sidecars/20260911222514.json"
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
   "db_reads": [
     "table plm.dcp_asset",
@@ -57,6 +59,11 @@
       "command": "read-only refutation probes (recorded so they are not retried)",
       "exit_code": 0,
       "evidence": "Materializing the retained-asset CTEs alone measured 4285/4226/4656 ms, no gain over baseline. Raising work_mem 12x measured no gain, refuting the theory named in claim #2791's title. The narrow (id, style_guide_id) projection is the load-bearing change."
+    },
+    {
+      "command": "supabase/tests against an ephemeral database",
+      "exit_code": 0,
+      "evidence": "GREEN in CI at d8bc0a03 (job 103453979387). It FAILED at 4ad729ff on db_data_admin_scraped_properties_opa_groups.sql, which is NOT quarantined. Cause was mine and real: that file asserted the function text still contained \"page_dcp_retained_assets as not materialized\" and \"join plm.dcp_asset a on a.id=r.asset_id\", both of which this migration rewrites. The assertions were re-pointed at the narrow map rather than deleted, and are strictly stronger: they still pin the retained-asset CTE, still ban dcp_asset_context, and additionally prove the style context is sourced from plm.dcp_asset via \"select a.id,a.style_guide_id from plm.dcp_asset a\". Only pre-existing quarantined failures remain. Verified by reading the check result back, not inferred from an exit code."
     }
   ],
   "notes": [

@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2744,
-  "generation": 7,
+  "generation": 8,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Return the unfiltered Scraped Properties / DCP identity listing to comfortably under eight seconds for role authenticated, without changing its output, its authorization gate, or any timeout, role or memory setting.",
@@ -11,18 +11,22 @@
   "branch": "claude/issue-2744-unfiltered-perf",
   "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
-    ".agent/contract.json",
     ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/production-verification-sidecars/20260911222514.json",
+    "scripts/production_business_risk_gate.py",
     "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
-    "scripts/production-verification-sidecars/20260911222514.json"
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
   "file_writes": [
-    ".agent/contract.json",
     ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/production-verification-sidecars/20260911222514.json",
+    "scripts/production_business_risk_gate.py",
     "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
-    "scripts/production-verification-sidecars/20260911222514.json"
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
   "db_reads": [
     "table plm.dcp_asset",
@@ -57,7 +61,8 @@
     "Performance and parity evidence is read-only production measurement taken as role authenticated inside begin; ... rollback;. Nothing was committed to any database and no timeout, role or memory setting was changed.",
     "Production acceptance for issue #2744 is a separate gate that has not yet been re-run after this change. Issue #2744 stays open and claim #2791 stays held until it passes.",
     "The reported Product pipeline outage is api.pm_pipeline_page, a disjoint function. This migration cannot repair that screen and does not claim to.",
-    "Per AGENTS.md a migration needs two independent governed reviewers; the dispatching brief said one, and the rulebook is followed."
+    "Per AGENTS.md a migration needs two independent governed reviewers; the dispatching brief said one, and the rulebook is followed.",
+    "Generation 8 declares two paths generation 7 did not anticipate, both forced by this migration rather than added scope. supabase/tests/db_data_admin_scraped_properties_opa_groups.sql asserted the function text still contained \"page_dcp_retained_assets as not materialized\" and \"join plm.dcp_asset a on a.id=r.asset_id\", both of which this migration rewrites; the assertions were re-pointed at the narrow map and are strictly stronger, not weaker. scripts/production_business_risk_gate.py gains one line because every verification sidecar is pinned individually in PREVIEW_PRODUCER_PATHS -- the Contents API cannot expose a directory as a blob -- so a new sidecar owes a registry entry. required_checks was NOT touched."
   ],
   "stop_conditions": [
     "Stop and report if the applied predecessor 20260911170526 does not match the migration preconditions; the migration raises SQLSTATE 55000 rather than replacing an unexpected definition.",
