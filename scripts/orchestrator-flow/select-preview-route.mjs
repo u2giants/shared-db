@@ -15,6 +15,8 @@ const INVALIDATION_CONDITIONS = Object.freeze(['file-content-change','file-set-c
 export function databasePreviewRequiredFromEvidenceBundle(bundle){
   const identity=bundle?.identity
   if(!identity||bundle.bundle_id!==sha256(canonicalJson(identity)))throw new Error('database evidence bundle identity is unavailable or changed')
+  const target={issue:bundle?.metadata?.issue,pr:bundle?.metadata?.pr,base_sha:bundle?.metadata?.base_main_sha,head_sha:bundle?.metadata?.integration_sha}
+  if(!Number.isInteger(target.issue)||!Number.isInteger(target.pr)||!/^[0-9a-f]{40}$/i.test(String(target.base_sha??''))||!/^[0-9a-f]{40}$/i.test(String(target.head_sha??'')))throw new Error('database evidence bundle target identity is unavailable')
   const byPath=new Map()
   const add=(rows,impact,reason)=>{for(const row of rows??[]){const existing=byPath.get(row.path);if(existing&&existing.sha256!==row.sha256)throw new Error(`database evidence bundle disagrees on ${row.path}`);byPath.set(row.path,{path:row.path,sha256:row.sha256,impact,reason})}}
   add(identity.migrations,'database-structure','versioned migration executes against the database')
@@ -24,14 +26,15 @@ export function databasePreviewRequiredFromEvidenceBundle(bundle){
   const files=[...byPath.values()].sort((a,b)=>a.path.localeCompare(b.path)),applicable_checks=['database-preview','exact-head-review','full-ci']
   const firstRequired=files.find((file)=>PREVIEW_REQUIRED_IMPACTS.has(file.impact))
   if(!firstRequired)throw new Error('database evidence bundle names no preview-requiring input')
-  return {schema_version:1,decision:DATABASE_PREVIEW_REQUIRED,reason_code:`impact_${firstRequired.impact.replaceAll('-','_')}`,inspected_digest:sha256(canonicalJson({classifier_version:PREVIEW_CLASSIFIER_VERSION,files,applicable_checks})),files,applicable_checks,invalidated_by:[...INVALIDATION_CONDITIONS]}
+  return {schema_version:1,...target,decision:DATABASE_PREVIEW_REQUIRED,reason_code:`impact_${firstRequired.impact.replaceAll('-','_')}`,inspected_digest:sha256(canonicalJson({classifier_version:PREVIEW_CLASSIFIER_VERSION,...target,files,applicable_checks})),files,applicable_checks,invalidated_by:[...INVALIDATION_CONDITIONS]}
 }
 
-export function validatePreviewClassification(value,inspectedFiles){
+export function validatePreviewClassification(value,inspectedFiles,target){
   if(!value||value.schema_version!==1||!Array.isArray(value.files)||!value.files.length)throw new Error('explicit schema-version-1 database preview classification is required')
-  const known=new Set(['schema_version','decision','reason_code','inspected_digest','files','applicable_checks','invalidated_by'])
+  const known=new Set(['schema_version','issue','pr','base_sha','head_sha','decision','reason_code','inspected_digest','files','applicable_checks','invalidated_by'])
   if(Object.keys(value).some((key)=>!known.has(key)))throw new Error('database preview classification contains an unknown input')
   if(![NO_DATABASE_PREVIEW,DATABASE_PREVIEW_REQUIRED].includes(value.decision))throw new Error('database preview decision is unknown')
+  if(!target||value.issue!==target.issue||value.pr!==target.pr||value.base_sha!==target.base_sha||value.head_sha!==target.head_sha)throw new Error('database preview classification target does not match exact issue, PR, base and head')
   if(!Array.isArray(value.applicable_checks)||!value.applicable_checks.length||value.applicable_checks.some((check)=>typeof check!=='string'||!check.trim()))throw new Error('database preview classification requires applicable checks')
   if(new Set(value.applicable_checks).size!==value.applicable_checks.length)throw new Error('database preview classification has duplicate applicable checks')
   if(canonicalJson(value.invalidated_by)!==canonicalJson(INVALIDATION_CONDITIONS))throw new Error('database preview invalidation conditions are incomplete or changed')
@@ -50,22 +53,22 @@ export function validatePreviewClassification(value,inspectedFiles){
   const authoritative=inspectedFiles.map((entry)=>({path:String(entry?.path??'').replaceAll('\\','/'),sha256:String(entry?.sha256??'')})).sort((a,b)=>a.path.localeCompare(b.path))
   if(authoritative.some((entry)=>!entry.path||!/^[0-9a-f]{64}$/.test(entry.sha256))||new Set(authoritative.map((entry)=>entry.path)).size!==authoritative.length)throw new Error('exact inspected file set is malformed')
   if(canonicalJson(authoritative)!==canonicalJson(files.map(({path,sha256})=>({path,sha256}))))throw new Error('database preview classification does not cover the exact inspected file set and bytes')
-  const inspectedDigest=sha256(canonicalJson({classifier_version:PREVIEW_CLASSIFIER_VERSION,files,applicable_checks:checks}))
+  const inspectedDigest=sha256(canonicalJson({classifier_version:PREVIEW_CLASSIFIER_VERSION,issue:value.issue,pr:value.pr,base_sha:value.base_sha,head_sha:value.head_sha,files,applicable_checks:checks}))
   if(value.inspected_digest!==inspectedDigest)throw new Error('database preview classification digest does not match its exact inspected inputs')
   const required=files.filter((file)=>PREVIEW_REQUIRED_IMPACTS.has(file.impact))
   const expectedDecision=required.length?DATABASE_PREVIEW_REQUIRED:NO_DATABASE_PREVIEW
   const expectedReason=required.length?`impact_${required[0].impact.replaceAll('-','_')}`:'proven_non_database_change'
   if(value.decision!==expectedDecision||value.reason_code!==expectedReason)throw new Error('database preview decision or reason does not match inspected impacts')
-  return {schema_version:1,decision:expectedDecision,reason_code:expectedReason,inspected_digest:inspectedDigest,files,applicable_checks:checks,invalidated_by:[...INVALIDATION_CONDITIONS]}
+  return {schema_version:1,issue:value.issue,pr:value.pr,base_sha:value.base_sha,head_sha:value.head_sha,decision:expectedDecision,reason_code:expectedReason,inspected_digest:inspectedDigest,files,applicable_checks:checks,invalidated_by:[...INVALIDATION_CONDITIONS]}
 }
 
 export function selectPreviewRoute(input){
   try{
-    if(!/^[0-9a-f]{40}$/i.test(String(input.head_sha??''))||!Number.isInteger(input.pr)||!Number.isInteger(input.issue))throw new Error('exact issue, PR and head are required')
+    if(!/^[0-9a-f]{40}$/i.test(String(input.head_sha??''))||!/^[0-9a-f]{40}$/i.test(String(input.base_sha??''))||!Number.isInteger(input.pr)||!Number.isInteger(input.issue))throw new Error('exact issue, PR, base and head are required')
     if(!/^[0-9a-f]{64}$/.test(String(input.bundle_id??'')))throw new Error('bundle identity is unavailable')
-    const classification=validatePreviewClassification(input.database_preview,input.inspected_files)
+    const classification=validatePreviewClassification(input.database_preview,input.inspected_files,{issue:input.issue,pr:input.pr,base_sha:input.base_sha,head_sha:input.head_sha})
     if(classification.decision===NO_DATABASE_PREVIEW){
-      const context={issue:input.issue,pr:input.pr,head_sha:input.head_sha,bundle_id:input.bundle_id,route:NO_DATABASE_PREVIEW,classification_digest:classification.inspected_digest,reason_code:classification.reason_code,applicable_checks:classification.applicable_checks}
+      const context={issue:input.issue,pr:input.pr,base_sha:input.base_sha,head_sha:input.head_sha,bundle_id:input.bundle_id,route:NO_DATABASE_PREVIEW,classification_digest:classification.inspected_digest,reason_code:classification.reason_code,applicable_checks:classification.applicable_checks}
       return {status:'READY',route:NO_DATABASE_PREVIEW,reason:'exact inspected inputs prove no database preview is applicable',context,decision_id:sha256(canonicalJson(context)),classification}
     }
     if(!Array.isArray(input.versions)||!input.versions.length||input.versions.some((version)=>!/^\d{14}$/.test(String(version))))throw new Error('versions must be a non-empty 14-digit array')
@@ -84,7 +87,7 @@ export function selectPreviewRoute(input){
       if(![...requested].every((version)=>main.has(version)))throw new Error('merged route versions are not all on current main')
       route='POST_MERGE_REHEARSAL';reason='merged versions are absent from preview'
     }else{route='NORMAL_PREVIEW';reason='open exact-head versions are absent from preview'}
-    const context={issue:input.issue,pr:input.pr,head_sha:input.head_sha,bundle_id:input.bundle_id,versions:[...requested].sort(),graph_digest:graph.digest,route,blockers:[...new Set(blockers)].sort(),classification_digest:classification.inspected_digest,reason_code:classification.reason_code}
+    const context={issue:input.issue,pr:input.pr,base_sha:input.base_sha,head_sha:input.head_sha,bundle_id:input.bundle_id,versions:[...requested].sort(),graph_digest:graph.digest,route,blockers:[...new Set(blockers)].sort(),classification_digest:classification.inspected_digest,reason_code:classification.reason_code}
     return {status:route==='WAITING'?'WAITING':'READY',route,reason,context,decision_id:sha256(canonicalJson(context)),graph}
   }catch(error){return {status:'UNVERIFIABLE',route:'UNVERIFIABLE',reason:error.message}}
 }

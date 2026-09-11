@@ -5030,6 +5030,16 @@ function mergedRehearsalIo({version='20260828232207',migration=`supabase/migrati
   }}
 }
 
+test('live no-database-preview returns before claims, pull requests, reviews, or preview evidence are read',()=>{
+  const target={issue:433,pr:99,base_sha:'8'.repeat(40),head_sha:'9'.repeat(40)},files=[{path:'scripts/tool.mjs',sha256:'a'.repeat(64),impact:'reviewer-tooling',reason:'reviewer-only change'}],applicable_checks=['unit-tests']
+  const database_preview={schema_version:1,...target,decision:'NO_DATABASE_PREVIEW',reason_code:'proven_non_database_change',inspected_digest:sha256(canonicalJson({classifier_version:1,...target,files,applicable_checks})),files,applicable_checks,invalidated_by:['file-content-change','file-set-change','impact-evidence-change','applicable-check-change','classifier-version-change']}
+  const forbidden=()=>{throw new Error('late database admission dependency must not run')}
+  const evidence={...target,bundle_id:'b'.repeat(64),database_preview,inspected_files:files.map(({path,sha256})=>({path,sha256}))}
+  const result=deriveLivePreviewCandidate(433,{databasePreviewClassification:()=>evidence,openClaims:forbidden,openPulls:forbidden,previewGateProof:forbidden,previewLedger:forbidden})
+  assert.equal(result.route,'no_database_preview');assert.equal(result.next_action,'return-to-natural-owner');assert.equal(result.pr,99);assert.equal(result.head_sha,target.head_sha)
+  for(const replay of [{...evidence,pr:100},{...evidence,head_sha:'7'.repeat(40)}])assert.throws(()=>deriveLivePreviewCandidate(433,{databasePreviewClassification:()=>replay,openClaims:forbidden}),/target does not match/)
+})
+
 function immutablePreviewApplyIo({sourcePr=1809,artifactRunId='33308168016',mergeCommitSha='b'.repeat(40)}={}){
   const runId='33308168016',headSha='75a6e35e46a79af7c059836a64a5b621ac79404a',version='20260828232207'
   return {
