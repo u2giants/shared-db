@@ -6,10 +6,12 @@
   "migration_versions": [
     "20260911214438"
   ],
-  "contract_ref": "refs/db-contracts/2724/3",
-  "contract_sha256": "2faf92a46f67bcd009fd51464e503ca9fede1f83d78068d7fa13a00b1ed0ca2c",
-  "head_sha": "8db739a227b19c3dc13492eb9b9377a1bb868b9a",
+  "contract_ref": "refs/db-contracts/2724/4",
+  "contract_sha256": "4fffe12b339656cce02eca7a0780f1a9f0d8e674a0947f3e74f113f0f91854db",
+  "head_sha": "a4582052d1040195d25ec4a18761b9ff40ed10ad",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "config/db-data-admin-property-source-coverage.json",
     "supabase/migrations/20260911214438_plm_factory_time_templates.sql",
     "supabase/tests/plm_factory_time_template_contracts.sql"
@@ -49,8 +51,10 @@
     "Version 20260911214438 is the version reserved by author claim #2803.",
     "No object was renamed; previous_factory_time_id and every other name match the WIP head the consuming app was built against.",
     "The ephemeral-database contract test failure was reproduced on a disposable local PostgreSQL cluster: the row state was correct and the only defect was the test accepting a single SQLSTATE for an ON DELETE RESTRICT refusal. The handler now accepts restrict_violation or foreign_key_violation; the test was not quarantined and the schema was not changed. That fix passed the CI ephemeral-database job at the earlier head 4aab3768.",
-    "Generation 2 at head 4aab3768 earned a governed APPROVE from muse-spark-1.3-contributor (durable verdict ref refs/db-review-verdicts/2724-2804-4aab37683541138f598cd6ba707919a0731374d8). Main then advanced to 5ec8aef0, so that verdict no longer describes this head and a fresh governed review is being run at the new head rather than carried over."
+    "Generation 2 at head 4aab3768 earned a governed APPROVE (refs/db-review-verdicts/2724-2804-4aab37683541138f598cd6ba707919a0731374d8). Main then advanced to 5ec8aef0 and the branch was REBASED, which rewrites history, so that verdict was voided and not carried. The carry-forward checker added by PR #2780 was run against it and refused for exactly that reason: 4aab3768 is not an ancestor of b5a98122.",
+    "A second full governed review was therefore run at head b5a98122 and returned APPROVE from muse-spark-1.3-contributor, durable verdict ref refs/db-review-verdicts/2724-2804-b5a981222a2b73b195e357b7f9b54336f405e84a.",
+    "Main then advanced again to 26d9345b. This time the branch was refreshed by MERGING main rather than rebasing, so the approved head b5a98122 remains an ancestor of the merge head 35aa1d34 and the pull request's own diff is byte-identical at both (.agent evidence aside). The b5a98122 APPROVE therefore carries forward under the PR #2780 rule and no third review was run. No reviewer was drawn at the merge head, because a head carrying reviewer records of its own is judged on those alone and that would have forfeited the carry."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Structural change rebased onto main 5ec8aef0 after the #2482 lane landed; the same three implementation commits, unchanged in content. Implementation head 8db739a2; only the two .agent evidence files follow it. Ready for exact-head governed review and guarded merge, with the preview rehearsal after merge."
+  "evidence_note": "Structural change refreshed onto main 26d9345b by merging main, not rebasing, so the governed APPROVE at b5a98122 survives. The three implementation files are unchanged in content across every refresh; main's advance touched only the two .agent evidence files. Head 35aa1d34; only the two .agent evidence files follow it. Ready for guarded merge on the carried approval, with the preview rehearsal after merge and production after that."
 }
