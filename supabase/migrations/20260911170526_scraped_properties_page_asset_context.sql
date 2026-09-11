@@ -1,3 +1,4 @@
+-- derived-from: 20260911061539
 -- #2744: Scraped Properties default listing timed out for signed-in Data Admin
 -- users (8s authenticated statement_timeout). The page-context step materialized
 -- the entire DCP and Lucasfilm DCP asset catalogs (187k + 22k rows) before
