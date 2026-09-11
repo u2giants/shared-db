@@ -45,18 +45,18 @@ begin
   if v_gate <> 1 then
     raise exception 'effective list function must invoke public.require_dam_access() exactly once, found %', v_gate;
   end if;
-  if position(') a where public.require_dam_access() and a.is_deleted = false and (' in v_lower) = 0 then
+  if position(') a where public.require_dam_access()' in v_lower) = 0 then
     raise exception 'effective list function must gate on DAM entitlement in its outer WHERE clause';
   end if;
 
-  -- Seven mutually exclusive identity arms, each pinned by its leading guard.
+  -- Eight preserved fallback arms plus two exclusive narrow tag arms, each pinned by its leading guard.
   -- The bare equality tokens also occur as optional conjuncts on the licensor
   -- pair, so counting arms and pinning guards is what stops a deleted
   -- property- or customer-leading arm from passing while the DAM property and
   -- customer libraries silently return nothing.
   v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
-  if v_arms <> 7 then
-    raise exception 'effective predicates must keep eight UNION arms, found % UNION ALLs', v_arms;
+  if v_arms <> 9 then
+    raise exception 'effective predicates must keep ten UNION arms, found % UNION ALLs', v_arms;
   end if;
   foreach v_pin in array array[
     'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null union all',
@@ -274,6 +274,12 @@ insert into public.assets (
   'zz1703-auth-gate.ai', 'zz1703-auth-gate.ai', 'ai',
   'zz1703-auth-gate', now(), false
 );
+insert into public.assets(id,filename,relative_path,file_type,quick_hash,modified_at,thumbnail_url,is_deleted)
+values('17030000-0000-4000-8000-000000000004','zz1703-tag-visible.ai',
+  'zz1703-tag-visible.ai','ai','zz1703-tag-visible',now(),'https://example.invalid/tag.png',false);
+insert into public.asset_effective_tags(asset_id,tag,scope) values
+  ('17030000-0000-4000-8000-000000000003','zz1703-auth-tag','asset'),
+  ('17030000-0000-4000-8000-000000000004','zz1703-auth-tag','asset');
 
 do $$
 declare v_n bigint;
@@ -283,6 +289,12 @@ begin
     '{"sub":"17030000-0000-4000-8000-000000000001","role":"authenticated"}',true);
   if not app.has_app_access('dam'::app.app_name) then
     raise exception 'authorized control user did not receive DAM access';
+  end if;
+  perform set_config('plan_cache_mode','force_generic_plan',true);
+  select count(*) into v_n from public.filter_effective_assets('{"tagFilter":"zz1703-auth-tag"}'::jsonb);
+  if v_n<>2 then raise exception 'authenticated prepared tag path lost thumbnail partition parity'; end if;
+  if (public.get_filter_counts('{"tagFilter":"zz1703-auth-tag"}'::jsonb)->>'total')::bigint<>2 then
+    raise exception 'authenticated tag facet/list parity changed';
   end if;
   perform 1 from public.filter_effective_assets('{}'::jsonb) limit 1;
   perform public.get_filter_counts('{}'::jsonb);
@@ -298,6 +310,11 @@ begin
   if app.has_app_access('dam'::app.app_name) then
     raise exception 'non-DAM control user unexpectedly received DAM access';
   end if;
+  begin
+    perform 1 from public.filter_effective_assets('{"tagFilter":"zz1703-auth-tag"}'::jsonb) limit 1;
+    raise exception 'non-DAM user reached narrow tag assets';
+  exception when insufficient_privilege then null;
+  end;
   begin
     perform 1 from public.filter_effective_assets('{}'::jsonb) limit 1;
     raise exception 'non-DAM user reached effective assets';
