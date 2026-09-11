@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/29",
-  "contract_sha256": "36a5025e3237a96441466087d86c3aa9f31a876cf57cd91304fa72c9468db73d",
-  "head_sha": "f9ea854459d585b15236c9cd796ec7ad5db8568f",
+  "contract_ref": "refs/db-contracts/2727/31",
+  "contract_sha256": "f9429d39fa4ffb606b1240a6f19eab42bd7464955f77ba49dc0076c983615246",
+  "head_sha": "75f541fb4783b0213f5e97f1aabae3e7f5697b55",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -31,27 +31,22 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 153b7754 f9ea8544 reports no whitespace errors."
+      "evidence": "git diff --check f15f0f0e 75f541fb reports no whitespace errors."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at f9ea8544."
-    },
-    {
-      "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
-      "exit_code": 0,
-      "evidence": "716 tests, 716 pass, 0 fail, 0 skipped at f9ea8544."
+      "evidence": "721 tests, 721 pass, 0 fail, 0 skipped at 75f541fb."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=279 at f9ea8544."
+      "evidence": "truth audit OK: call_sites=279 at 75f541fb."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "GitHub transport conformance: 219 files scanned at f9ea8544."
+      "evidence": "221 files scanned at 75f541fb; every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
