@@ -11,6 +11,7 @@ function timestamp(value) {
 }
 
 const converters = { text, num, date, ts: timestamp };
+converters.keytext = (value) => value === null || value === undefined ? null : String(value).trim();
 
 export function assertKnownShape(spec, rows) {
   const known = knownApiFields(spec);

@@ -31,6 +31,13 @@ test("operational probe proves merchGroupDetails works without retaining values"
   assert.equal(proof.response_shape,"plain array"); assert.ok(proof.nonempty_queries>0); assert.match(proof.privacy,/no ColdLion payload values/i);
 });
 
+test("merchandise detail identity includes category so live categories cannot collapse",()=>{
+  assert.deepEqual(MASTER_SPECS.merch_group_detail.key,["company_code","division_code","mg_type_code","mg_category","mg_code"]);
+  const source=sourceFor(MASTER_SPECS.merch_group_detail,{companyCode:"SYNCO",divisionCode:"SD001",mgTypeCode:"01",mgCategory:"",mgCode:"M1"});
+  const projected=projectCurrentRows(MASTER_SPECS.merch_group_detail,[source],{runId:RUN,fetchedAt:NOW});
+  assert.equal(projected.rows[0].mg_category,"");
+});
+
 test("master URL emits only declared parameters supplied by its caller",()=>{
   assert.equal(masterUrl("/seasons",{companyCode:"SYNCO",divisionCode:"SD001",active:"N"}).search,"?companyCode=SYNCO&divisionCode=SD001&active=N");
 });
@@ -50,6 +57,13 @@ test("paged masters refuse an incomplete total",async()=>{
 test("plain-array endpoints refuse a paged envelope",async()=>{
   const fetchImpl=async()=>({ok:true,status:200,text:async()=>JSON.stringify({content:[]})});
   await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),/plain array/);
+});
+
+test("plain-array masters use the same serialized request gate",async()=>{
+  let gates=0;
+  const fetchImpl=async()=>({ok:true,status:200,text:async()=>"[]"});
+  await fetchArrayMaster("/merchGroupDetails",{},"hidden",{fetchImpl,pauseMs:0,requestGate:async()=>{gates+=1;}});
+  assert.equal(gates,1);
 });
 
 test("every live-shaped synthetic row maps or is deliberately ignored",()=>{

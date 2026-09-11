@@ -1,7 +1,7 @@
 import { sqlDate, sqlNumber, sqlText, sqlTimestamp, sqlUuid } from "./values.mjs";
 
-const PG = { text: "text", num: "numeric", date: "date", ts: "timestamptz" };
-const emitters = { text: sqlText, num: sqlNumber, date: sqlDate, ts: sqlTimestamp };
+const PG = { text: "text", keytext: "text", num: "numeric", date: "date", ts: "timestamptz" };
+const emitters = { text: sqlText, keytext: sqlText, num: sqlNumber, date: sqlDate, ts: sqlTimestamp };
 const BATCH = 300;
 
 function stageSql(name, spec, rows) {

@@ -30,9 +30,10 @@ export async function fetchPagedMaster(endpoint, params, apiKey, options = {}) {
   return rows;
 }
 
-export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = fetch, timeoutMs = REQUEST_TIMEOUT_MS, pauseMs = REQUEST_PAUSE_MS } = {}) {
+export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = fetch, requestGate, timeoutMs = REQUEST_TIMEOUT_MS, pauseMs = REQUEST_PAUSE_MS } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    if (requestGate) await requestGate();
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
