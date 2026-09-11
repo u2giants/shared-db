@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2775/1",
   "contract_sha256": "dfd0d4af04f62b352230a526c17c486da1a6f76ad78a635023eefee13d63a9f7",
-  "head_sha": "42e5d72e71b0be6061a16f96597e444f58690d70",
+  "head_sha": "5561d545dcd61f020ca43eac158bb7d1b4fdd93b",
   "files_changed": [
     "AGENTS.md",
     "docs/agents/section-4-anti-collision-rules.md",
