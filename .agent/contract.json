@@ -1,21 +1,27 @@
 {
   "schema_version": 1,
-  "generation": 1,
-  "work_issue": 2701,
+  "generation": 5,
+  "work_issue": 2694,
   "work_type": "repo-maintenance",
-  "route": "repo-session",
-  "goal": "Restore Property Matches for non-admin Licensing users through the existing Licensing-gated Scraped Properties read surface when the lower-level reconciliation view is refused, without changing database structure, roles, grants, or decision controls.",
-  "base_sha": "aef1504e7c3c7674a6a9709e42720b8f2a725f43",
-  "dispatcher": "Albert owner request in Codex task",
-  "worker": "Codex issue 2701 repository session",
-  "branch": "codex/issue-2701-property-match-access",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2701-property-match-access",
-  "allowed_paths": ["apps/db-data-admin/src/lib/property-match.ts", "apps/db-data-admin/src/PropertyMatchReview.test.tsx", ".agent/contract.json", ".agent/completion.json"],
-  "file_writes": ["apps/db-data-admin/src/lib/property-match.ts", "apps/db-data-admin/src/PropertyMatchReview.test.tsx", ".agent/contract.json", ".agent/completion.json"],
+  "route": "repository-maintenance",
+  "goal": "Implement Albert Hazan's 2026-09-10 owner policy that governed reviewers may run concurrent independent jobs. Replace the single active lease per reviewer with assignment-keyed leases while preserving exact-head binding, independent slots, durable verdicts, atomic release/replacement, and compatibility for active legacy leases.",
+  "base_sha": "5532d2bd401e67af39f0e60c6b08bcd1ebb0723f",
+  "dispatcher": "Albert Hazan owner instruction, issue #2694",
+  "worker": "Codex reviewer-concurrency-policy",
+  "branch": "codex/reviewer-concurrency-policy",
+  "worktree": "C:/repos/shared-db-worktrees/reviewer-concurrency-policy",
+  "allowed_paths": [
+    "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "scripts/record-review-verdict.test.mjs", "plan_reviewer_lease_capacity_truth.md", "docs/agents/section-4-anti-collision-rules.md", ".agent/contract.json", ".agent/completion.json"
+  ],
+  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "scripts/record-review-verdict.test.mjs", "plan_reviewer_lease_capacity_truth.md", "docs/agents/section-4-anti-collision-rules.md", ".agent/contract.json", ".agent/completion.json"],
   "db_reads": [],
   "db_writes": [],
-  "prohibited_actions": ["No database migration, role grant, permission broadening, or production data write", "Do not weaken or bypass the Licensing Manager gate or append-only decision controls", "Do not call the failure fixed without exact deployed-head live workflow evidence"],
-  "required_checks": ["npm test -- --run", "npm run build --silent", "npm run lint --silent", "git diff --check"],
-  "assumptions": ["The existing db_data_admin_scraped_properties RPC remains the authorized Licensing read surface already used by the adjacent production tab.", "The fallback runs only after the direct OPA reconciliation view returns an error and preserves every OPA submission option returned by the authorized review surface."],
-  "stop_conditions": ["Testing shows the main property-match queue RPC itself fails for a correctly linked Licensing user", "A complete OPA picker would require broader database permissions or a database structure change", "A required test or independent review identifies a capability or authorization regression"]
+  "prohibited_actions": ["No database access or mutation", "Do not weaken exact-head, independence, durable-verdict, atomic-transition, or legacy-lease safeguards", "Do not alter reviewer eligibility, roster, or provider wrappers", "Do not merge until the governed pull-request route has two durable exact-head approvals"],
+  "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "node --test scripts/record-review-verdict.test.mjs", "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "git diff --check"],
+  "assumptions": ["The owner clarification supersedes the historical one-active-lease capacity assumption but not the evidence and independence safeguards.", "Legacy refs remain readable and releasable so no active review is invalidated by this change.", "Concurrent leases are keyed by the durable assignment tuple and only exact 40-character production heads enter the new namespace."],
+  "stop_conditions": [
+    "A required test shows a concurrent lease can overwrite, release, or authorize a sibling assignment",
+    "The change would require relaxing an existing exact-head or independent-review rule",
+    "The work expands into database structure or application behavior"
+  ]
 }

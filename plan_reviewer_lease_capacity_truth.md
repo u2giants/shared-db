@@ -31,9 +31,15 @@ retired by implementation PR #2064.
 | 5 | `ai-reviewer-issue`: never advertise evidence that was not captured | ✅ done | `popcre/ai-devops` `113839d39f0179b66bda86f79ef5761ee8eb70ca`; 52 tests; exact-head APPROVE |
 | 6 | Tests green, PR merged, `#2058` closed and `#1851` updated | ✅ done | PR #2064 merged as `9c5973bbff1d2c6ce38a8ef6e3fe65e7d694fee7`; Guarded Merge run `33550813754`; #1999 sequence 809 replaced by Muse sequence 844 |
 
+**Owner clarification, 2026-09-10:** reviewers have no concurrent-job cap. The
+one-active-lease-per-reviewer model documented below is historical; issue #2694
+replaces it with assignment-keyed concurrent leases while preserving exact-head,
+independent-review, and durable-verdict requirements.
+
 **Complete — do not restart implementation.** PR #2064 is merged, #2058 is
 closed, #1851 records the two deliberately remaining defects, and the live
-replacement proof succeeded without a manual ref edit.
+replacement proof succeeded without a manual ref edit. The later #2694 policy
+change is separate repository-maintenance work, not a reopening of #2058.
 
 ---
 

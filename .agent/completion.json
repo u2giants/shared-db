@@ -1,21 +1,60 @@
 {
   "schema_version": 1,
-  "work_issue": 2701,
+  "work_issue": 2694,
   "outcome": "ready-for-merge",
-  "pr": 2702,
+  "pr": 2695,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2701/1",
-  "contract_sha256": "591d17acccd97a9e6a04386f599fa3432b4e546b8d4620feb0ebf77a63a12418",
-  "head_sha": "a7dc9b3d4b0d2531177f98740806c9a7e7cd67d7",
-  "files_changed": ["apps/db-data-admin/src/PropertyMatchReview.test.tsx", "apps/db-data-admin/src/lib/property-match.ts"],
+  "contract_ref": "refs/db-contracts/2694/5",
+  "contract_sha256": "3274438055249c72764a25dba17ac304f74d71a3df7e79596b0e717cc0bd6b50",
+  "head_sha": "984d5417f071f4e6e7cb2e516d2d836ef1958f7e",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/agents/section-4-anti-collision-rules.md",
+    "plan_reviewer_lease_capacity_truth.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/record-review-verdict.test.mjs"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "npm test -- --run", "exit_code": 0, "evidence": "22 test files and 145 tests passed."},
-    {"command": "npm run build --silent", "exit_code": 0, "evidence": "Production build completed successfully."},
-    {"command": "npm run lint --silent", "exit_code": 0, "evidence": "Lint completed successfully with no reported errors."},
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
+    {
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 504, pass 504, fail 0, skipped 0, todo 0, suites 0 at commit 984d5417f071f4e6e7cb2e516d2d836ef1958f7e. The new test '#2694 releasing a slot 2 failure is refused when the lease at that ref names slot 1' asserts the SLOT in the inline lease-match check inside releaseFailedReviewer. It was proved to be a real regression test: with that check reverted to the slot-blind five-field predicate, `node --test --test-name-pattern \"lease at that ref names slot 1\"` runs tests 1, pass 0, fail 1; with the fix in place it passes. Both inline checks now delegate to leaseMatchesAssignment, which already compared the slot, so neither depends on the single global sequence cursor keeping sequences unique across slots."
+    },
+    {
+      "command": "node --test scripts/record-review-verdict.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 18, pass 18, fail 0, skipped 0, todo 0, suites 0 at commit 984d5417f071f4e6e7cb2e516d2d836ef1958f7e. Unchanged by this round: the slot fix touches only the two inline lease-match predicates in the lane manager's release and replacement paths, and the verdict recorder's own lease handling is untouched."
+    },
+    {
+      "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
+      "exit_code": 0,
+      "evidence": "Contract is valid. Generation 5, published and read back as refs/db-contracts/2694/5 sha 72a37b2a8640b3c3b28dff62719e8fafa5513cad, content hash 3274438055249c72764a25dba17ac304f74d71a3df7e79596b0e717cc0bd6b50."
+    },
+    {
+      "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
+      "exit_code": 0,
+      "evidence": "Completion report satisfies the contract. Also validated with --expected-pr 2695 and --expected-head-sha naming this round's final head."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    }
   ],
-  "assumptions_resolved": ["The fallback uses only the existing Licensing-gated db_data_admin_scraped_properties RPC and introduces no database or role change.", "Tests prove Disney and Lucasfilm OPA rows are retained, non-OPA Creative rows are excluded, results are sorted, and safe stage codes are shown if both reads fail."],
+  "assumptions_resolved": [
+    "A recorded verdict now releases the lease it was recorded against. A tuple-keyed v2 lease is never drawn again, so before this change nothing reclaimed it and refs/db-review-active-v2/* grew without bound until the listing ceiling refused every draw, release, replacement, exclusion and capacity report.",
+    "The release is best-effort by design: it is compare-and-swap where the io offers one, and it never throws, because a failed release must not void a durable verdict artifact whose digest is computed over the findings comment.",
+    "A determinate listing refusal (row ceiling or a newly paginated namespace) is now marked on the error and re-raised with its own text; transient failures still fail open. No budget, ceiling or guard was widened or relaxed.",
+    "The capacity report and cutover activation read the assignment-keyed view, so one provider holding two live jobs is two rows and two backfilled leases rather than one.",
+    "No database access or mutation occurred.",
+    "#2710. The standing verdict artifact is read before the exact-lease gate, so recording stays idempotent after the verdict has handed its own lease back. The artifact's assignment_sha binding is still enforced by validateVerdictArtifact, so a late or conflicting verdict is refused unchanged, and a request with no standing artifact still meets the lease gate.",
+    "The lease a recorded verdict hands back no longer falls back to the provider-keyed legacy ref when neither name holds it, so the release cannot aim at a ref a live sibling job for the same provider is holding.",
+    "#2695 review REVISE round. Both inline lease-match checks -- in releaseFailedReviewer and in the replacement path -- now state the review slot by reusing leaseMatchesAssignment, so a lease belonging to another slot can no longer satisfy them. The dead failedLeaseRef binding in releaseFailedReviewer was removed so a later edit cannot aim a compare-and-delete at the wrong ref name, and a duplicated three-line comment paragraph was deleted.",
+    "pickReviewer keeps its serial behaviour and gains a comment instead of a concurrent-mode branch. It has no production caller in this tree, its tests pin the serial-lease rule, and the live draw path applies failed-name, exclusion and excluded-provider filtering that this helper does not have -- so a bolted-on concurrent branch would produce a half-correct helper that LOOKS safe to reuse for a draw. Documenting it as the pre-concurrency serial helper that must not be reused without that branch and those filters is the safer of the two options offered."
+  ],
   "stop_conditions_hit": []
 }
