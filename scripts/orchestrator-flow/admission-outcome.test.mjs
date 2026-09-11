@@ -95,7 +95,7 @@ test('manager requires explicit admission before claim, reviewer, and shared-sta
   ]
   const old=console.error;const messages=[];console.error=(m)=>messages.push(String(m))
   try { for (const args of calls) assert.equal(managerMain(args,new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
-  assert.equal(messages.filter((m)=>m.includes('--admit-issue')).length,3)
+  assert.equal(messages.filter((m)=>m.includes('--admit-issue')).length,3,messages.join(' | '))
 })
 
 test('production admission requires the source PR so actual SQL is rechecked',()=>{
@@ -266,6 +266,36 @@ test('initial admission events are serialized under the author mutex',()=>{
   try{assert.equal(managerMain(['--admit-issue','41'],new Date('2026-09-11T00:00:00Z'),io),0)}finally{console.log=old}
   assert.deepEqual(labels.map((row)=>row.split(':')[0]),['lock','comment','comment','unlock'])
   assert.equal(outcomeHistory(comments,41).state,'classified')
+})
+
+test('claim admission and dispatched event share one author-mutex ownership interval',()=>{
+  const comments=[],refs=new Map(),labels=[]
+  const io={
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,
+    makeOwnerCommit:()=> 'claim-owner',readRef:(ref)=>refs.get(ref)??null,
+    createRef:(ref,sha)=>{labels.push('lock');if(refs.has(ref))return false;refs.set(ref,sha);return true},
+    deleteRef:(ref)=>{labels.push('unlock');refs.delete(ref)},openClaims:()=>[],prSources:()=>[],
+    reserveVersion:()=>({version:'20260911133700'}),
+    createClaim:()=>{assert.equal(refs.size,1);labels.push('claim');return 'https://github.com/u2giants/shared-db/issues/99'},closeClaim:()=>{},
+    commentIssue:(_n,body)=>{assert.equal(refs.size,1);labels.push('event');comments.push(ownerComment(body))},
+  }
+  const old=console.log;console.log=()=>{}
+  try{assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.example'],new Date('2026-09-11T00:00:00Z'),io),0)}finally{console.log=old}
+  assert.deepEqual(labels,['lock','event','event','claim','event','unlock'])
+  assert.equal(outcomeHistory(comments,41).state,'dispatched')
+})
+
+test('advance validation and lifecycle mutation share one author-mutex interval',()=>{
+  const comments=eventComments('classified',41),refs=new Map();let writes=0
+  const io={
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,
+    makeOwnerCommit:()=> 'advance-owner',readRef:(ref)=>refs.get(ref)??null,
+    createRef:(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true},deleteRef:(ref)=>refs.delete(ref),
+    commentIssue:(_n,body)=>{assert.equal(refs.size,1);writes++;comments.push(ownerComment(body))},
+  }
+  const old=console.log;console.log=()=>{}
+  try{assert.equal(managerMain(['--advance-outcome','dispatched','--admit-issue','41','--issue','41','--owner','o','--evidence','https://github.com/u2giants/shared-db/issues/99'],new Date('2026-09-11T00:03:00Z'),io),0)}finally{console.log=old}
+  assert.equal(writes,1);assert.equal(outcomeHistory(comments,41).state,'dispatched');assert.equal(refs.size,0)
 })
 
 test('outcome status ignores trusted lifecycle events for a different issue',()=>{

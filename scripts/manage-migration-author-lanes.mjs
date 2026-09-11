@@ -2271,7 +2271,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:admission|author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:admission|outcome-advance|author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -5458,16 +5458,20 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
   }
 }
 
-function admitIssueSerialized(number, io = githubIo, options = {}) {
+function withAuthorMutex(label, io, options, operation) {
   const requestId = options.requestId ?? randomUUID()
-  const ownerSha = io.makeOwnerCommit(`db-coordination admission ${requestId}`)
+  const ownerSha = io.makeOwnerCommit(`db-coordination ${label} ${requestId}`)
   acquireMutex(ownerSha, io, options.mutexAttempts ?? 100)
   try {
     requireOwnedRef(MUTEX_REF, ownerSha, io)
-    return admitIssue(number, io, options)
+    return operation(ownerSha)
   } finally {
     if (io.readRef(MUTEX_REF) === ownerSha) releaseOwnedRef(MUTEX_REF, ownerSha, io)
   }
+}
+
+function admitIssueSerialized(number, io = githubIo, options = {}) {
+  return withAuthorMutex('admission',io,options,()=>admitIssue(number,io,options))
 }
 
 export function resolveAdmittedIssueForPr(pr, io = githubIo) {
@@ -5479,7 +5483,7 @@ export function resolveAdmittedIssueForPr(pr, io = githubIo) {
   return { issue:Number(linked[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
 }
 
-function requireAdmission(options, io, { pr = null, timestamp } = {}) {
+function requireAdmission(options, io, { pr = null, timestamp, mutexOwner = null } = {}) {
   if (io.enforceAdmission !== true) return null
   if (!Number.isInteger(Number(options.admitIssue)) || Number(options.admitIssue) <= 0) {
     throw new LaneError('--admit-issue <work issue> is required before claim, reviewer assignment, or shared-stage acquisition')
@@ -5488,7 +5492,10 @@ function requireAdmission(options, io, { pr = null, timestamp } = {}) {
     throw new LaneError(`--admit-issue #${options.admitIssue} does not match --issue #${options.issue}`)
   }
   if(pr===null&&options.acquireExclusive)throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
-  const admitted=admitIssueSerialized(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null, timestamp })
+  if(mutexOwner)requireOwnedRef(MUTEX_REF,mutexOwner,io)
+  const admitted=mutexOwner
+    ? admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null, timestamp })
+    : admitIssueSerialized(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null, timestamp })
   if(options.claim){
     const requested=validateClaimObjects(options.objects??[]).sort()
     const authorized=[...(admitted.writes??[])].sort()
@@ -5499,10 +5506,16 @@ function requireAdmission(options, io, { pr = null, timestamp } = {}) {
 
 export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
   options = { ...options, objects: validateClaimObjects(options.objects) }
+  if(io.enforceAdmission===true&&(!Number.isInteger(Number(options.admitIssue))||Number(options.admitIssue)<=0))throw new LaneError('--admit-issue <work issue> is required before claim, reviewer assignment, or shared-stage acquisition')
   const requestId = options.requestId ?? randomUUID()
   const ownerSha = io.makeOwnerCommit(`db-coordination author-acquisition ${requestId}`)
   acquireMutex(ownerSha, io, options.mutexAttempts ?? 100)
   try {
+    const admitted=requireAdmission(options,io,{timestamp:now,mutexOwner:ownerSha})
+    if(io.enforceAdmission===true){
+      const authorized=[...(admitted?.writes??[])].sort()
+      if(options.objects.length!==authorized.length||options.objects.some((value,index)=>value!==authorized[index]))throw new LaneError(`--claim objects must exactly match admitted issue #${options.admitIssue} writes`)
+    }
     const claims = io.openClaims()
     const prSources = io.prSources()
     assertLaneAvailable(claims, options.objects, now, { prSources })
@@ -5512,7 +5525,10 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
     const body = claimBody({ ...options, version: reservation.version, expiresAt })
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const url = io.createClaim(options.task, body)
-    try { requireOwnedRef(MUTEX_REF,ownerSha,io) }
+    try {
+      requireOwnedRef(MUTEX_REF,ownerSha,io)
+      if(io.enforceAdmission===true)advanceOutcome({issue:Number(options.admitIssue),state:'dispatched',actor:options.owner,timestamp:now.toISOString(),evidenceUrls:[url]},io)
+    }
     catch(error) {
       const number=/\/(\d+)\/?$/.exec(String(url))?.[1]
       if(!number)throw new LaneError(`lost mutex ownership after claim creation and could not identify the claim to close: ${error.message}`)
@@ -6485,14 +6501,17 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.advanceOutcome){
       if(!o.issue)throw new LaneError('--advance-outcome requires --issue <n>')
       if(!o.evidence)throw new LaneError('--advance-outcome requires --evidence <durable URL>')
-      requireAdmission(o,io,{pr:o.pr??null})
-      console.log(JSON.stringify(advanceOutcome({issue:Number(o.issue),state:o.advanceOutcome,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString(),evidenceUrls:[o.evidence]},io),null,2));return 0
+      const result=withAuthorMutex('outcome-advance',io,o,(ownerSha)=>{
+        requireAdmission(o,io,{pr:o.pr??null,mutexOwner:ownerSha})
+        requireOwnedRef(MUTEX_REF,ownerSha,io)
+        return advanceOutcome({issue:Number(o.issue),state:o.advanceOutcome,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString(),evidenceUrls:[o.evidence]},io)
+      })
+      console.log(JSON.stringify(result,null,2));return 0
     }
     if(o.completeOutcome){
       if(!o.evidence)throw new LaneError('--complete-outcome requires --evidence <durable comment URL>')
       console.log(JSON.stringify(completeOutcome({issue:o.completeOutcome,evidenceRef:o.evidence,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString()}, {...io,parseScope:parseQueueScope}),null,2));return 0
     }
-    if(o.claim)requireAdmission(o,io,{timestamp:now})
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
     if(o.reconcileFlow){
       if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('reconcile runtime adapter is unavailable')
@@ -6539,6 +6558,14 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
     if (o.acquireExclusive) { requireAdmission(o,io,{pr:o.pr??null});console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
+    if(o.claim){
+      for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)
+      if (!o.objects.length) throw new LaneError('--objects must name every database object exactly')
+      o.leaseHours ??= DEFAULT_LEASE_HOURS
+      if (!Number.isFinite(o.leaseHours) || o.leaseHours <= 0 || o.leaseHours > 24) throw new LaneError('--lease-hours must be greater than 0 and no more than 24')
+      const claimed=acquireAuthorLane(o, now, io)
+      console.log(JSON.stringify(claimed, null, 2));return 0
+    }
     const claims = io.openClaims()
     if (o.returnIssue) { console.log(JSON.stringify(returnIssueToOwner(o.returnIssue, io), null, 2)); return 0 }
     if (o.queueAudit) {
@@ -6785,14 +6812,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       for(const problem of malformed)console.error(`MALFORMED ${problem}`)
       return malformed.length || occupied>MAX_AUTHOR_LANES ? 2 : 0
     }
-    if (!o.claim) throw new LaneError('choose --admit-issue, --claim, --audit, --queue-audit, --outcome-status, --complete-outcome, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
-    for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)
-    if (!o.objects.length) throw new LaneError('--objects must name every database object exactly')
-    o.leaseHours ??= DEFAULT_LEASE_HOURS
-    if (!Number.isFinite(o.leaseHours) || o.leaseHours <= 0 || o.leaseHours > 24) throw new LaneError('--lease-hours must be greater than 0 and no more than 24')
-    const claimed=acquireAuthorLane(o, now, io)
-    if(io.enforceAdmission===true)advanceOutcome({issue:Number(o.admitIssue),state:'dispatched',actor:o.owner,timestamp:now.toISOString(),evidenceUrls:[claimed.claim]},io)
-    console.log(JSON.stringify(claimed, null, 2)); return 0
+    throw new LaneError('choose --admit-issue, --claim, --audit, --queue-audit, --outcome-status, --complete-outcome, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
   } catch (error) { console.error(`REFUSED: ${error.message}`); return 2 }
 }
 
