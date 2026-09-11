@@ -4322,5 +4322,71 @@ CATALOG_CONTRACTS["dcp_stable_identity_property_match_v1"] = (
 )
 
 
+# Issue #2579. Complete all-licensor Property-source coverage in DB Data Admin.
+#
+# Migration 20260910155753 lands the Paramount TrackerPlus submission landing
+# schema and edits api.db_data_admin_scraped_properties and
+# api.source_capture_inventory_exact in place with pg_get_functiondef, so the
+# reviewed migration text does not restate those bodies. This contract reads the
+# durable post-apply outcome of exactly those statements out of the catalog.
+#
+# It is a strict SUPERSET of dcp_stable_identity_property_match_v1, so every
+# assertion #2576 and #2449 made about the shared routine is carried forward and
+# nothing they proved stops being proved.
+_INVENTORY_EXACT_DEF = (
+    "pg_get_functiondef(to_regprocedure("
+    "'api.source_capture_inventory_exact(text)'))"
+)
+ALL_LICENSOR_PROPERTY_SOURCE_COVERAGE_CONTRACT = (
+    DCP_STABLE_IDENTITY_PROPERTY_MATCH_CONTRACT
+    # The TrackerPlus submission landing schema exists, is append-only for the
+    # loader role and is never readable or writable by public or anon.
+    + " and to_regclass('plm.pmt_trackerplus_submission_capture') is not null"
+    + " and to_regclass('plm.pmt_trackerplus_submission_property') is not null"
+    + " and exists (select 1 from pg_class where oid='plm.pmt_trackerplus_submission_capture'::regclass and relrowsecurity)"
+    + " and exists (select 1 from pg_class where oid='plm.pmt_trackerplus_submission_property'::regclass and relrowsecurity)"
+    + " and has_table_privilege('service_role','plm.pmt_trackerplus_submission_capture','INSERT')"
+    + " and has_table_privilege('service_role','plm.pmt_trackerplus_submission_property','INSERT')"
+    + " and not has_table_privilege('service_role','plm.pmt_trackerplus_submission_property','DELETE,TRUNCATE')"
+    + " and not has_table_privilege('authenticated','plm.pmt_trackerplus_submission_property','INSERT,UPDATE,DELETE,TRUNCATE')"
+    + " and not has_table_privilege('anon','plm.pmt_trackerplus_submission_property','SELECT')"
+    + " and to_regprocedure('plm.begin_pmt_trackerplus_submission_capture(text,text,text,text,timestamptz,integer,text,text)') is not null"
+    + " and to_regprocedure('plm.load_pmt_trackerplus_submission_capture_chunk(uuid,integer,jsonb)') is not null"
+    + " and to_regprocedure('plm.finalize_pmt_trackerplus_submission_capture(uuid)') is not null"
+    + " and not has_function_privilege('anon',to_regprocedure('plm.load_pmt_trackerplus_submission_capture_chunk(uuid,integer,jsonb)'),'EXECUTE')"
+    + " and not has_function_privilege('authenticated',to_regprocedure('plm.load_pmt_trackerplus_submission_capture_chunk(uuid,integer,jsonb)'),'EXECUTE')"
+    # The reader gained exactly three new source groups, each pinned to its own
+    # latest complete capture clock.
+    + " and position('plm.pmt_trackerplus_submission_property' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('plm.coke_asset_property_option' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('plm.wwe_property' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('pmt_trackerplus_latest' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('coke_property_latest' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('wwe_submission_latest' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    # Paramount Creative stays a separate group from Paramount Submissions.
+    + " and position('Submissions (TrackerPlus)' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('Creative (Asset Library Property choices)' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('plm.pmt_property' in %s)>0" % _SCRAPED_PROPERTIES_DEF
+    # No Property vocabulary is manufactured from inferred or secondary evidence.
+    + " and position('coke_approval_vocabulary_value' in %s)=0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('wwe_asset_property_inferred' in %s)=0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('wwe_character_property_inferred' in %s)=0" % _SCRAPED_PROPERTIES_DEF
+    + " and position('wwe_style_guide_property_inferred' in %s)=0" % _SCRAPED_PROPERTIES_DEF
+    # The inventory classifies the post-inventory families and gives TrackerPlus
+    # its own clock; the browser-safe view stays count-free.
+    + " and to_regclass('api.source_capture_inventory') is not null"
+    + " and position('pmt_trackerplus_capture_id' in %s)>0" % _INVENTORY_EXACT_DEF
+    + r" and not exists (select 1 from api.source_capture_inventory where source_system='other' and (table_name like 'marvel\_%' or table_name like 'wwe\_%' or table_name like 'pmt\_trackerplus\_%'))"
+    + " and not exists (select 1 from api.source_capture_inventory where row_count is not null)"
+    + " and has_table_privilege('authenticated','api.source_capture_inventory','SELECT')"
+    + " and not has_table_privilege('anon','api.source_capture_inventory','SELECT')"
+    + " and has_function_privilege('authenticated',to_regprocedure('api.source_capture_inventory_exact(text)'),'EXECUTE')"
+    + " and not has_function_privilege('anon',to_regprocedure('api.source_capture_inventory_exact(text)'),'EXECUTE')"
+)
+CATALOG_CONTRACTS["all_licensor_property_source_coverage_v1"] = (
+    ALL_LICENSOR_PROPERTY_SOURCE_COVERAGE_CONTRACT
+)
+
+
 if __name__ == "__main__":
     raise SystemExit(main())
