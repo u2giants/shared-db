@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/26",
-  "contract_sha256": "94893547f6619d8fa7c112b1221d52ee903197c158899b75bd4a637f4d4711e3",
-  "head_sha": "aaa849571bc0e7854286a1d4ce77a348ebacb770",
+  "contract_ref": "refs/db-contracts/2727/27",
+  "contract_sha256": "ceaae2e191c75e6c16c49f597befaf7af6662a523f94c312715af719e777d6aa",
+  "head_sha": "bce1321e2da5d866512fb30a704deef6739c5b7a",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -31,22 +31,22 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 9b02ad48 aaa84957 reports no whitespace errors after merging main 9b02ad48 (#2767) and resolving the lane-manager conflict."
+      "evidence": "git diff --check 5761bc5e bce1321e reports no whitespace errors."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "At aaa84957: tests 712, pass 712, fail 0, cancelled 0, skipped 0."
+      "evidence": "At bce1321e: tests 712,pass 712,fail 0,cancelled 0,skipped 0."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "At aaa84957: truth audit OK: call_sites=278."
+      "evidence": "At bce1321e: truth audit OK: call_sites=278"
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "At aaa84957: 215 files scanned, every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "At bce1321e: GitHub transport conformance: 215 files scanned, every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
