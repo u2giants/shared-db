@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2786,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2785/1",
-  "contract_sha256": "7014c15d3a75f4e05bec9bcafe08632bca7eece0c9eb93e3ff30b02748fa5b50",
-  "head_sha": "38cbd24e75c747c5d85b9f20504e49420add9574",
+  "contract_ref": "refs/db-contracts/2785/2",
+  "contract_sha256": "7526a02f7ca7e9d27a4f6cb29cc0f780fb7b6c6de3add7dbec5feffd038c61b3",
+  "head_sha": "3bc425d230bd1e4d17e0b00a771d42bb1fda1836",
   "files_changed": [
     ".github/workflows/business-rule-library.yml",
     ".github/workflows/documents-only-merge-authorization.yml",
@@ -17,6 +17,7 @@
     ".github/workflows/shared-supabase-migrations.yml",
     ".github/workflows/task-gates.yml",
     "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
     "scripts/check-actions-quota.mjs",
     "scripts/check-actions-quota.test.mjs",
     "scripts/check-dispatch-collision.mjs",
@@ -27,7 +28,6 @@
     "scripts/lib/github-transport.test.mjs",
     "scripts/lib/open-pr-files.mjs",
     "scripts/lib/open-pr-files.test.mjs",
-    "scripts/manage-migration-author-lanes.mjs",
     "scripts/production_business_risk_gate.py",
     "scripts/test_production_business_risk_gate.py"
   ],
@@ -37,28 +37,39 @@
     {
       "command": "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
       "exit_code": 0,
-      "evidence": "658 tests, 658 pass, 0 fail, 0 skipped. Includes: rate-limit 403 waits 301 s then succeeds; other 403s fail after one call with no probe; collision result identical with shared snapshot vs self-gather, snapshot path makes no network reads."
+      "evidence": "661 tests, 661 pass, 0 fail, 0 skipped after merging main 9b02ad48. Includes: rate-limit 403 waits 301 s then succeeds; other 403s fail after one call with no probe; a one-attempt caller never waits or probes; collision result identical with shared snapshot vs self-gather."
     },
     {
       "command": "python -m unittest scripts.test_production_business_risk_gate",
       "exit_code": 0,
-      "evidence": "Ran 141 tests OK after merging main 2662aa1a; pre-lane invocation waits, lane-held invocation fails fast."
+      "evidence": "Ran 141 tests OK after merging main 9b02ad48; pre-lane invocation waits, lane-held invocation fails fast."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors against origin/main 9b02ad48."
+    },
+    {
+      "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "12 tests, 12 pass; invalidator inventory covers scripts/lib/open-pr-files.mjs."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=275."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "216 files scanned; conformance tests 10/10 pass; contract suites 41/41 pass."
+      "evidence": "216 files scanned; conformance tests 10/10 pass."
     }
   ],
   "assumptions_resolved": [
     "Only primary quota exhaustion (403/429 with remaining 0) waits, at most 15 minutes and only for reads; secondary limits and other 403s still fail immediately.",
     "The shared open-PR snapshot keeps every completeness proof and is bound to repo, PR number and schema; a mismatch fails closed.",
-    "No database reads or writes; no lock-holding workflow waits on quota."
+    "No database reads or writes; no lock-holding workflow waits on quota.",
+    "The lanes script change (list issues once) was moved to follow-up #2787 to clear the protected-source collision; the lanes script is unchanged here."
   ],
   "stop_conditions_hit": []
 }

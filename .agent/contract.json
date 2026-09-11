@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2785,
-  "generation": 1,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Cut GitHub Actions installation API quota use so production applies stop failing at about ten active PRs, without weakening any safety check or changing which collisions are found.",
-  "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
+  "base_sha": "9b02ad489d09427fc0556248c0a85b7cc78807ff",
   "dispatcher": "Claude coordinator session",
   "worker": "Claude api-quota-reduction worker",
   "branch": "claude/api-quota-reduction",
@@ -14,6 +14,7 @@
     ".agent/contract.json",
     ".agent/completion.json",
     "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
     ".github/workflows/business-rule-library.yml",
     ".github/workflows/documents-only-merge-authorization.yml",
     ".github/workflows/guarded-migration-merge.yml",
@@ -40,6 +41,7 @@
     ".agent/contract.json",
     ".agent/completion.json",
     "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
     ".github/workflows/business-rule-library.yml",
     ".github/workflows/documents-only-merge-authorization.yml",
     ".github/workflows/guarded-migration-merge.yml",
@@ -71,7 +73,9 @@
   "required_checks": [
     "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
     "python -m unittest scripts.test_production_business_risk_gate",
-    "git diff --check"
+    "git diff --check",
+    "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs"
   ],
   "assumptions": [
     "Quota exhaustion is the primary rate limit (403/429 with remaining 0); secondary limits and other 403s must keep failing immediately.",
