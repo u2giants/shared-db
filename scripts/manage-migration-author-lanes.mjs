@@ -5534,8 +5534,14 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
     catch(error) {
       if(io.readRef(MUTEX_REF)!==ownerSha)throw new LaneError(`lost mutex ownership after claim creation; claim ${url} remains protected for explicit recovery: ${error.message}`)
       if(expectedDispatch){
-        const history=outcomeHistory(io.issueComments(Number(options.admitIssue)),Number(options.admitIssue))
-        if(history.valid&&history.events.some((event)=>event.event_id===expectedDispatch.event_id))return { version:reservation.version,claim:url,expiresAt:expiresAt.toISOString(),requestId }
+        const delays=[0,250,500,1000,1500,2000]
+        for(const delay of delays){
+          if(delay)(io.wait??((ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)))(delay)
+          requireOwnedRef(MUTEX_REF,ownerSha,io)
+          const history=outcomeHistory(io.issueComments(Number(options.admitIssue)),Number(options.admitIssue))
+          if(!history.valid)throw new LaneError(`dispatch readback is invalid; claim ${url} remains protected for explicit recovery: ${history.problems.join('; ')}`)
+          if(history.events.some((event)=>event.event_id===expectedDispatch.event_id))return { version:reservation.version,claim:url,expiresAt:expiresAt.toISOString(),requestId }
+        }
       }
       const number=/\/(\d+)\/?$/.exec(String(url))?.[1]
       if(!number)throw new LaneError(`lost mutex ownership after claim creation and could not identify the claim to close: ${error.message}`)

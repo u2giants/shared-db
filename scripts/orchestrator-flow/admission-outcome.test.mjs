@@ -285,19 +285,19 @@ test('claim admission and dispatched event share one author-mutex ownership inte
   assert.equal(outcomeHistory(comments,41).state,'dispatched')
 })
 
-test('lost dispatched-comment response preserves the valid claim after exact event readback',()=>{
-  const comments=[],refs=new Map();let closed=0
+test('lost dispatched-comment response tolerates delayed exact-event visibility and preserves the claim',()=>{
+  const comments=[],refs=new Map();let closed=0,hiddenReads=0,waits=0
   const io={
-    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>hiddenReads-->0?comments.filter((comment)=>parseEventComment(comment.body)[0]?.event_type!=='dispatched'):comments,
     makeOwnerCommit:()=> 'claim-owner',readRef:(ref)=>refs.get(ref)??null,
     createRef:(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true},deleteRef:(ref)=>refs.delete(ref),
     openClaims:()=>[],prSources:()=>[],reserveVersion:()=>({version:'20260911133800'}),
-    createClaim:()=> 'https://github.com/u2giants/shared-db/issues/99',closeClaim:()=>{closed++},
-    commentIssue:(_n,body)=>{comments.push(ownerComment(body));if(parseEventComment(body)[0]?.event_type==='dispatched')throw new Error('response lost')},
+    createClaim:()=> 'https://github.com/u2giants/shared-db/issues/99',closeClaim:()=>{closed++},wait:()=>{waits++},
+    commentIssue:(_n,body)=>{comments.push(ownerComment(body));if(parseEventComment(body)[0]?.event_type==='dispatched'){hiddenReads=2;throw new Error('response lost')}},
   }
   const old=console.log;console.log=()=>{}
   try{assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.example'],new Date('2026-09-11T00:00:00Z'),io),0)}finally{console.log=old}
-  assert.equal(closed,0);assert.equal(outcomeHistory(comments,41).state,'dispatched')
+  assert.equal(closed,0);assert.equal(waits,2);assert.equal(outcomeHistory(comments,41).state,'dispatched')
 })
 
 test('lost mutex ownership never closes the newly created claim',()=>{
