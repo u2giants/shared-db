@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 28,
+  "generation": 29,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "f15f0f0ef39a1f433c16c40ead9a3bead2418772",
+  "base_sha": "e11a59896b870f9b9c11c1c77f7fe0a24f50ab66",
   "dispatcher": "Claude orchestrator marker2758",
   "worker": "Claude issue2506 refresh worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -72,7 +72,8 @@
     "Governed Grok review REVISE 6a1d4ad7 addressed at implementation head aad19862 on main 5761bc5e: migration-local lock_timeout 2s and statement_timeout 30s bound the transactional index builds (a timeout aborts atomically and is retryable); benchmark asserts full-width baseline/forward hashes equal and exercises the authorization boundary for both bodies; unit test binds catalog md5 to the forward body. Backdated guard forced supersession 20260911124016 -> 20260911170219 via the lane tool (ref 1eda7bf5).",
     "Generation 26 rebases the contract on main 11d0e2b4 (after #2786) with no scope change, so the checked PR base is an ancestor of the reported implementation head.",
     "Generation 27 rebases the contract on main 120fb612 (after #2743) with no scope change.",
-    "Generation 28 rebases the contract on main f15f0f0e (after #2780) with no scope change."
+    "Generation 28 rebases the contract on main f15f0f0e (after #2780) with no scope change.",
+    "Generation 29 rebases the contract on main e11a5989 with no scope change."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
