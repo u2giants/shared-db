@@ -3,6 +3,7 @@
   "work_issue": 2781,
   "outcome": "ready-for-merge",
   "pr": 2780,
+  "migration_versions": [],
   "contract_ref": "refs/db-contracts/2781/1",
   "contract_sha256": "25f7ee9cd3e123850b02ee9d160200465ec7b97c8a67c5ee686c6b9f1cfc452f",
   "head_sha": "a7806965f3135f5e716da5a2b7b063e19ea1b045",
