@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2798,
-  "generation": 3,
+  "generation": 4,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Register claim-mode preview apply run 34636342626 and the exact bytes of migration 20260911170526 as a historical restoration so the applied-migration-edit guard accepts the unchanged file on PR #2793, without granting production producer provenance or weakening any other guard.",
