@@ -55,6 +55,8 @@ jobs:
       - name: Check the GitHub API quota before classifying
         env:
           GH_TOKEN: ${{ github.token }}
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
         run: |
           if [ -f scripts/check-actions-quota.mjs ]; then node scripts/check-actions-quota.mjs; fi
 

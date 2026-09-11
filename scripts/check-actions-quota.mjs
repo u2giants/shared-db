@@ -7,7 +7,8 @@
 // using the `rate_limit` endpoint, which does not count against the quota.
 //
 //   remaining >= ACTIONS_QUOTA_MIN_REMAINING (default 200)  -> continue
-//   below it, reset within 15 minutes                       -> wait, then re-check once
+//   below it, reset within the opted-in cap                 -> wait, then re-check once
+//     (GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS, at most 900; unset or 0 means never wait)
 //   below it, reset further away, or unreadable             -> fail with a clear
 //                                                              "installation quota low"
 //
@@ -15,7 +16,7 @@
 // work it cannot finish, and names the real cause when that happens.
 
 import { pathToFileURL } from 'node:url'
-import { DEFAULT_RATE_LIMIT_MAX_WAIT_MS, runGitHubCommand } from './lib/github-transport.mjs'
+import { rateLimitMaxWaitMs, runGitHubCommand } from './lib/github-transport.mjs'
 
 export const DEFAULT_MIN_REMAINING = 200
 
@@ -46,6 +47,7 @@ export function checkQuota({
   log = console.log,
 } = {}) {
   const floor = minRemaining(env)
+  const maxWaitMs = rateLimitMaxWaitMs(env)
   for (let pass = 0; pass < 2; pass += 1) {
     const quota = readQuota(read)
     if (!quota.readable) return { ok: false, message: `installation quota low or unknown: could not read the remaining GitHub API quota (${quota.why}). Refusing to start work that may not finish.` }
@@ -55,7 +57,7 @@ export function checkQuota({
     }
     const delay = quota.reset * 1000 - now()
     const resetAt = new Date(quota.reset * 1000).toISOString()
-    if (pass === 0 && delay <= DEFAULT_RATE_LIMIT_MAX_WAIT_MS) {
+    if (pass === 0 && maxWaitMs > 0 && delay <= maxWaitMs) {
       log(`GitHub API quota: only ${quota.remaining} requests left (floor ${floor}); waiting ${Math.ceil(Math.max(delay, 0) / 1000)}s for the reset at ${resetAt}.`)
       wait(Math.max(delay, 0) + 1000)
       continue

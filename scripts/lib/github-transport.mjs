@@ -56,8 +56,9 @@
 // "API rate limit exceeded" -- a condition with a known end time, unlike a 404.
 // A READ that hits a primary exhaustion (that text with HTTP 403/429) asks the
 // free `rate_limit` endpoint when the quota resets and waits ONCE if that is 15
-// minutes away or less (GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS can lower the cap,
-// never raise it; a step holding a lock sets it to 0). A further reset, an
+// minutes away or less -- but ONLY for a caller that opted in by setting
+// GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS (capped at 900). The default is no wait, so
+// no step holding a lock can sit on it, including steps nobody edited. A further reset, an
 // unreadable reset, a second exhaustion, a write, a secondary rate limit, or any
 // other 403 fails closed exactly as before. The wait never changes what a gate
 // reads or how it judges it.
@@ -105,11 +106,13 @@ export function isRateLimitExhausted(error) {
   return RATE_LIMIT_EXHAUSTED.test(text) && RATE_LIMIT_STATUS.test(text)
 }
 
-// A step holding a repository-wide lock sets GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS=0
-// so it fails fast instead of holding the lock for up to fifteen minutes.
+// OPT-IN. Unset means 0: fail fast, exactly as before this wait existed. Only a
+// step that holds no lock sets GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS (e.g. 900). A
+// lock-holding step therefore never waits, whether or not anyone remembered to
+// say so on that step.
 export function rateLimitMaxWaitMs(env = process.env) {
   const raw = env?.GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS
-  if (raw === undefined || String(raw).trim() === '') return DEFAULT_RATE_LIMIT_MAX_WAIT_MS
+  if (raw === undefined || String(raw).trim() === '') return 0
   const seconds = Number(raw)
   if (!Number.isFinite(seconds) || seconds < 0) return 0
   return Math.min(seconds * 1000, DEFAULT_RATE_LIMIT_MAX_WAIT_MS)

@@ -79,6 +79,8 @@ jobs:
       - name: Check the GitHub API quota before taking the merge lane
         env:
           GH_TOKEN: ${{ github.token }}
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
         run: node scripts/check-actions-quota.mjs
       - name: Pre-flight the required status checks before taking the merge lane
         env:

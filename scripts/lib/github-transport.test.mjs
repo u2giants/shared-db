@@ -136,12 +136,27 @@ function rateLimitedExecutor({ failures = 1, probe, stdout = '{"ok":true}', stde
   }
 }
 
+// The wait is opt-in: these tests act as a step that holds no lock and set the cap.
+const OPTED_MS = 15 * 60 * 1000
+
+test('with no opt-in, a rate-limit 403 fails fast: no wait, no probe, one call', () => {
+  const saved = process.env.GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS
+  delete process.env.GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS
+  try {
+    const { calls, executor } = rateLimitedExecutor({ probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 60) })
+    assert.throws(() => runGitHubCommand(['api', 'repos/o/r/pulls'], { executor, wait: () => assert.fail('an unmarked (possibly lock-holding) step waited'), now: () => NOW_MS, reportStderr() {} }))
+    assert.equal(calls.length, 1)
+  } finally {
+    if (saved !== undefined) process.env.GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS = saved
+  }
+})
+
 test('a rate-limit 403 waits for the stated reset, then succeeds', () => {
   const resetSeconds = Math.floor(NOW_MS / 1000) + 300
   const waits = []
   const { calls, executor } = rateLimitedExecutor({ probe: rateLimitResponse(resetSeconds) })
   const out = ghJson(['api', 'repos/o/r/pulls?state=open&per_page=100'], {
-    executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, reportStderr() {},
+    executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, maxRateLimitWaitMs: OPTED_MS, reportStderr() {},
   })
   assert.deepEqual(out, { ok: true })
   assert.deepEqual(calls.map((args) => args.join(' ')), [
@@ -158,7 +173,7 @@ test('retry-after is honoured when GitHub states one', () => {
     probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 3000, 0, 'Retry-After: 60\n'),
     stderr: 'HTTP 429: API rate limit exceeded',
   })
-  runGitHubCommand(['api', 'repos/o/r/issues'], { executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, reportStderr() {} })
+  runGitHubCommand(['api', 'repos/o/r/issues'], { executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, maxRateLimitWaitMs: OPTED_MS, reportStderr() {} })
   assert.deepEqual(waits, [61000])
 })
 
@@ -166,7 +181,7 @@ test('a different 403 still fails immediately with no wait and no probe', () => 
   for (const stderr of ['HTTP 403: Resource not accessible by integration', 'HTTP 403: Forbidden', 'You have exceeded a secondary rate limit (HTTP 403)']) {
     const { calls, executor } = rateLimitedExecutor({ failures: 5, stderr, probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 10) })
     assert.throws(
-      () => runGitHubCommand(['api', 'repos/o/r/pulls/1'], { executor, wait: () => assert.fail(`${stderr} waited`), now: () => NOW_MS, reportStderr() {} }),
+      () => runGitHubCommand(['api', 'repos/o/r/pulls/1'], { executor, wait: () => assert.fail(`${stderr} waited`), now: () => NOW_MS, maxRateLimitWaitMs: OPTED_MS, reportStderr() {} }),
       (error) => error instanceof GitHubTransportError && error.rateLimitExhausted === false,
     )
     assert.equal(calls.length, 1, `${stderr} must cost exactly one call`)
@@ -176,7 +191,7 @@ test('a different 403 still fails immediately with no wait and no probe', () => 
 test('a reset further away than fifteen minutes fails CLOSED without waiting', () => {
   const { calls, executor } = rateLimitedExecutor({ probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 16 * 60) })
   assert.throws(
-    () => runGitHubCommand(['api', 'repos/o/r/pulls'], { executor, wait: () => assert.fail('waited past the cap'), now: () => NOW_MS, reportStderr() {} }),
+    () => runGitHubCommand(['api', 'repos/o/r/pulls'], { executor, wait: () => assert.fail('waited past the cap'), now: () => NOW_MS, maxRateLimitWaitMs: OPTED_MS, reportStderr() {} }),
     (error) => error.rateLimitExhausted === true && /rate limit exceeded/.test(error.message),
   )
   assert.equal(calls.length, 2, 'the original call and the free rate_limit probe, nothing more')
@@ -185,13 +200,13 @@ test('a reset further away than fifteen minutes fails CLOSED without waiting', (
 test('an unreadable reset, a second exhaustion, a write, or a zero cap all fail closed', () => {
   const inWindow = rateLimitResponse(Math.floor(NOW_MS / 1000) + 60)
   const unreadable = rateLimitedExecutor({ probe: new Error('probe failed') })
-  assert.throws(() => runGitHubCommand(['api', 'x'], { executor: unreadable.executor, wait: () => assert.fail('guessed a reset'), now: () => NOW_MS, reportStderr() {} }))
+  assert.throws(() => runGitHubCommand(['api', 'x'], { executor: unreadable.executor, wait: () => assert.fail('guessed a reset'), now: () => NOW_MS, maxRateLimitWaitMs: OPTED_MS, reportStderr() {} }))
   const twice = rateLimitedExecutor({ failures: 2, probe: inWindow })
   const waits = []
-  assert.throws(() => runGitHubCommand(['api', 'x'], { executor: twice.executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, reportStderr() {} }))
+  assert.throws(() => runGitHubCommand(['api', 'x'], { executor: twice.executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, maxRateLimitWaitMs: OPTED_MS, reportStderr() {} }))
   assert.equal(waits.length, 1, 'waits at most once per call')
   const write = rateLimitedExecutor({ probe: inWindow })
-  assert.throws(() => runGitHubCommand(['api', '-X', 'POST', 'repos/o/r/git/refs'], { executor: write.executor, wait: () => assert.fail('a write waited'), now: () => NOW_MS, reportStderr() {} }))
+  assert.throws(() => runGitHubCommand(['api', '-X', 'POST', 'repos/o/r/git/refs'], { executor: write.executor, wait: () => assert.fail('a write waited'), now: () => NOW_MS, maxRateLimitWaitMs: OPTED_MS, reportStderr() {} }))
   assert.equal(write.calls.length, 1)
   const capped = rateLimitedExecutor({ probe: inWindow })
   assert.throws(() => runGitHubCommand(['api', 'x'], { executor: capped.executor, maxRateLimitWaitMs: 0, wait: () => assert.fail('a lock holder waited'), now: () => NOW_MS, reportStderr() {} }))
@@ -207,8 +222,9 @@ test('a caller that asked for exactly one attempt never waits or probes on a rat
   assert.equal(calls.length, 1, 'one call, no rate_limit probe, no replay')
 })
 
-test('the wait cap is configurable down, never up, and malformed values fail fast', () => {
-  assert.equal(rateLimitMaxWaitMs({}), 15 * 60 * 1000)
+test('the wait is opt-in, capped at 15 minutes, and malformed values fail fast', () => {
+  assert.equal(rateLimitMaxWaitMs({}), 0, 'opt-in: an unmarked step (possibly lock-holding) never waits')
+  assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '' }), 0)
   assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '0' }), 0)
   assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '120' }), 120000)
   assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '99999' }), 15 * 60 * 1000)

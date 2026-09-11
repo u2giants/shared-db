@@ -77,6 +77,8 @@ jobs:
       - name: Check the GitHub API quota before reading markers
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
         run: node scripts/check-actions-quota.mjs
 
       - name: Check how many orchestrator markers are open
