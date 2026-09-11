@@ -5378,8 +5378,8 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
     }
     return admitted
   } catch (error) {
-    if(error instanceof AdmissionError&&!error.result&&/contains no added or modified migration/.test(error.message)){
-      error.result={reason:error.message,return_to:scope?.applicationReturnTo??'u2giants/shared-db',evidence_required:['an added or modified migration file carrying the proposed structural change']}
+    if(error instanceof AdmissionError&&!error.result&&/(contains no added or modified migration|content is unreadable|contain no statement-leading schema DDL|contains unmodelled DDL)/.test(error.message)){
+      error.result={reason:error.message,return_to:scope?.applicationReturnTo??'u2giants/shared-db',evidence_required:['readable pull request content containing acknowledged statement-leading schema DDL for the proposed structural change']}
     }
     if (error instanceof AdmissionError && error.result && io.commentIssue) {
       const comments = io.issueComments?.(Number(number)) ?? []
@@ -6404,7 +6404,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.authorizeRepositoryMaintenanceStatus){console.log(JSON.stringify(authorizeRepositoryMaintenanceStatus(o,io),null,2));return 0}
     if(o.resolveAdmittedIssueForPr){console.log(JSON.stringify(resolveAdmittedIssueForPr(o.resolveAdmittedIssueForPr,io),null,2));return 0}
     const admissionOnly=o.admitIssue&&!o.claim&&!o.assignReviewer&&!o.acquireExclusive&&!o.replaceFailedReviewer&&!o.completeOutcome&&!o.outcomeStatus&&!o.advanceOutcome
-    if(admissionOnly){console.log(JSON.stringify(admitIssue(o.admitIssue,io),null,2));return 0}
+    if(admissionOnly){console.log(JSON.stringify(admitIssue(o.admitIssue,io,{pr:o.pr??null}),null,2));return 0}
     if(o.outcomeStatus){console.log(JSON.stringify(outcomeHistory(io.issueComments(o.outcomeStatus)),null,2));return 0}
     if(o.advanceOutcome){
       if(!o.issue)throw new LaneError('--advance-outcome requires --issue <n>')

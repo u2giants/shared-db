@@ -110,6 +110,20 @@ test('a refused actual change publishes one typed refusal with return and reopen
   assert.equal(event.return_to,'u2giants/example-app');assert.ok(event.evidence_required.length)
 })
 
+test('a data-only migration PR publishes a typed refusal instead of trusting its filename', () => {
+  const comments=[]
+  const io={
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push({body:value}),
+    getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_data.sql',status:'added'}],
+    getFileAt:()=>'insert into core.example values (1);',
+  }
+  const old=console.error;console.error=()=>{}
+  try { assert.equal(managerMain(['--admit-issue','41','--pr','7'],new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
+  const event=parseEventComment(comments[0].body)[0]
+  assert.equal(event.event_type,'rejected_non_structural');assert.match(event.detail,/actual change is not structural/)
+  assert.deepEqual(event.evidence_required,['readable pull request content containing acknowledged statement-leading schema DDL for the proposed structural change'])
+})
+
 test('repository-maintenance admission refusal cannot consume a lane or shared stage', () => {
   const body=scopeBody({change:'repository-maintenance'}),calls={claim:0,stage:0}
   const io={enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>[],commentIssue:()=>{},createIssue:()=>calls.claim++,createRef:()=>calls.stage++}
