@@ -43,27 +43,20 @@ import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightwe
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
 export const REPO = 'u2giants/shared-db'
-// AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
-// eight on 2026-08-28, and from eight to twenty-four on 2026-09-11 (owner
-// instructions relayed on marker #2758: ignore concurrency limits).
+// NO AUTHOR LANE CAP. The cap was three (2026-08-14), five (2026-08-25), eight
+// (2026-08-28) and twenty-four (2026-09-11, #2766). On 2026-09-11 Albert ruled
+// there must be no limit on migration author lanes at all, ever (marker #2758,
+// issue #2775), so the constant and every capacity refusal are gone. Do not
+// reintroduce a number here.
 //
-// WHAT THE NUMBER DOES AND DOES NOT DO. It is a throughput dial, not a safety
-// dial. Collision safety comes from four mechanisms that do not read this
-// constant: exact per-object claims (`assertLaneAvailable`), the global
-// acquisition mutex (`MUTEX_REF`), permanent per-version refs
-// (`refs/db-claims/<version>`), and the exclusive single-holder stage refs in
-// `EXCLUSIVE_REFS`. Preview, guarded merge and production stay strictly serial
-// at twenty-four lanes exactly as they were at three -- more authors never means
-// more sessions touching a live database.
-//
-// WHAT THE RAISE ACTUALLY COSTS. Downstream capacity, not correctness. Up to
-// twenty-four authors finishing together queue in front of the single preview stage. The
-// owner approved six active reviewers, including Codex GPT-5.6 Sol and DeepSeek,
-// before this cap was activated. DeepSeek was retired on 2026-09-01 (#2078),
-// leaving five; the cap is unaffected -- it bounds authors, not reviewers. Ref writes are ~6/hour per lane, so twenty-four lanes
-// stay far inside GitHub's limits and the rate-limit caveat recorded in
-// plan_multi_agent_database_coordination_hardening.md is satisfied at this cap.
-export const MAX_AUTHOR_LANES = 24
+// The cap was a throughput dial, never a safety dial. Collision safety comes from
+// mechanisms that never read it and remain in force: exact per-object claims
+// (`assertLaneAvailable`), the global acquisition mutex (`MUTEX_REF`), permanent
+// per-version refs (`refs/db-claims/<version>`), and the exclusive single-holder
+// stage refs in `EXCLUSIVE_REFS`. Preview, guarded merge and production stay
+// strictly serial -- more authors never means more sessions touching a live
+// database. Ref writes are ~6/hour per active lease; that caveat in
+// plan_multi_agent_database_coordination_hardening.md now scales with real work.
 export const AUTHOR_CAPACITY_STATES = Object.freeze(['active', 'relinquished', 'expired-unconfirmed'])
 export const DEFAULT_LEASE_HOURS = 12
 export const MUTEX_STALE_AFTER_MS = 2 * 60 * 1000
@@ -845,19 +838,16 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
   for (let i=0;i<components.length;i++) for (let j=i+1;j<components.length;) {
     if (components[i].some((a)=>components[j].some((b)=>conflicts(a,b)))) components[i].push(...components.splice(j,1)[0]); else j++
   }
-  const queues = Array.from({length:MAX_AUTHOR_LANES},(_,index)=>({ lane:index+1, active:null, activeLeaseState:null, activeExpiresAt:null, activePrState:null, protected:[], queued:[], objects:[], reads:[] }))
+  // Uncapped: every collision component gets its own lane, numbered in order.
+  const queues = []
   const componentRank = (component) => component.filter((item)=>item.issue).sort(queueOrder)[0]
   const ordered = components.sort((a,b)=>Number(Boolean(b.some(x=>x.claim)))-Number(Boolean(a.some(x=>x.claim))) || (componentRank(a)&&componentRank(b)?queueOrder(componentRank(a),componentRank(b)):0))
   for (const component of ordered) {
     const protectedItems = component.filter((x)=>x.claim)
     const activeItem = protectedItems.find((x)=>x.capacityActive)
-    const free=queues.filter((q)=>!q.active)
-    // Protected claims may outnumber active capacity. They remain visible in a
-    // collision component without indexing a non-existent author lane.
-    let lane = activeItem ? free[0] : [...(free.length?free:queues)].sort((a,b)=>a.queued.length-b.queued.length)[0]
-    if (!lane) lane = { lane:null, active:null, protected:[], queued:[], objects:[], reads:[] }, queues.push(lane)
+    const lane = { lane:queues.length+1, active:null, activeLeaseState:null, activeExpiresAt:null, activePrState:null, protected:[], queued:[], objects:[], reads:[] }
+    queues.push(lane)
     if (activeItem) {
-      if (!free.length) throw new LaneError(`active author capacity exceeds ${MAX_AUTHOR_LANES}`)
       lane.active = activeItem.claim
       lane.activeLeaseState = activeItem.leaseState
       lane.activeExpiresAt = activeItem.expiresAt
@@ -868,7 +858,7 @@ export function buildDynamicQueues(issues, claims, now = new Date(), allOpenIssu
     lane.objects.push(...new Set(component.flatMap((x)=>x.writes ?? x.objects ?? [])))
     lane.reads.push(...new Set(component.flatMap((x)=>x.reads ?? [])))
   }
-  const authorQueues = queues.filter((q)=>q.lane !== null)
+  const authorQueues = queues
   const emptyLanes = authorQueues.filter((q)=>!q.active).length
   const dispatchable = authorQueues.filter((q)=>!q.active && !q.protected.length && q.queued.length).map((q)=>q.queued[0])
   const expiredClaims = authorQueues.filter((q)=>q.active && q.activeLeaseState === 'expired-unconfirmed').map((q)=>({ claim:q.active, lane:q.lane, expires_at:q.activeExpiresAt, pr_state:q.activePrState, queued:[...q.queued] }))
@@ -979,15 +969,15 @@ export function parseAuthorLease(body, now = new Date()) {
   return { ...claim, legacy: false, owner: fields.get('owner'), branch: fields.get('branch'), worktree: fields.get('worktree'), expiresAt, active, capacityState, declaredCapacityState, capacityActive, blockedOn }
 }
 
-export function assertLaneAvailable(claims, proposedObjects, now = new Date(), { ignoreCapacity = false, prSources = [] } = {}) {
+export function assertLaneAvailable(claims, proposedObjects, now = new Date(), { prSources = [] } = {}) {
   const parsed = claims.map((claim) => {
     try { return { ...claim, lease: parseAuthorLease(claim.body, now) } }
     catch (error) { throw new LaneError(`claim #${claim.number} is unreadable: ${error.message}`) }
   })
-  // Legacy claims consume capacity. An expiry never releases object protection;
-  // cleanup must close the issue explicitly before another author can touch it.
+  // No capacity refusal: author lanes are unlimited (issue #2775). An expiry never
+  // releases object protection; cleanup must close the issue explicitly before
+  // another author can touch its objects.
   const occupied = parsed.filter((claim)=>claim.lease.capacityActive)
-  if (!ignoreCapacity && occupied.length >= MAX_AUTHOR_LANES) throw new LaneError(`all ${MAX_AUTHOR_LANES} active-author leases are occupied`)
   const wanted = new Set(proposedObjects.map(normalizeObject))
   for (const holder of [...parsed.map((c) => ({ label: `claim #${c.number}`, objects: c.lease.objects })), ...prSources]) {
     const overlap = (holder.objects ?? []).map(normalizeObject).filter((object) => wanted.has(object))
@@ -5592,7 +5582,7 @@ export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
       if(unsupported.length)throw new LaneError(`claim carries objects unsupported by its issue or pull request: ${unsupported.join(', ')}`)
     }
     const others=claims.filter((claim)=>String(claim.number)!==String(options.claim)),otherPrs=sources.filter((source)=>source!==target[0])
-    assertLaneAvailable(others,lease.objects,now,{ignoreCapacity:true,prSources:otherPrs})
+    assertLaneAvailable(others,lease.objects,now,{prSources:otherPrs})
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const freshWorkIssue=io.getIssue(options.issue)
     if(freshWorkIssue?.state!==workIssue.state||freshWorkIssue?.body!==workIssue.body)throw new LaneError('renewal issue changed concurrently')
@@ -5663,7 +5653,7 @@ export function recoverExpiredClaimFromPr(options, now = new Date(), io = github
     if(!uncovered.length)throw new LaneError('pull request has no uncovered objects to recover')
     const expanded=[...lease.objects.map(normalizeObject),...uncovered]
     const others=claims.filter((claim)=>String(claim.number)!==String(options.claim)),otherPrs=sources.filter((source)=>source!==target)
-    assertLaneAvailable(others,expanded,now,{ignoreCapacity:true,prSources:otherPrs})
+    assertLaneAvailable(others,expanded,now,{prSources:otherPrs})
     const expectedBody=replaceLeaseExpiry(appendClaimObjects(before.body,lease.version,uncovered),desiredExpiry)
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const freshWorkIssue=io.getIssue(options.issue),freshClaim=io.getIssue(options.claim),freshPr=io.getPr(options.pr)
@@ -5718,7 +5708,7 @@ export function expandActiveClaimFromPr(options, now = new Date(), io = githubIo
     const claims=io.openClaims()
     if(claims.filter((claim)=>String(claim.number)===String(options.claim)).length!==1)throw new LaneError('active claim set is ambiguous')
     const others=claims.filter((claim)=>String(claim.number)!==String(options.claim)),otherPrs=sources.filter((source)=>source!==target)
-    assertLaneAvailable(others,uncovered,now,{ignoreCapacity:true,prSources:otherPrs})
+    assertLaneAvailable(others,uncovered,now,{prSources:otherPrs})
     const expanded=[...lease.objects.map(normalizeObject),...uncovered]
     const updatedBody=replaceClaimObjects(before.body,lease.version,expanded)
     requireOwnedRef(MUTEX_REF,ownerSha,io)
@@ -5758,7 +5748,7 @@ export function expandActiveClaimFromIssue(options,now=new Date(),io=githubIo){
     const claims=io.openClaims()
     if(claims.filter((claim)=>String(claim.number)===String(options.claim)).length!==1)throw new LaneError('active claim set is ambiguous')
     const others=claims.filter((claim)=>String(claim.number)!==String(options.claim)),sources=io.prSources()
-    assertLaneAvailable(others,uncovered,now,{ignoreCapacity:true,prSources:sources})
+    assertLaneAvailable(others,uncovered,now,{prSources:sources})
     const expanded=[...lease.objects.map(normalizeObject),...uncovered],updatedBody=replaceClaimObjects(before.body,lease.version,expanded)
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     possiblyChanged=true;io.updateIssue(options.claim,{body:updatedBody})
@@ -5814,8 +5804,6 @@ export function recoverSameOwnerSplit(options, now = new Date(), io = githubIo) 
     const versionCollision=thirdPartyPrs.find((pr)=>(pr.versions??[]).some((version)=>reservedVersions.has(String(version))))
     if(versionCollision)throw new LaneError(`migration version collision with ${versionCollision.label}`)
     assertLaneAvailable(thirdParty,[...combined],now,{prSources:thirdPartyPrs})
-    const activeThirdParty=thirdParty.filter((claim)=>parseAuthorLease(claim.body,now).capacityActive)
-    if(activeThirdParty.length+2>MAX_AUTHOR_LANES)throw new LaneError('split recovery would exceed active-author capacity')
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const activeBody=replaceLeaseLocation(activeBefore.body,options.targetBranch,options.targetWorktree)
     activeChanged=true;io.updateIssue(options.activeClaim,{body:activeBody})
@@ -6480,7 +6468,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       }
       if (result.dispatchable.length) { console.error(`REFILL REQUIRED NOW: dispatch issue(s) ${result.dispatchable.map((n)=>`#${n}`).join(', ')}`); return 2 }
       if (result.unlabelled.length) console.error(`UNLABELLED ISSUES: add the \`${WORK_LABEL}\` label to ${result.unlabelled.map((n)=>`#${n}`).join(', ')} — an unlabelled issue is invisible to every label-filtered query`)
-      if (result.emptyLanes && !result.fullyAudited) { console.error('EMPTY LANE NOT PROVEN: classify and label every open issue before claiming no eligible work exists'); return 2 }
+      if (!result.fullyAudited) { console.error('EMPTY LANE NOT PROVEN: classify and label every open issue before claiming no eligible work exists'); return 2 }
       return result.malformed.length || result.unlabelled.length || result.dependencyCycles.length || result.expiredClaims.some((row)=>row.queued.length) || result.notOrchestratorWork.some((item)=>item.needsReturnAddress) ? 2 : 0
     }
     if (o.assertExclusive) {
@@ -6584,15 +6572,15 @@ export function main(argv, now = new Date(), io = githubIo) {
       return 0
     }
     if (o.cleanup) {
-      const { stale } = assertLaneAvailable(claims, [], now, { ignoreCapacity: true })
+      const { stale } = assertLaneAvailable(claims, [], now)
       console.log(`${stale.length} expired claim(s) remain locked. Release each explicitly with --release-claim, exact --owner, and --confirm-finished.`); return stale.length ? 2 : 0
     }
     if (o.audit) {
       const malformed=[];let protectedCount=0,occupied=0,relinquished=0,expired=0
       for(const claim of claims){try{const lease=parseAuthorLease(claim.body,now);protectedCount++;if(lease.capacityActive)occupied++;else relinquished++;if(!lease.legacy&&!lease.active)expired++}catch(e){malformed.push(`#${claim.number}: ${e.message}`)}}
-      console.log(`${occupied}/${MAX_AUTHOR_LANES} active-author leases occupied; ${protectedCount} protected claim(s); ${relinquished} relinquished; ${expired} expired lease(s) remain locked.`)
+      console.log(`${occupied} active-author lease(s) (no cap); ${protectedCount} protected claim(s); ${relinquished} relinquished; ${expired} expired lease(s) remain locked.`)
       for(const problem of malformed)console.error(`MALFORMED ${problem}`)
-      return malformed.length || occupied>MAX_AUTHOR_LANES ? 2 : 0
+      return malformed.length ? 2 : 0
     }
     if (!o.claim) throw new LaneError('choose --claim, --audit, --queue-audit, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
     for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)
