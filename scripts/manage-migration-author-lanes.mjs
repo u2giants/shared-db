@@ -99,7 +99,8 @@ export const REVIEW_OPERATION_REQUEST_LIMIT = 25, REVIEW_MUTEX_SECTION_RESERVE =
 // was added after REVIEW_OPERATION_REQUEST_LIMIT was derived, and its request count was
 // never measured against it, so every reclaim refused at request 24 and a dead lease could
 // never be released. Measured on the wire-attempt fixture in
-// scripts/manage-migration-author-lanes.test.mjs: 14 pre-mutex requests + a 14-request
+// Initial current-key measurement in scripts/manage-migration-author-lanes.test.mjs:
+// 14 pre-mutex requests + a 14-request
 // mutex-held section (mutex create, in-mutex lease re-resolution, fresh activity
 // fingerprint, uncached durable-verdict re-listing, locked readback, atomic transition,
 // post-transition readback, and the 3-request mutex release) = 28 complete.

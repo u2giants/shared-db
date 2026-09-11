@@ -32,8 +32,9 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 > governed `--reclaim-silent-reviewer`, which was added later and whose request
 > count was never derived; charged against 25 it refused at request 24 every
 > time, so a dead reviewer lease could not be released. That path is now
-> measured and given its own derived ceiling of 28 (14 pre-mutex plus a
-> 14-request mutex-held section), with one duplicate fresh PR read removed
+> initially measured at 28 on the current-key path (14 pre-mutex plus a
+> 14-request mutex-held section), with one duplicate fresh PR read removed;
+> the later legacy fallback measurement is 30 (15 plus 15) and controls the ceiling
 > rather than paid for, in
 > `docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md`.
 

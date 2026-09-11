@@ -26,11 +26,11 @@ The consequence is structural, not cosmetic: a dead reviewer lease classified `s
 
 Identical to the derivation in the 2026-08-28 document: a wire-attempt fixture in `scripts/manage-migration-author-lanes.test.mjs` wraps every `io` method that reaches GitHub so each call runs one counted `runGitHubCommand` attempt through the real budget, and labels it. Nothing was measured against live GitHub and no shared coordination state was mutated: the fixture builds an in-memory lease, probes it, and reclaims it. `io.getRateLimit` is charged 2 requests, as production charges for the REST and GraphQL quota reads.
 
-Test name: `silent reviewer reclaim costs exactly its derived 28-request budget (issue #2697)`.
+Initial current-key test: `silent reviewer reclaim costs exactly its derived 28-request budget (issue #2697)`. The refreshed compatibility test derives and enforces 30 for the longer legacy fallback route.
 
-## Measured cost — 28 requests
+## Initial current-key measurement — 28 requests
 
-Before the redundancy was removed the same fixture measured **29**. Verbatim label trace of the measured 28:
+Before the redundancy was removed the same current-key fixture measured **29**. Verbatim label trace of the measured current-key 28:
 
 | # | Request | Section |
 |---|---|---|
@@ -62,7 +62,7 @@ Before the redundancy was removed the same fixture measured **29**. Verbatim lab
 | 27 | `atomicReviewMutexRelease` | mutex section |
 | 28 | `readReviewRefs` (release proof) | mutex section |
 
-**Pre-mutex 14; mutex-held section 14; total 28.**
+**Current-key path: pre-mutex 14; mutex-held section 14; total 28.** The compatibility route adds one legacy-key proof on each side of the mutex, producing the controlling 15 + 15 = 30 ceiling documented above.
 
 ## The redundancy that was removed rather than paid for
 
@@ -94,7 +94,7 @@ reviewer operation request budget exhausted before request 24
 New:
 
 ```
-reviewer operation 'reclaim-silent-reviewer' exhausted its derived 28-request budget before request 29. This ceiling is DERIVED for this operation, not a global default: see the derivation cited beside its constant in scripts/manage-migration-author-lanes.mjs. Re-derive it from a written measurement rather than widening it (issue #2075)
+reviewer operation 'reclaim-silent-reviewer' exhausted its derived 30-request budget before request 31. This ceiling is DERIVED for this operation, not a global default: see the derivation cited beside its constant in scripts/manage-migration-author-lanes.mjs. Re-derive it from a written measurement rather than widening it (issue #2075)
 ```
 
 It names the operation, its derived ceiling, how much (if any) is held back as the mutex-release reserve, and where the derivation lives. Asserted by `an exhausted reviewer budget names the operation and its derived ceiling (issue #2697)`.
@@ -103,12 +103,12 @@ It names the operation, its derived ceiling, how much (if any) is held back as t
 
 `node --test scripts/manage-migration-author-lanes.test.mjs`
 
-Result: **489 passed, 0 failed, 0 skipped, 0 todo, 0 cancelled.**
+Refreshed result: **509 passed, 0 failed, 0 skipped, 0 todo, 0 cancelled.**
 
 Red-first proof. With the derived budget unwired from `reclaimSilentReviewer` (the pre-fix behaviour, the operation charged against the shared 25), all three new tests fail, verbatim:
 
 ```
-Error: reviewer operation cannot fit 14 remaining requests inside the 25-request budget; refused before mutex acquisition; calls=quota,quota,readRef:refs/db-review-assignments/...,commit,commit
+Historical pre-refresh example (superseded by the measured 30/15 compatibility ceiling): `Error: reviewer operation cannot fit 14 remaining requests inside the 25-request budget; refused before mutex acquisition; calls=quota,quota,readRef:refs/db-review-assignments/...,commit,commit`
 ```
 
 ## Not done, deliberately
