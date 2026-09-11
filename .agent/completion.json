@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2771,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2772/12",
-  "contract_sha256": "bd8b76447cf68ef8632c0e31d119ad9bfaa179d9dced9feaef679c52c4650bb5",
-  "head_sha": "4faae0c522832a6ec33a37f59f507acf44a82b56",
+  "contract_ref": "refs/db-contracts/2772/13",
+  "contract_sha256": "969c95f83eb66fb2e651bda0516c8f4ef96a0ba7603f049d3073935772c3f6ea",
+  "head_sha": "04a52ebe8d3c1bcead0f270804355cd261877d99",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -22,12 +22,12 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors at 4faae0c5."
+      "evidence": "No whitespace errors at 04a52ebe."
     },
     {
       "command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py",
       "exit_code": 0,
-      "evidence": "189 passed, 158 subtests passed at 4faae0c5 (merge of origin/main f15f0f0e); pytest -q on the three named files."
+      "evidence": "189 passed, 158 subtests passed at 04a52ebe (merge of origin/main 9a62bd23); pytest -q on the three named files."
     }
   ],
   "assumptions_resolved": [
