@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 6,
+  "generation": 7,
   "work_issue": 2694,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
@@ -14,11 +14,13 @@
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "file_writes": [
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -29,11 +31,13 @@
   ],
   "required_checks": [
     "node --test scripts/manage-migration-author-lanes.test.mjs",
-    "git diff --check"
+    "git diff --check",
+    "node scripts/check-throughput-truth-audit.mjs"
   ],
   "assumptions": [
     "Prospective delivery contract: existing implementation and review predate this publication; no retrospective publication claim.",
-    "Installed ai-devops scoped preflight contract is a required merge prerequisite."
+    "Installed ai-devops scoped preflight contract is a required merge prerequisite.",
+    "Generation7 adds the existing semantic inventory disposition for local admission validation after CI qualification."
   ],
   "stop_conditions": [
     "Refuse missing, malformed or mismatched admission evidence before assignment.",

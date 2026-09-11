@@ -4,10 +4,13 @@
   "outcome": "ready-for-merge",
   "pr": 2750,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2694/6",
-  "contract_sha256": "0d9581a3d6eb7982d3a2128f524d4295dd5f60908030650a22179a7346e01f8c",
-  "head_sha": "7bdce74aa4aedf5044ebba74cc505a06df209e84",
+  "contract_ref": "refs/db-contracts/2694/7",
+  "contract_sha256": "d93acf5713f11e17ec10f2871679537e8e76e711bc224abf2a9164e2ab846bc9",
+  "head_sha": "58b4beae83d341439d7844aa58e3c88926595a9d",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs"
   ],
@@ -23,6 +26,11 @@
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "275 semantically bound call sites match; the new admission diagnostic is a local-evidence validation, not a database absence claim."
     }
   ],
   "assumptions_resolved": [
