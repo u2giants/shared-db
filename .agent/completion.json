@@ -4,15 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2721,
   "migration_versions": [
-    "20260911043720"
+    "20260911050646"
   ],
-  "contract_ref": "refs/db-contracts/2706/2",
-  "contract_sha256": "25ae67ce4db09490e63ac5af73ca76ca449beedd64494dfaf68162e745ca3287",
-  "head_sha": "e262732680b5acee07b20882dae77bbc9f754329",
+  "contract_ref": "refs/db-contracts/2706/3",
+  "contract_sha256": "e6916b157ddfbe2cb2d9c0c356de0abf3962e66dee22545d1a58dc61d75f3287",
+  "head_sha": "16ce1d262b45dc4212baea8434b9f0918c8ace15",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260911043720_dcp_stable_identity_presentation.sql",
+    "supabase/migrations/20260911050646_dcp_stable_identity_presentation.sql",
     "supabase/tests/dcp_stable_identity_presentation_contracts.sql"
   ],
   "db_reads": [],
@@ -34,7 +34,8 @@
   "assumptions_resolved": [
     "Production function read after #2579 includes new source groups, all retained verbatim.",
     "Presentation authority now uses latest terminal per copy and stable dcpvault identity across copies; pending proposals cannot hide mapped authority.",
-    "Member disagreement and conflicting signed studio assertions retain conflict treatment; non-authoritative Marvel tags remain raw evidence."
+    "Member disagreement and conflicting signed studio assertions retain conflict treatment; non-authoritative Marvel tags remain raw evidence.",
+    "Preserved independent twentieth source presentation; regression tests now cover member-equivalent signed studio preservation and conflicting studio assertions. Final current-main review and ephemeral tests remain required."
   ],
   "stop_conditions_hit": []
 }

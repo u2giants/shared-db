@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2706,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Align DCP Creative section, status and guidance with stable latest-terminal identity authority across retained copies; preserve genuine unresolved/conflicting records and non-authoritative Marvel raw-tag treatment.",
-  "base_sha": "71dca7b3deae7eea2ab0c2e47a320e1291dc0580",
+  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
   "dispatcher": "Codex orchestrator #2714",
   "worker": "codex-2714-2706",
   "branch": "codex/issue-2706",
   "worktree": "C:/repos/shared-db-worktrees/issue-2706",
   "allowed_paths": [
-    "supabase/migrations/20260911043720_dcp_stable_identity_presentation.sql",
+    "supabase/migrations/20260911050646_dcp_stable_identity_presentation.sql",
     "supabase/tests/dcp_stable_identity_presentation_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260911043720_dcp_stable_identity_presentation.sql",
+    "supabase/migrations/20260911050646_dcp_stable_identity_presentation.sql",
     "supabase/tests/dcp_stable_identity_presentation_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
@@ -40,7 +40,8 @@
     "DCP identities share only namespaced dcpvault identifiers; bare ids remain exact-copy keyed.",
     "Latest terminal decisions survive pending proposals; conflicting terminal member sets fail closed.",
     "Studio placement uses the existing contract/OPA rules; Marvel tags stay non-authoritative.",
-    "The signed Marvel studio exception to Disney OPA branch applies identically across all retained Creative tables."
+    "The signed Marvel studio exception to Disney OPA branch applies identically across all retained Creative tables.",
+    "Non-namespaced twentieth identities retain their independent source presentation; member-equivalent copies retain any nonconflicting signed studio assertion."
   ],
   "stop_conditions": [
     "An exact-object claim collision cannot be resolved by ordinary governed coordination.",
