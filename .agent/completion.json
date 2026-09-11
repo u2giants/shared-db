@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2780,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2781/4",
-  "contract_sha256": "6714b1216f3fe49b375ff6473eb9d91e86a59990bb4d1e19ba73bcf29853eb65",
-  "head_sha": "79d7a2ab75f0882504ef673811b6d435deb77298",
+  "contract_ref": "refs/db-contracts/2781/5",
+  "contract_sha256": "7897cd8dce892efe9eda514ed4f799a048f3db09fde01e67df0c4a2e916c99d1",
+  "head_sha": "d726f7cfb6437a2da0afefd1b221d3ed27c3d5a0",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -30,32 +30,33 @@
     {
       "command": "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 29, pass 29, fail 0, skipped 0 at 79d7a2ab (merge of origin/main 153b7754): merge-only refresh ok, migration edit refused, .agent-only change ok, independent main move ok, overlapping file, version collision and conflict refused."
+      "evidence": "tests 30, pass 30, fail 0, skipped 0 at d726f7cf: merge-only refresh ok, migration edit refused, .agent-only change ok, nested .agent path compared, independent main move ok, overlapping file, version collision and conflict refused."
     },
     {
       "command": "node --test scripts/check-exact-head-approval.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 50, pass 50, fail 0, skipped 0 at 79d7a2ab (merge of origin/main 153b7754), including approval carried across an equivalent refresh and refused when the diff changed."
+      "evidence": "tests 52, pass 52, fail 0, skipped 0 at d726f7cf, including approval carried across an equivalent refresh, refused when the diff changed, and refused when the new head has its own assignment or return (both new tests fail against e7efa555)."
     },
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 519, pass 519, fail 0, skipped 0 at 79d7a2ab (merge of origin/main 153b7754), including durable approval carried to an equivalent later head and refused otherwise."
+      "evidence": "tests 521, pass 521, fail 0, skipped 0 at d726f7cf, including durable approval carried to an equivalent later head and refused when that head has its own assignment or return (both new tests fail against e7efa555)."
     },
     {
       "command": "python -m pytest scripts/test_production_business_risk_gate.py",
       "exit_code": 0,
-      "evidence": "142 passed, 0 failed, 145 subtests passed at 79d7a2ab (merge of origin/main 153b7754); the new unrelated-sidecar test passes."
+      "evidence": "143 passed, 0 failed, 145 subtests passed at d726f7cf; the unrelated-sidecar test passes and the new quoted-identifier test passes (it fails against e7efa555)."
     },
     {
       "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 6, pass 6, fail 0, skipped 0 at 79d7a2ab (merge of origin/main 153b7754); the invalidator inventory now covers the manager import closure including scripts/lib/pr-content-equivalence.mjs."
+      "evidence": "tests 6, pass 6, fail 0, skipped 0 at d726f7cf; the invalidator inventory covers the manager import closure including scripts/lib/pr-content-equivalence.mjs, which is now also a pinned preview producer path."
     }
   ],
   "assumptions_resolved": [
-    "The PR diff against its merge base, .agent aside, is compared byte-exactly so whitespace SQL edits still need review.",
-    "A later sidecar keeps the preview proof only when its migration shares no schema-qualified object with every promoted migration; any doubt refuses."
+    "The PR diff against its merge base, root .agent/ aside, is compared byte-exactly so whitespace SQL edits still need review.",
+    "A later sidecar keeps the preview proof only when its migration shares no schema-qualified object (quoted or bare) with every promoted migration; any doubt refuses.",
+    "A head with reviewer records of its own is judged on those alone; an approval is carried only onto a head no reviewer has touched."
   ],
   "stop_conditions_hit": []
 }
