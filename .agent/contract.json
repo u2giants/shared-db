@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 20,
+  "generation": 21,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
@@ -62,7 +62,8 @@
     "Main8e81462f maintenance integration preserves all SQL and benchmark bytes; current exact-head evidence refreshed.",
     "Main5af3fafa maintenance integration preserves all SQL and benchmark bytes after prior exact-head GLM approval; refreshed evidence follows.",
     "Main208ba30d preview-evidence maintenance integrated without search SQL or benchmark changes; final head review follows.",
-    "Main5eaebe7c integrated (truth-audit digest recomputed, 276 sites); supported supersession re-reserved 20260911051552 as 20260911124016 with no SQL byte change. Grok assignment 2323 is bound to superseded head 84e9bd0c; fresh exact-head review required."
+    "Main5eaebe7c integrated (truth-audit digest recomputed, 276 sites); supported supersession re-reserved 20260911051552 as 20260911124016 with no SQL byte change. Grok assignment 2323 is bound to superseded head 84e9bd0c; fresh exact-head review required.",
+    "Implementation head 967d6349 points the parity benchmark at 20260911124016; both evidence files follow that head together."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
