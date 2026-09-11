@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911124016"
   ],
-  "contract_ref": "refs/db-contracts/2506/21",
-  "contract_sha256": "2c230b742e5a8dddecdbc3f51f174dc532c3b534c9da6597b7470e58471b0d14",
-  "head_sha": "967d6349dc058139cefa33c5452986eb1cf74972",
+  "contract_ref": "refs/db-contracts/2506/22",
+  "contract_sha256": "83c1f72da8ffae4c933bf2d417f0cee75e43d94ec1121839cdf6a8bc022b8e95",
+  "head_sha": "8bde76f511dd4ad68e436472af8c94096e1ca94a",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -64,7 +64,8 @@
     "Main5af3fafa maintenance integration changes no migration or benchmark bytes. Prior GLM approval remains historical only; new exact-head review required.",
     "Main208ba30d integration preserves SQL/benchmark bytes; contract19 replaces metadata authority, fresh exact-head CI and review pending.",
     "Main5eaebe7c integrated; supersession re-reserved 20260911051552 as 20260911124016 (rename only, SQL bytes unchanged). Contract20 published; Grok assignment2323 stays bound to superseded head84e9bd0c, fresh exact-head review pending.",
-    "Contract21 binds both evidence files after implementation head967d6349."
+    "Contract21 binds both evidence files after implementation head967d6349.",
+    "Refreshed on main b68a1900 at implementation head 8bde76f5 (merge commit; only the two .agent evidence files conflicted). Contract generation 22 records the new base; both evidence files follow that head together."
   ],
   "stop_conditions_hit": []
 }
