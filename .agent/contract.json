@@ -1,91 +1,49 @@
 {
   "schema_version": 1,
-  "work_issue": 2506,
-  "generation": 37,
+  "work_issue": 2802,
+  "generation": 1,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
-  "dispatcher": "Claude orchestrator marker2758",
-  "worker": "Claude issue2506 refresh worker",
-  "branch": "codex/issue-2506-production-performance-2714",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2506-production-performance-2714",
+  "goal": "Add a nullable boolean column has_talent_likeness to dam.style_guide_file recording whether the style-guide file's source explicitly indicated talent likeness, as a tri-state where NULL means the source exposed no determination. Structure only.",
+  "base_sha": "e420cd8619f57933de5b35aa5065f7d9ea3cc9de",
+  "dispatcher": "Claude shared-db orchestrator",
+  "worker": "Claude issue2802 migration author lane",
+  "branch": "claude/issue-2802-talent-likeness",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2802-talent-likeness",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911213429_popsg_search_v2_production_performance.sql",
-    "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911213429.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/production_business_risk_gate.py",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/test_production_catalog_verification.py"
+    "supabase/migrations/20260911224952_dam_style_guide_file_has_talent_likeness.sql"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911213429_popsg_search_v2_production_performance.sql",
-    "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911213429.json",
-    "scripts/production_catalog_verification.py",
-    "scripts/production_business_risk_gate.py",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/test_production_catalog_verification.py"
+    "supabase/migrations/20260911224952_dam_style_guide_file_has_talent_likeness.sql"
   ],
   "db_reads": [
-    "table public.style_guide_search_documents",
-    "table public.style_guide_render_queue"
+    "table core.style_guide"
   ],
   "db_writes": [
-    "function public.search_style_guide_library_v2",
-    "index public.idx_sgf_live_preview_ids",
-    "index public.idx_sgf_live_missing_clean_ids",
-    "index public.idx_sgf_live_missing_error_ids",
-    "table public.style_guide_files"
+    "table dam.style_guide_file"
   ],
   "prohibited_actions": [
-    "Do not rewrite applied migration bytes, raise timeouts, weaken RLS, quarantine assertions or remove fast/warm search capability.",
-    "Do not bypass the independent governed review or replay-provenance guards.",
-    "Do not push before coordinator release or claim local proof as preview/production acceptance."
+    "backfilling or otherwise writing any row value into has_talent_likeness; this intake authorizes structure only",
+    "inferring the value from a filename, path, folder or title",
+    "declaring the column NOT NULL or giving it a default, which would destroy the third NULL state",
+    "altering or repurposing the existing raw source filename and label columns (title, relative_path, folder, metadata)",
+    "running production DDL directly instead of through the governed promotion workflow"
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "python scripts/benchmark_popsg_search_v2_production.py --parity-only",
-    "python -m unittest scripts.test_production_catalog_verification"
+    "bash scripts/check-sql.sh"
   ],
   "assumptions": [
-    "Fresh supported claim2722 covers exactly the function and three indexes.",
-    "Local diagnostic candidate predates this fresh contract; no false claim of publication before diagnostic authorship.",
-    "All fixture rows are synthetic. Production acceptance remains a separate parent-owned gate.",
-    "Supported unapplied-version supersession reserved20260911051552; main39ee46b2 integrated without SQL changes. Existing benchmark evidence remains applicable; no unchanged benchmark rerun.",
-    "CREATE INDEX parser additionally declares its parent table; supported exact-PR claim expansion binds that table without any extra SQL change. Synthetic benchmark missing-state literal receives a reviewed truth-audit disposition.",
-    "Main8e81462f maintenance integration preserves all SQL and benchmark bytes; current exact-head evidence refreshed.",
-    "Main5af3fafa maintenance integration preserves all SQL and benchmark bytes after prior exact-head GLM approval; refreshed evidence follows.",
-    "Main208ba30d preview-evidence maintenance integrated without search SQL or benchmark changes; final head review follows.",
-    "Main5eaebe7c integrated (truth-audit digest recomputed, 276 sites); supported supersession re-reserved 20260911051552 as 20260911124016 with no SQL byte change. Grok assignment 2323 is bound to superseded head 84e9bd0c; fresh exact-head review required.",
-    "Implementation head 967d6349 points the parity benchmark at 20260911124016; both evidence files follow that head together.",
-    "Implementation head 8bde76f5 merges current main b68a1900 into the branch; only the two .agent evidence files conflicted and kept the branch copies. Both evidence files follow that head together.",
-    "Implementation head f721c5d0 merges current main 9da98ede (PR #2748) into the branch; only the two .agent evidence files conflicted and kept the branch copies. Search migration and benchmark bytes unchanged. Both evidence files follow that head together.",
-    "Implementation head a2b58746 merges current main 9b02ad48 (PR #2767) into the branch; only the two .agent evidence files conflicted and kept the branch copies. Search migration and benchmark bytes unchanged. Both evidence files follow that head together.",
-    "Governed Grok review REVISE 6a1d4ad7 addressed at implementation head aad19862 on main 5761bc5e: migration-local lock_timeout 2s and statement_timeout 30s bound the transactional index builds (a timeout aborts atomically and is retryable); benchmark asserts full-width baseline/forward hashes equal and exercises the authorization boundary for both bodies; unit test binds catalog md5 to the forward body. Backdated guard forced supersession 20260911124016 -> 20260911170219 via the lane tool (ref 1eda7bf5).",
-    "Generation 26 rebases the contract on main 11d0e2b4 (after #2786) with no scope change, so the checked PR base is an ancestor of the reported implementation head.",
-    "Generation 27 rebases the contract on main 120fb612 (after #2743) with no scope change.",
-    "Generation 28 rebases the contract on main f15f0f0e (after #2780) with no scope change.",
-    "Generation 29 rebases the contract on main e11a5989 with no scope change.",
-    "Generation 30 rebases the contract on main 9a62bd23 with no scope change.",
-    "Generation 31 rebases on main f13a77dc (#2771) and records the lane-tool supersession of migration 20260911170219 to 20260911205753 past main's newer 20260911170650; SQL bytes unchanged, benchmark and catalog test repointed at implementation head e900bd6d.",
-    "Generation 32 rebases the contract on main f938f36f with no scope change.",
-    "Generation 33 rebases the contract on main 72c299b8 with no scope change.",
-    "Generation 34 rebases on main 72c299b8 and records the lane-tool supersession of migration 20260911205753 to 20260911213429 past main's newer 20260911210709; SQL bytes unchanged, benchmark and catalog binding test repointed, no scope change.",
-    "Generation 35 rebases the contract on main 9ea5c664 with no scope change.",
-    "Generation 36 rebases the contract on main 5ec8aef0 with no scope change.",
-    "Generation 37 rebases the contract on main 26d9345b with no scope change."
+    "The raw source filename and label remain preserved separately in the existing title, relative_path, folder and metadata columns, so no new column is needed to retain them.",
+    "NULL is a distinct third answer meaning the source exposed no determination, and is never to be read as FALSE."
   ],
   "stop_conditions": [
-    "Unexpected ownership or scope collision.",
-    "Any exact-result mismatch, lost live-state or authorization behavior.",
-    "No shared database writes by this worker."
+    "the governed reviewer returns REVISE",
+    "any repository guard or required check fails and passing it would require weakening or bypassing the guard",
+    "the work would require writing row data rather than structure",
+    "the correct value for the column cannot be determined from the source without inference"
   ]
 }
