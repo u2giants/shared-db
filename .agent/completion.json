@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260910155753"
   ],
-  "contract_ref": "refs/db-contracts/2579/5",
-  "contract_sha256": "12706c36829efb3bfd25f96bc28612eec43ce4b93e1187003db9c07cb9192390",
-  "head_sha": "836d0ffb22aed103cf80387ef1774a50637d22d1",
+  "contract_ref": "refs/db-contracts/2579/6",
+  "contract_sha256": "505edbc24ba58f90c8d8243d60df110a7a7371031059929b58718a8f324965d5",
+  "head_sha": "38f1c7cd3657bb8932644ea86464666e82c7b17d",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -53,7 +53,7 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "{\"status\":\"OK\",\"sidecars\":47,... {\"version\":\"20260910155753\",\"markers\":[1083],\"sidecar\":true}]}"
+      "evidence": "{\"status\":\"OK\",\"sidecars\":47,... {\"version\":\"20260910155753\",\"markers\":[1122],\"sidecar\":true}]}"
     },
     {
       "command": "node scripts/check-db-data-admin-property-source-coverage.mjs",
@@ -68,7 +68,7 @@
     {
       "command": "python -m pytest scripts/test_production_catalog_verification.py scripts/test_check_production_verification_sidecars.py scripts/test_migration_derivation.py scripts/test_production_business_risk_gate.py -q",
       "exit_code": 0,
-      "evidence": "137 passed, 142 subtests passed; 243 passed, 69 subtests passed"
+      "evidence": "381 passed, 211 subtests passed in 36.80s"
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
@@ -91,7 +91,8 @@
     "CI repair after the first push: the api.source_capture_inventory view body still carried the `and (p_table_name is null or c.relname = p_table_name)` predicate copied from api.source_capture_inventory_exact. A view takes no parameter, so the entire migration aborted with `column \"p_table_name\" does not exist` and never applied. That single error produced all four database contract failures - the TrackerPlus landing tables were never created, and the pre-existing view kept classifying every plm.marvel_* and plm.wwe_* table as 'other'. The predicate was removed from the view only; the function keeps it, and no contract expectation was changed to make a test pass.",
     "The claim on issue #2679 was amended through the supported path `--expand-active-claim-from-pr`, never by hand, adding the two TrackerPlus staff-read policies and api.source_capture_inventory as declared writes. Contract generation 2 (refs/db-contracts/2579/2) adds docs/verification/throughput-guard-truth-audit-20260828.json to allowed_paths: the truth-audit inventory needed the one new call site introduced by scripts/check-db-data-admin-property-source-coverage.mjs:188, which reports the reserved migration missing only after a direct fs.existsSync test, so it is dispositioned 'excluded'.",
     "CI round 3: the ephemeral-database replay aborted the migration at its own append-only assertion, '#2579: 6 mutating grants survive on the TrackerPlus landing'. The count read information_schema.role_table_grants with no grantee filter, so it included the table owner's implicit UPDATE/DELETE/TRUNCATE on both new tables (2 x 3 = 6) which no REVOKE can remove. The guard and the matching contract-test assertion now filter to service_role, authenticated, anon and PUBLIC, the same shape used by the wildbrain and sega landing guards; the guarantee is unchanged and the sidecar migration_sha256 was rebound to 9a1dfaccef8867701ace74dfdf1c5634c71bb420f98781b729f3167eb2084a2a.",
-    "CI round 4: the migration applied and the four earlier database-contract failures cleared, leaving two. opa_coherent_complete_capture_contracts A0 showed api.source_capture_inventory_exact('opa_capture_scope') reporting a zero current-snapshot count where the coherent-capture contract requires an unknown latest-complete count, because this migration's in-place rewrite of the inventory was authored against the definition that preceded 20260909115140 and dropped its OPA clock. wildbrain_nbcu_licensing_read_access C showed the two new TrackerPlus read policies no longer admitting designer, which #1249 forbids. Both were repaired in the migration rather than in the tests; no contract expectation was changed."
+    "CI round 4: the migration applied and the four earlier database-contract failures cleared, leaving two. opa_coherent_complete_capture_contracts A0 showed api.source_capture_inventory_exact('opa_capture_scope') reporting a zero current-snapshot count where the coherent-capture contract requires an unknown latest-complete count, because this migration's in-place rewrite of the inventory was authored against the definition that preceded 20260909115140 and dropped its OPA clock. wildbrain_nbcu_licensing_read_access C showed the two new TrackerPlus read policies no longer admitting designer, which #1249 forbids. Both were repaired in the migration rather than in the tests; no contract expectation was changed.",
+    "Pre-merge update from main at ef06ca5aec77ad4eccf0e3b40accc2c2faca2cd6 by the shared-db orchestrator. The only conflicts were .agent/completion.json and .agent/contract.json, resolved by keeping this pull request own evidence; no non-.agent file conflicted and no implementation file changed. Contract generation 6 was published and the recorded check outputs were re-run against merge commit 38f1c7cd3657bb8932644ea86464666e82c7b17d."
   ],
   "assumptions_resolved": [
     {
@@ -136,5 +137,5 @@
     }
   ],
   "stop_conditions_hit": [],
-  "generation": 4
+  "generation": 6
 }
