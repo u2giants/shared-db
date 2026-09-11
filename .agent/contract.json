@@ -1,60 +1,21 @@
 {
-  "allowed_paths": [
-    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
-    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "assumptions": [
-    "api.db_data_admin_scraped_properties stays byte-for-byte unchanged and remains the Property Matching contract for its current dependents.",
-    "The licensor authority derivation reused by the Property arm is the exact derivation api.db_data_admin_scraped_properties already applies, so the two functions cannot disagree about who a row belongs to.",
-    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are non-authoritative inferred evidence and are therefore excluded from a source-declared inventory.",
-    "Every capture-backed family reads exactly one latest complete capture, the same contract the existing RPC uses, so nothing here touches issue #2744's performance repair.",
-    "app.require_licensing_manager_access() is the existing Licensing Manager gate and is unchanged."
-  ],
-  "base_sha": "5ec8aef002471e8520f45aef290101e0424e69d7",
-  "branch": "claude/issue-2797-scraped-source-inventory",
-  "db_reads": [
-    "function api.db_data_admin_scraped_properties",
-    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
-    "character and style-guide source landing tables in the same approved captures"
-  ],
-  "db_writes": [
-    "function api.db_data_admin_scraped_source_inventory"
-  ],
-  "dispatcher": "claude shared-db orchestrator marker issue 2758",
-  "file_writes": [
-    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
-    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "generation": 1,
-  "goal": "Add one read-only, Licensing-manager-gated, paged inventory RPC api.db_data_admin_scraped_source_inventory over the raw scraped source vocabularies for Properties, Characters and Style Guides, leaving api.db_data_admin_scraped_properties unchanged.",
-  "prohibited_actions": [
-    "No change of any kind to api.db_data_admin_scraped_properties",
-    "No matching controls, review reasons, evidence basis, review guidance, contract status or authority-derived presentation buckets in the payload",
-    "No deduplication across scrape routes and no identity inferred from names",
-    "No inferred candidate table presented as a source-declared fact",
-    "No direct production DDL; production only through the governed workflow",
-    "No object or path outside claim 2807 and this contract"
-  ],
-  "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check"
-  ],
-  "route": "shared-db-orchestrator",
   "schema_version": 1,
-  "stop_conditions": [
-    "Claim 2807, reserved version 20260911221304, or the coordinator route changes",
-    "A competing change touches api.db_data_admin_scraped_properties or any claimed object or contracted path",
-    "Issue #2744's performance repair would be weakened or its live claim collided with",
-    "Implementation requires an object or path outside claim 2807 or this contract"
-  ],
-  "work_issue": 2797,
-  "work_type": "structural",
-  "worker": "claude issue2797-author holding claim 2807",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/agent-aa4966ba29d9ccc16"
+  "work_issue": 2690,
+  "generation": 10,
+  "work_type": "source-data",
+  "route": "source-data-session",
+  "goal": "Fill and reconcile the existing ColdLion current-state master landing tables without schema changes, history windows, truncation, or public payload disclosure.",
+  "base_sha": "d5cea0278208b801bbf83b112b25bae816e49817",
+  "dispatcher": "returned source-data issue 2690; owner resumed 2026-09-11",
+  "worker": "codex coldlion-master-landing",
+  "branch": "codex/coldlion-master-landing",
+  "worktree": "C:/repos/shared-db-codex-coldlion-masters",
+  "allowed_paths": [".agent/contract.json", ".agent/completion.json", ".github/workflows/coldlion-landing-sync.yml", "docs/verification/coldlion-api-parameters-20260909T022136Z.json", "docs/verification/coldlion-merch-group-details-probe-20260909T0224Z.json", "tools/coldlion-landing/**", "tools/coldlion-landing-masters.test.mjs"],
+  "file_writes": [".github/workflows/coldlion-landing-sync.yml", "docs/verification/coldlion-api-parameters-20260909T022136Z.json", "docs/verification/coldlion-merch-group-details-probe-20260909T0224Z.json", "tools/coldlion-landing/**", "tools/coldlion-landing-masters.test.mjs"],
+  "db_reads": [],
+  "db_writes": [],
+  "prohibited_actions": ["No schema change or migration.", "No database write from this authoring task; GitHub Actions is the sole real-database path.", "No real ColdLion payload, customer, vendor, salesperson, factory, item, or licensed value in this public repository.", "No truncation of existing item tables and no history window ledger use for masters.", "No unfiltered seasons request and no EP001 landing row."],
+  "required_checks": ["node --test tools/coldlion-landing-masters.test.mjs", "node --test tools/*.test.mjs", "npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml"],
+  "assumptions": ["Applied landing migrations and settled owner field decisions are authoritative for projections.", "The live API documentation captured on 2026-09-09 is authoritative for request parameters.", "A company-only itemDetails call is a complete plain-array snapshot, as established by the protected read-only probe.", "Migration 20260909194231 is applied in production and makes mg_category part of merchandise-group detail identity."],
+  "stop_conditions": ["Stop if any requested field needs another schema change.", "Stop if offline proof would require committing a real ColdLion value.", "Stop before any local or authoring-session database write."]
 }
