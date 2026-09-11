@@ -1,29 +1,41 @@
 {
   "schema_version": 1,
-  "work_issue": 2706,
+  "work_issue": 2703,
   "outcome": "ready-for-merge",
-  "pr": 2721,
+  "pr": 2740,
   "migration_versions": [
-    "20260911050646"
+    "20260911061539"
   ],
-  "contract_ref": "refs/db-contracts/2706/5",
-  "contract_sha256": "564e86502d6b893b2ccb92c55378eb0eb2ca5eb5a6aba5bd739af6f7b187a28f",
-  "head_sha": "aabfe17f29903976662ebdaf652f1da8d7a8e4a7",
+  "contract_ref": "refs/db-contracts/2703/2",
+  "contract_sha256": "64f8fbffa0c8fa9053d9e661b22f0ce6abf026f62feae3e230f9415465ac7228",
+  "head_sha": "c56285a2b2f440cf281afff7f8ea8811baf0941d",
   "files_changed": [
-    ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260911050646_dcp_stable_identity_presentation.sql",
-    "supabase/tests/dcp_stable_identity_presentation_contracts.sql"
+    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
+    "docs/business-rules/licensing-master-data.md",
+    "supabase/migrations/20260911061539_opa_route_compliance.sql",
+    "supabase/tests/opa_route_compliance_contracts.sql"
   ],
   "db_reads": [],
   "db_writes": [
-    "function api.db_data_admin_scraped_properties"
+    "table plm.opa_property_scope_membership",
+    "table plm.opa_property_compliance_capture",
+    "view plm.opa_property_current_compliance",
+    "function plm.guard_opa_property_compliance_capture",
+    "function plm.guard_opa_property_compliance_membership",
+    "function plm.finalize_opa_property_compliance_capture",
+    "function api.db_data_admin_scraped_properties",
+    "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
+    "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
+    "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
+    "index plm.opa_compliance_membership_capture_idx",
+    "index plm.opa_compliance_capture_route_time_idx"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL, expected-count, verify-cost and EOL guards passed. No disposable local database was configured; SQL behaviour is covered by the PR ephemeral-database workflow, which remains required."
+      "evidence": "Static SQL guards passed. No local disposable database configured; PR database CI remains required."
     },
     {
       "command": "git diff --check",
@@ -32,11 +44,9 @@
     }
   ],
   "assumptions_resolved": [
-    "Production function read after #2579 includes new source groups, all retained verbatim.",
-    "Presentation authority now uses latest terminal per copy and stable dcpvault identity across copies; pending proposals cannot hide mapped authority.",
-    "Member disagreement and conflicting signed studio assertions retain conflict treatment; non-authoritative Marvel tags remain raw evidence.",
-    "Preserved independent twentieth source presentation; regression tests now cover member-equivalent signed studio preservation and conflicting studio assertions. Final current-main review and ephemeral tests remain required.",
-    "Database workflow34565404888 passed169 test files with zero nonquarantined failures; twelve existing quarantined failures retained. Final main refresh adds no change to this function."
+    "Exact route/account latest approved complete explicit observations define current rights; retained source identity is separate.",
+    "Private loader contract requires reviewed companion route/authentication proof; no rows loaded.",
+    "Final database CI and independent review remain required; production timeout investigation remains open before final review."
   ],
   "stop_conditions_hit": []
 }
