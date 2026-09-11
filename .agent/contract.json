@@ -19,7 +19,14 @@
   ],
   "base_sha": "120fb6125907386ce2b93bd9ae0a91de700fb738",
   "branch": "claude/issue-2482-retire-erp-items",
-  "db_reads": [ "table public.erp_items_current", "table public.erp_items_raw", "view api.plm_item_list", "table plm.item", "table plm.style_tracker_item_bridge", "table public.product_category_predictions"],
+  "db_reads": [
+    "table public.erp_items_current",
+    "table public.erp_items_raw",
+    "view api.plm_item_list",
+    "table plm.item",
+    "table plm.style_tracker_item_bridge",
+    "table public.product_category_predictions"
+  ],
   "db_writes": [
     "schema archive",
     "table plm.legacy_erp_item_identity",
