@@ -1,50 +1,78 @@
 {
   "schema_version": 1,
-  "generation": 5,
-  "work_issue": 2706,
+  "generation": 1,
+  "work_issue": 2741,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Align DCP Creative section, status and guidance with stable latest-terminal identity authority across retained copies; preserve genuine unresolved/conflicting records and non-authoritative Marvel raw-tag treatment.",
-  "base_sha": "439beffc5970b60bc7e1c8e0445f892fae46f8a7",
+  "goal": "Reconcile old preview Character alias and provenance shape with final reviewed2355 behavior without rewriting curated rows.",
+  "base_sha": "39ee46b2def37e1b1e14217bd145537aa57ef265",
   "dispatcher": "Codex orchestrator #2714",
-  "worker": "codex-2714-2706",
-  "branch": "codex/issue-2706",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2706",
+  "worker": "codex-2714-2355-forward",
+  "branch": "codex/issue-2426-character-parent",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2426-character-parent",
   "allowed_paths": [
-    "supabase/migrations/20260911050646_dcp_stable_identity_presentation.sql",
-    "supabase/tests/dcp_stable_identity_presentation_contracts.sql",
+    "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
+    "supabase/tests/character_alias_forward_repair_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260911050646_dcp_stable_identity_presentation.sql",
-    "supabase/tests/dcp_stable_identity_presentation_contracts.sql",
+    "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
+    "supabase/tests/character_alias_forward_repair_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "table core.licensor",
+    "table core.property",
+    "table core.franchise"
+  ],
   "db_writes": [
-    "function api.db_data_admin_scraped_properties"
+    "column core.character_alias.licensor_id",
+    "column core.character_alias.normalized_alias",
+    "column core.character_alias.source_id",
+    "column core.character_alias.source_system",
+    "column core.taxonomy_source_ref.first_seen_at",
+    "column core.taxonomy_source_ref.is_current",
+    "column core.taxonomy_source_ref.last_seen_at",
+    "column core.taxonomy_source_ref.missing_since",
+    "column core.taxonomy_source_ref.source_licensor_id",
+    "function core.guard_character_alias_licensor",
+    "function core.guard_taxonomy_source_ref_identity",
+    "index core.character_alias_character_idx",
+    "index core.character_alias_licensor_idx",
+    "index core.character_alias_licensor_norm_key",
+    "index core.character_alias_licensor_source_key",
+    "index core.taxonomy_source_ref_current_idx",
+    "index core.taxonomy_source_ref_entity_idx",
+    "index core.taxonomy_source_ref_source_licensor_idx",
+    "policy shared_read on core.character_alias",
+    "table core.character_alias",
+    "table core.taxonomy_source_ref",
+    "trigger a_taxonomy_source_ref_identity_guard on core.taxonomy_source_ref",
+    "trigger character_alias_licensor_guard on core.character_alias",
+    "trigger set_updated_at on core.character_alias",
+    "function core.bump_taxonomy_source_ref_last_seen",
+    "trigger b_taxonomy_source_ref_last_seen on core.taxonomy_source_ref",
+    "table core.character",
+    "index core.character_id_licensor_id_key"
   ],
   "prohibited_actions": [
-    "No production or preview database write by this worker; parent serializes promotion.",
-    "No licensed source rows or private regression values in public artifacts.",
-    "Preserve all source groups added by #2579, authentication, grants and append-only decisions.",
-    "No changes to other workers, protected issues or coordination implementation."
+    "No shared DB writes or merges by this worker.",
+    "Never rewrite old migration20260906222338 or licensed/source rows.",
+    "No CASCADE or relaxation of authentication, RLS, integrity or ColdLion breaker."
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
     "git diff --check"
   ],
   "assumptions": [
-    "DCP identities share only namespaced dcpvault identifiers; bare ids remain exact-copy keyed.",
-    "Latest terminal decisions survive pending proposals; conflicting terminal member sets fail closed.",
-    "Studio placement uses the existing contract/OPA rules; Marvel tags stay non-authoritative.",
-    "The signed Marvel studio exception to Disney OPA branch applies identically across all retained Creative tables.",
-    "Non-namespaced twentieth identities retain their independent source presentation; member-equivalent copies retain any nonconflicting signed studio assertion."
+    "Old preview applied67dc237a body; final reviewed2355 bodycb7bf087 differs.",
+    "Only legacy generated is_current=(missing_since IS NULL) may be removed RESTRICT; all independently held rows remain untouched."
   ],
   "stop_conditions": [
-    "An exact-object claim collision cannot be resolved by ordinary governed coordination.",
-    "A required test proves source groups, privacy, authorization or mapping authority regressed."
+    "Unexpected legacy column definition or dependent consumer.",
+    "Object ownership collision.",
+    "Either upgrade path loses data or fails existing2355 behavioral contracts."
   ]
 }
