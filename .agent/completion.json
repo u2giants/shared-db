@@ -1,59 +1,40 @@
 {
   "schema_version": 1,
-  "work_issue": 2501,
+  "work_issue": 2694,
   "outcome": "ready-for-merge",
-  "pr": 2734,
-  "migration_versions": [
-    "20260911052640"
-  ],
-  "contract_ref": "refs/db-contracts/2501/8",
-  "contract_sha256": "108c7636eb86071f6fc4b24c864224a6bb373d8f0300821024da25e9ef2de5df",
-  "head_sha": "b4d151e7a01eac41c845da1d222e07dc9cf0edd5",
+  "pr": 2750,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2694/7",
+  "contract_sha256": "d93acf5713f11e17ec10f2871679537e8e76e711bc224abf2a9164e2ab846bc9",
+  "head_sha": "58b4beae83d341439d7844aa58e3c88926595a9d",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql",
-    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
-  "db_reads": [
-    "table public.asset_effective_tags",
-    "table public.style_groups",
-    "table public.admin_config"
-  ],
-  "db_writes": [
-    "function public.filter_effective_assets",
-    "function public.get_effective_filter_counts_unchecked_1703",
-    "index public.idx_assets_tag_visible_facets",
-    "index public.idx_assets_tag_pending_facets",
-    "table public.assets",
-    "index public.idx_assets_tag_rls_visible_ids"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
+    {
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "exit_code": 0,
+      "evidence": "524 passed, zero failed, skipped, cancelled or todo; malformed and mismatch refusal, expired and unknown admission, parallel leases and crash recovery covered."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
     },
     {
-      "command": "synthetic PostgreSQL parity and index-only plan test",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Owned PostgreSQL18 fixture on localhost55486:40000 wide assets,327680000-byte heap,3964928-byte three-index footprint.16 scenarios preserved exact counts,IDs,legacy and own-facet maps. Actual production SELECT policies reproduced under authenticated role; prepared force_generic_plan tagcount33.502ms with narrow indexes. New rollback eligibility test and catalog guards passed. This is diagnostic mechanism proof, not production acceptance."
-    },
-    {
-      "command": "hosted ephemeral migration regression suite",
-      "exit_code": 0,
-      "evidence": "Database Contract Tests run34567517090 completed success at exact implementation76dbba1ed2f4c9c0b18da85fa017b718ca1cdd6e; every migration and every supabase/tests SQL test passed, including authenticated prepared tag access and non-DAM denial."
+      "evidence": "275 semantically bound call sites match; the new admission diagnostic is a local-evidence validation, not a database absence claim."
     }
   ],
   "assumptions_resolved": [
-    "Production qsllyeztdwjgirsysgai target verified read-only; underlying blue count timed out at8s and showed primary-key heap lookups into2.12GBassets. Existing tag RLS requires visible asset existence; policy bytes remain unchanged.",
-    "Simple tag/facet-only requests have guarded narrow generic-plan arms; other filters retain complete original fallback. Existing API eight-second configurations remain unchanged.",
-    "Ordinary atomic index builds use lock_timeout2s and statement_timeout30s per build. Three full heap passes may hold write-blocking locks for roughly90s; preview must measure actual build duration. No concurrent/ad-hoc production DDL.",
-    "Applied migration bytes preserved. Parent owns final-main integration,one independent exact-head review,guarded merge,preview,production and real authenticated acceptance.",
-    "Currentmain208ba30d merged without anySQL/test change; finalheadCIandoneindependentreview stillrequired."
+    "Prospective delivery validation only; final exact-head review, CI and prerequisite installation remain separate gates."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Implementation is tested. Final-main reviewer approval and real shared-target performance acceptance remain pending, not asserted by this completion record."
+  "stop_conditions_hit": []
 }

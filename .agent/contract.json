@@ -1,58 +1,46 @@
 {
   "schema_version": 1,
-  "work_issue": 2501,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Repair real cold authenticated blue tag facet/exact-list timeouts through narrow eligibility reads while preserving RLS, exact facet/count semantics and eight-second ceiling.",
+  "generation": 7,
+  "work_issue": 2694,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Complete scoped reviewer admission delivery while preserving parallel exact-head leases and truthful unknown provider capacity.",
   "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
-  "dispatcher": "codex orchestrator marker2714",
-  "worker": "codex-2714-2501-forward",
-  "branch": "codex/2501-forward-performance",
-  "worktree": "C:\\repos\\shared-db-worktrees\\2501-forward-performance",
+  "dispatcher": "Codex parent159 authorized maintenance programme",
+  "worker": "Codex programme_audit",
+  "branch": "codex/396-scoped-reviewer-admission",
+  "worktree": "C:/repos/shared-db-worktrees/396-scoped-reviewer-admission",
   "allowed_paths": [
-    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
-  "db_reads": [
-    "table public.asset_effective_tags",
-    "table public.style_groups",
-    "table public.admin_config"
-  ],
-  "db_writes": [
-    "function public.filter_effective_assets",
-    "function public.get_effective_filter_counts_unchecked_1703",
-    "index public.idx_assets_tag_visible_facets",
-    "index public.idx_assets_tag_pending_facets",
-    "table public.assets",
-    "index public.idx_assets_tag_rls_visible_ids"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "No production or shared-preview writes by this worker.",
-    "Do not change existing migration bytes, timeout, RLS, filter semantics or exact counts.",
-    "No warm-only retry as acceptance."
+    "No database structure or data access.",
+    "No orchestrator contact or new issues.",
+    "No arbitrary provider cap or weakened review, lease or CI gate."
   ],
   "required_checks": [
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
     "git diff --check",
-    "synthetic PostgreSQL parity and index-only plan test",
-    "hosted ephemeral migration regression suite"
+    "node scripts/check-throughput-truth-audit.mjs"
   ],
   "assumptions": [
-    "Current actual viewer failure is reproduced by underlying tag count timeout at8s.",
-    "Parent owns preview, merge, production and real authenticated acceptance."
+    "Prospective delivery contract: existing implementation and review predate this publication; no retrospective publication claim.",
+    "Installed ai-devops scoped preflight contract is a required merge prerequisite.",
+    "Generation7 adds the existing semantic inventory disposition for local admission validation after CI qualification."
   ],
   "stop_conditions": [
-    "Stop if exact count/filter/authorization parity changes.",
-    "Stop if narrow plan still requires broad heap payload reads."
-  ],
-  "generation": 8
+    "Refuse missing, malformed or mismatched admission evidence before assignment.",
+    "Stop delivery on failed checks or loss of parallel lease capability."
+  ]
 }
