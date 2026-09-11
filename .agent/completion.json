@@ -1,52 +1,66 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
+  "work_issue": 2712,
   "outcome": "ready-for-merge",
-  "pr": 2746,
+  "pr": 2765,
   "migration_versions": [
-    "20260911204023"
+    "20260911210709"
   ],
-  "contract_ref": "refs/db-contracts/2478/3",
-  "contract_sha256": "f52a3b1bf1d44f3e6018ec557c525f83f17f3cd3bfc0ed0489d584c048946a24",
-  "head_sha": "986bb3ed173029268f983e214d24a33770800812",
+  "contract_ref": "refs/db-contracts/2712/3",
+  "contract_sha256": "de8af529641b2ead777f540877b48bebfabb1ba7ce9c007486ba6dcf7cc799b9",
+  "head_sha": "29b6f37529e9744bca77fbf041a47ccb4160724a",
   "files_changed": [
-    "supabase/migrations/20260911204023_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    "supabase/migrations/20260911210709_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "function app.set_updated_at"
+  ],
   "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
+    "schema hts_rag",
+    "role designflow_hts_prod_runtime",
+    "role designflow_hts_alsand_runtime",
+    "role designflow_hts_prod_worker",
+    "role designflow_hts_alsand_worker",
+    "table hts_rag.hts_rag_rulings",
+    "table hts_rag.hts_rag_product_examples",
+    "table hts_rag.hts_rag_precedents",
+    "table hts_rag.hts_rag_precedent_rulings",
+    "table hts_rag.hts_rag_extraction_jobs",
+    "table hts_rag.hts_rag_determinations",
+    "table hts_rag.hts_rag_provider_responses",
+    "table hts_rag.hts_rag_review_events",
+    "table hts_rag.hts_rag_product_family_allowlist",
+    "table hts_rag.hts_rag_debate_runs",
+    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
   ],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
-    },
-    {
-      "command": "local PostgreSQL helper parity contracts",
-      "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
-    },
-    {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors at implementation head 3924458832137ba0981f218b71a1cec0874e469d."
     },
     {
-      "command": "python -m unittest scripts.test_migration_derivation",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
+      "evidence": "SQL migration guards job passed on PR 2765 (run 34603204304 and at c8c557174c84794716bd0e3448369bc9b03c2259); the migration file is unchanged since."
+    },
+    {
+      "command": "psql contract test in a rolled-back transaction",
+      "exit_code": 0,
+      "evidence": "hts_rag_shared_schema_contract.sql passed at 8314a3b8dc375a2772a40bce67d0e26a083b99c7 (migration SQL byte-identical at implementation head 3924458832137ba0981f218b71a1cec0874e469d after the governed pure rename from 20260911124845; the test differs only in its header comment) against a local PostgreSQL 17 cluster with migration 20260911210709 applied; a negative control granting EXECUTE on the promotion-gate trigger function to designflow_hts_alsand_worker made it fail as intended."
+    },
+    {
+      "command": "hosted ephemeral migration regression suite",
+      "exit_code": 0,
+      "evidence": "Database Contract Tests run 34614159509 passed at c8c557174c84794716bd0e3448369bc9b03c2259 with the previous test revision; the same migration SQL, then numbered 20260911124845, replayed from empty. The hosted run for this head is produced by CI on push."
     }
   ],
   "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
+    "Production qsllyeztdwjgirsysgai verified read-only on 2026-09-11: no hts_rag schema and no designflow_hts roles exist.",
+    "The migration is self-contained and does not depend on unapplied public.hts_rag_* migrations; public.hts_rag_* is untouched.",
+    "All four roles are NOLOGIN; no password is committed. Granting login credentials to the application is a separate governed follow-up."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Implementation is tested. Independent governed review, guarded merge, preview apply, production apply and live verification remain pending and are not asserted by this record."
 }

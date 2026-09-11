@@ -1,53 +1,66 @@
 {
-    "schema_version": 1,
-    "generation": 3,
-    "work_issue": 2478,
-    "work_type": "structural",
-    "route": "shared-db-orchestrator",
-    "goal": "Extract one SKU derivation shared by rebuild and read-only drift detector without changing grouping, correction, or drift behavior.",
-    "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
-    "dispatcher": "Codex orchestrator #2714",
-    "worker": "codex-2714-2478",
-    "branch": "codex/issue-2478-shared-sku-key",
-    "worktree": "C:/repos/shared-db-worktrees/issue-2478-shared-sku-key",
-    "allowed_paths": [
-        "supabase/migrations/20260911204023_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "file_writes": [
-        "supabase/migrations/20260911204023_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "db_reads": [],
-    "db_writes": [
-        "function public.style_group_key_for_sku",
-        "function public.rebuild_style_groups_batch",
-        "function public.reconcile_style_group_drift"
-    ],
-    "prohibited_actions": [
-        "No shared database writes by worker.",
-        "No correction of application row drift or change to nightly correction path.",
-        "No paid review, merge or main movement before parent priority window clears.",
-        "No changes to issues2705 or2709."
-    ],
-    "required_checks": [
-        "bash scripts/check-sql.sh",
-        "local PostgreSQL helper parity contracts",
-        "git diff --check"
-    ],
-    "assumptions": [
-        "Parent authorized adapting obsolete inline-token assertion to shared-helper wiring while preserving all existing behavior/security tests.",
-        "Latest consumer definitions derive from migrations20260906035323 and20260907031246."
-    ],
-    "stop_conditions": [
-        "Object overlap or changed source definitions.",
-        "Old/new grouping parity mismatch.",
-        "Consumer behavior or security changes beyond helper delegation."
-    ]
+  "schema_version": 1,
+  "work_issue": 2712,
+  "generation": 3,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Create the governed shared HTS RAG schema hts_rag and four least-privilege NOLOGIN roles for popcre/designflow-backend#94, with mandatory source_environment provenance, RLS, and no PUBLIC or Data API access.",
+  "base_sha": "153b7754155a22b8541349cc7fe372d14c4e4c96",
+  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
+  "worker": "Claude sub-agent hts-rag-2712 of marker 2758",
+  "branch": "claude/2712-hts-rag-schema",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/2712-hts-rag-schema",
+  "allowed_paths": [
+    "supabase/migrations/20260911210709_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "supabase/migrations/20260911210709_hts_rag_shared_schema_least_privilege_roles.sql",
+    "supabase/tests/hts_rag_shared_schema_contract.sql"
+  ],
+  "db_reads": [
+    "function app.set_updated_at"
+  ],
+  "db_writes": [
+    "schema hts_rag",
+    "role designflow_hts_prod_runtime",
+    "role designflow_hts_alsand_runtime",
+    "role designflow_hts_prod_worker",
+    "role designflow_hts_alsand_worker",
+    "table hts_rag.hts_rag_rulings",
+    "table hts_rag.hts_rag_product_examples",
+    "table hts_rag.hts_rag_precedents",
+    "table hts_rag.hts_rag_precedent_rulings",
+    "table hts_rag.hts_rag_extraction_jobs",
+    "table hts_rag.hts_rag_determinations",
+    "table hts_rag.hts_rag_provider_responses",
+    "table hts_rag.hts_rag_review_events",
+    "table hts_rag.hts_rag_product_family_allowlist",
+    "table hts_rag.hts_rag_debate_runs",
+    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
+  ],
+  "prohibited_actions": [
+    "Do not touch public.hts_rag_*, hts_rag_split, dflow or dflow_prod.",
+    "No PUBLIC, anon, authenticated or service_role grants; do not add hts_rag to Data API exposed schemas.",
+    "No password in committed SQL; roles stay NOLOGIN.",
+    "No direct production DDL; production only through the governed production workflow.",
+    "No admin merge; no Claude review."
+  ],
+  "required_checks": [
+    "git diff --check",
+    "bash scripts/check-sql.sh",
+    "hosted ephemeral migration regression suite"
+  ],
+  "assumptions": [
+    "Production qsllyeztdwjgirsysgai holds no hts_rag schema and no designflow_hts roles (verified read-only 2026-09-11).",
+    "Migrations 20260907121706, 20260908202651 and 20260909121403 are not applied on production, so this migration is self-contained.",
+    "Generation 2: claim #2763 version 20260911124845 was superseded to 20260911185745 by the governed --supersede-active-claim-version (supersession 0c03ea9c06b9604725585cc2ef3b600d63a0e472) because main gained 20260911152203; a pure rename, SQL unchanged.",
+    "Generation 3: claim #2763 version 20260911185745 was superseded to 20260911210709 by the governed --supersede-active-claim-version (supersession 971df73750ed1de62da8f46d60cba62c1f4fdc5b) because main gained 20260911203057; a pure rename, SQL unchanged."
+  ],
+  "stop_conditions": [
+    "Stop if a login password would be required through a non-governed path.",
+    "Stop if any grant to PUBLIC or a Data API role would be required."
+  ]
 }
