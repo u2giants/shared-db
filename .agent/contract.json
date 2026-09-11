@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 1,
+  "generation": 2,
   "work_issue": 2706,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -39,7 +39,8 @@
   "assumptions": [
     "DCP identities share only namespaced dcpvault identifiers; bare ids remain exact-copy keyed.",
     "Latest terminal decisions survive pending proposals; conflicting terminal member sets fail closed.",
-    "Studio placement uses the existing contract/OPA rules; Marvel tags stay non-authoritative."
+    "Studio placement uses the existing contract/OPA rules; Marvel tags stay non-authoritative.",
+    "The signed Marvel studio exception to Disney OPA branch applies identically across all retained Creative tables."
   ],
   "stop_conditions": [
     "An exact-object claim collision cannot be resolved by ordinary governed coordination.",
