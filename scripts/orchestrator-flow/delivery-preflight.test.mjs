@@ -1,10 +1,13 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { canonicalJson, sha256, validateEvidenceBundle } from './evidence-bundle.mjs'
 import {
   DELIVERY_CHECKS,
   DeliveryPreflightError,
   reuseDeliveryPreflight,
   runDeliveryPreflight,
+  composeDeliveryPreflight,
+  registerDeliveryPreflight,
 } from './delivery-preflight.mjs'
 
 const input = () => ({
@@ -12,6 +15,25 @@ const input = () => ({
   pr: 2800,
   head_sha: 'a'.repeat(40),
   checks: Object.fromEntries(DELIVERY_CHECKS.map((name) => [name, { status: 'PASS', evidence_id: `${name}-proof` }])),
+})
+
+test('composition invokes every existing gate once and registers exact-head evidence',()=>{
+  const calls=[]
+  const adapters=Object.fromEntries(DELIVERY_CHECKS.map((name)=>[name,()=>{calls.push(name);return{status:'PASS',evidence_id:`${name}-proof`}}]))
+  const result=composeDeliveryPreflight({issue:2728,pr:2800,head_sha:'a'.repeat(40)},adapters)
+  assert.deepEqual(calls,DELIVERY_CHECKS)
+  const identity={policy_version:1,migrations:[],focused_files:[],verification_files:[],claims:{writes:[],reads:[]},global_invalidators:[],migration_order_digest:'0'.repeat(64)}
+  const bundle={schema_version:1,bundle_id:sha256(canonicalJson(identity)),identity,metadata:{issue:2728,pr:2800,claim:1,base_main_sha:'b'.repeat(40),integration_sha:'a'.repeat(40),review:null,ci:null}}
+  const registered=registerDeliveryPreflight(bundle,result)
+  assert.equal(registered.metadata.delivery_preflight.input_digest,result.input_digest)
+  assert.equal(validateEvidenceBundle(registered),registered)
+  bundle.metadata.integration_sha='b'.repeat(40)
+  assert.throws(()=>registerDeliveryPreflight(bundle,result),/exact head/)
+})
+
+test('composition refuses before work when any gate adapter is absent',()=>{
+  const adapters=Object.fromEntries(DELIVERY_CHECKS.slice(1).map((name)=>[name,()=>({status:'PASS',evidence_id:'proof'})]))
+  assert.throws(()=>composeDeliveryPreflight({issue:1,pr:2,head_sha:'a'.repeat(40)},adapters),/adapter route is required/)
 })
 
 test('one composed preflight binds every early gate to the exact head', () => {

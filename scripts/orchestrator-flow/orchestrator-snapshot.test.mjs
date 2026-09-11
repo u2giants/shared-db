@@ -5,6 +5,8 @@ import {
   buildOrchestratorSnapshot,
   transitionNotification,
   verifyOrchestratorSnapshot,
+  publishSnapshotTransition,
+  agentCheckInNotification,
 } from './orchestrator-snapshot.mjs'
 
 const input = () => ({
@@ -15,6 +17,21 @@ const input = () => ({
   stage_locks: [{ stage: 'merge', holder: null }],
   outcome_events: [{ event_id: 'event-1', work_issue: 10 }],
   eligible_queue: [{ issue: 30, priority: 5 }],
+})
+
+test('publishing is edge-triggered and unchanged state emits no check-in',()=>{
+  const first=buildOrchestratorSnapshot(input()),published=[]
+  const same=publishSnapshotTransition(input(),{previousSnapshot:first,publish:(row)=>published.push(row)})
+  assert.equal(same.notification,null);assert.equal(published.length,0)
+  const changed=input();changed.eligible_queue.push({issue:32,priority:1})
+  publishSnapshotTransition(changed,{previousSnapshot:first,publish:(row)=>published.push(row)})
+  assert.equal(published.length,1);assert.equal(published[0].notification.event_type,'orchestrator_state_changed')
+})
+
+test('agents suppress progress chatter and report one terminal fact',()=>{
+  for(const status of ['intermediate','unchanged','working','waiting'])assert.equal(agentCheckInNotification({status}),null)
+  assert.deepEqual(agentCheckInNotification({status:'completed',issue:7,evidence_id:'artifact:7'}),{event_type:'agent_completed',work_issue:7,evidence_id:'artifact:7'})
+  assert.throws(()=>agentCheckInNotification({status:'blocked',issue:7,evidence_id:''}),/durable evidence/)
 })
 
 test('snapshot is deterministic despite collection order and capture time', () => {

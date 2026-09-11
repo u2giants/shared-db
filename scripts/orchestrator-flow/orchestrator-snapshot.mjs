@@ -1,4 +1,7 @@
 import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { canonicalJson } from './evidence-bundle.mjs'
 
 export class OrchestratorSnapshotError extends Error {}
@@ -82,3 +85,39 @@ export function transitionNotification(previousSnapshot, nextSnapshot) {
     snapshot_id: nextSnapshot.snapshot_id,
   }
 }
+
+export function publishSnapshotTransition(input, { previousSnapshot = null, capturedAt, publish } = {}) {
+  const snapshot = buildOrchestratorSnapshot(input, { capturedAt })
+  const notification = previousSnapshot ? transitionNotification(previousSnapshot, snapshot) : {
+    event_type: 'orchestrator_snapshot_created', snapshot_id: snapshot.snapshot_id,
+  }
+  if (notification) {
+    if (typeof publish !== 'function') throw new OrchestratorSnapshotError('changed snapshot requires a publisher')
+    publish({ snapshot, notification })
+  }
+  return { snapshot, notification }
+}
+
+export function agentCheckInNotification({ status, issue, evidence_id: evidenceId }) {
+  if (['intermediate', 'unchanged', 'working', 'waiting'].includes(status)) return null
+  if (!['completed', 'blocked'].includes(status)) throw new OrchestratorSnapshotError('agent check-in status is unsupported')
+  if (!Number.isInteger(issue) || issue <= 0 || typeof evidenceId !== 'string' || !evidenceId.trim()) {
+    throw new OrchestratorSnapshotError('terminal agent check-in requires issue and durable evidence')
+  }
+  return { event_type: status === 'completed' ? 'agent_completed' : 'agent_blocked', work_issue: issue, evidence_id: evidenceId }
+}
+
+export function main(argv) {
+  try {
+    const value = (name) => { const index=argv.indexOf(name); if(index<0||!argv[index+1])return null; return argv[index+1] }
+    const inputFile=value('--input'),verifyFile=value('--verify'),previousFile=value('--previous')
+    if(!inputFile)throw new OrchestratorSnapshotError('--input <json> is required')
+    const input=JSON.parse(readFileSync(inputFile,'utf8'))
+    if(verifyFile){console.log(JSON.stringify(verifyOrchestratorSnapshot(JSON.parse(readFileSync(verifyFile,'utf8')),input),null,2));return 0}
+    const snapshot=buildOrchestratorSnapshot(input)
+    const notification=previousFile?transitionNotification(JSON.parse(readFileSync(previousFile,'utf8')),snapshot):null
+    console.log(JSON.stringify({snapshot,notification},null,2));return 0
+  } catch(error) { console.error(`REFUSED: ${error.message}`); return 2 }
+}
+
+if(process.argv[1]&&path.resolve(fileURLToPath(import.meta.url))===path.resolve(process.argv[1]))process.exitCode=main(process.argv.slice(2))

@@ -1,5 +1,8 @@
 import { createHash } from 'node:crypto'
-import { canonicalJson } from './evidence-bundle.mjs'
+import { readFileSync } from 'node:fs'
+import path from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { canonicalJson, validateEvidenceBundle } from './evidence-bundle.mjs'
 
 export class DeliveryPreflightError extends Error {}
 export const DELIVERY_PREFLIGHT_SCHEMA_VERSION = 1
@@ -55,3 +58,32 @@ export function reuseDeliveryPreflight(record, currentInput) {
   if (record.preflight_id !== record.input_digest || record.input_digest !== currentDigest) return null
   return record
 }
+
+export function composeDeliveryPreflight({ issue, pr, head_sha }, adapters) {
+  if (!adapters || typeof adapters !== 'object') throw new DeliveryPreflightError('preflight adapters are required')
+  const checks={}
+  for(const name of DELIVERY_CHECKS){
+    if(typeof adapters[name]!=='function')throw new DeliveryPreflightError(`preflight adapter ${name} is required`)
+    const result=adapters[name]({issue,pr,head_sha})
+    checks[name]=result
+  }
+  return runDeliveryPreflight({issue,pr,head_sha,checks})
+}
+
+export function registerDeliveryPreflight(evidenceBundle, preflight) {
+  try{validateEvidenceBundle(evidenceBundle)}catch(error){throw new DeliveryPreflightError(`evidence bundle is unreadable: ${error.message}`)}
+  if(!preflight||preflight.status!=='PASS'||preflight.preflight_id!==preflight.input_digest)throw new DeliveryPreflightError('only a sealed passing preflight can be registered')
+  if(Number(evidenceBundle.metadata?.issue)!==preflight.input.issue||Number(evidenceBundle.metadata?.pr)!==preflight.input.pr||String(evidenceBundle.metadata?.integration_sha).toLowerCase()!==preflight.input.head_sha)throw new DeliveryPreflightError('preflight does not bind the evidence bundle issue, PR, and exact head')
+  const registered={...evidenceBundle,metadata:{...evidenceBundle.metadata,delivery_preflight:{preflight_id:preflight.preflight_id,input_digest:preflight.input_digest}}}
+  try{validateEvidenceBundle(registered)}catch(error){throw new DeliveryPreflightError(`preflight registration is invalid: ${error.message}`)}
+  return registered
+}
+
+export function main(argv){
+  try{
+    const index=argv.indexOf('--input');if(index<0||!argv[index+1])throw new DeliveryPreflightError('--input <json> is required')
+    const input=JSON.parse(readFileSync(argv[index+1],'utf8')),record=runDeliveryPreflight(input)
+    console.log(JSON.stringify(record,null,2));return 0
+  }catch(error){console.error(`REFUSED: ${error.message}`);return 2}
+}
+if(process.argv[1]&&path.resolve(fileURLToPath(import.meta.url))===path.resolve(process.argv[1]))process.exitCode=main(process.argv.slice(2))
