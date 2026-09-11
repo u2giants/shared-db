@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
+  "base_sha": "e420cd8619f57933de5b35aa5065f7d9ea3cc9de",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
@@ -93,12 +93,13 @@
     "Generation 42 refreshes the completed repair onto current main 9ea5c664; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
     "Generation 43 aligns the existing production-owner permission regression with the required effective production-apply issues write scope while preserving production-apply-review as read-only.",
     "Generation 44 restores shared-supabase default issues read and limits job-level issues write to preview and production-apply, with effective-permission coverage for validate, production-dry-run, and production-apply-review.",
-    "Generation 45 integrates current main 26d9345b and repairs the guarded-operation routing boundary: structural and mixed or unknown pull requests still require two-sided DDL admission, while deterministic repository-maintenance code retains exact-head review, CI, and guarded merge without fabricated database admission or database stages."
+    "Generation 45 integrates current main 26d9345b and repairs the guarded-operation routing boundary: structural and mixed or unknown pull requests still require two-sided DDL admission, while deterministic repository-maintenance code retains exact-head review, CI, and guarded merge without fabricated database admission or database stages.",
+    "Generation 46 integrates current main e420cd86 after PR 2726, preserving its search-performance migration and merged truth-audit dispositions while retaining the generation 45 routing repair unchanged."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if repository-maintenance work can consume a database author, preview, or production lane; exact-head reviewer and guarded merge use remain required.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 45
+  "generation": 46
 }
