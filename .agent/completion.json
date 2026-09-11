@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2723/2",
   "contract_sha256": "ceb50dd6bbdfb70e359c05ae2b8446461cde49f99033e3e7c452357eda63d936",
-  "head_sha": "85013d725d62726f2f81f7428c4bf08c30e23a15",
+  "head_sha": "3386ff8869180e39f2d92ee9889a045f8d256894",
   "files_changed": [
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
@@ -19,9 +19,9 @@
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/run-governed-review.test.mjs",
       "exit_code": 0,
-      "evidence": "505 passed, 0 failed, 0 skipped; original refusals and strict receipt fallback regression."
+      "evidence": "563 passed, 0 failed, 0 skipped; refreshed with both current main prerequisites."
     },
     {
       "command": "python scripts/test_verify_preview_apply_artifact.py",
