@@ -6,8 +6,8 @@
   "migration_versions": [
     "20260911063554"
   ],
-  "contract_ref": "refs/db-contracts/2741/5",
-  "contract_sha256": "30693851663287c3db25fa06a7b456481c2d9ea79c02bc89c01aa5cd7976794c",
+  "contract_ref": "refs/db-contracts/2741/6",
+  "contract_sha256": "e0df5dd3f3b2ddec9105bc196582464e446d222e461d83ba9289715c1b294b69",
   "head_sha": "dc2ece0bc556210ec89ca446653a1ea1d6bd4d78",
   "files_changed": [
     "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
@@ -86,7 +86,8 @@
     "Both historical upgrade and repeat finalschema application preserve all provenance rows and match reviewed function/constraint/index/policy/grant catalog; C10 parentcascade and ColdLion breakers pass.",
     "Oldversion20260906222338 unchanged. Parent owns preview/production and finalindependentreview after2501 priority.",
     "Existing retirement policy hard-blocks oldversion while preserving file/ledger; standaloneforward works withoutoldbase and is genuinely-pending ratherthanbase-absent.",
-    "No paidindependentreview or sharedpreview/production has run for2743. Parent ownsfinalheadreview andpromotion."
+    "No paidindependentreview or sharedpreview/production has run for2743. Parent ownsfinalheadreview andpromotion.",
+    "Generation6 refreshes both evidence files after actual implementationdc2ece0b; no SQL, policy, test or claim change. New-head CI and independent review remain required."
   ],
   "stop_conditions_hit": []
 }
