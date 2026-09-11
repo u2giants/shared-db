@@ -564,7 +564,7 @@ export function gatherOpenPrObjects(repo, io = defaultIo) {
     // endpoint omits changed_files). It is skipped ONLY when that proof cannot
     // change the answer: no migration file in the list, AND fewer than 100
     // files. A list under one full page has no pagination seam, so no page can
-    // have been lost; a list of 100 or more is always proved, because a missing
+    // have been lost; a list of 100 or more is always proved, because an unread
     // later page could hide a migration. Every migration pull request is still
     // proved exactly as before. This saves one call per unrelated open PR.
     const touchesMigrations = files.some((file) => String(file?.filename ?? '').startsWith(`${MIGRATIONS_DIR}/`))

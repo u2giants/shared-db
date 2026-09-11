@@ -1066,9 +1066,6 @@ export function runGitHubCommand(args,{executor=execFileSync,wait=(ms)=>Atomics.
     executor:(bin,cmdArgs,options)=>{consumeReviewWireRequest();return executor(bin,cmdArgs,options)},
     wait,
     attempts:reviewWireBudget?.locked?1:attempts,
-    // A locked reviewer wire budget cannot afford the probe and replay a
-    // rate-limit wait costs, so it keeps failing fast.
-    ...(reviewWireBudget?.locked?{maxRateLimitWaitMs:0}:{}),
     idempotentWrite,
     expectedFailure,
     reportStderr,
@@ -1502,7 +1499,6 @@ export const githubIo = {
       .map((x)=>({ number:x.number, title:x.title, body:x.body, createdAt:x.created_at, labels:(x.labels??[]).map((l)=>l.name) }))
       .filter((x)=>!x.labels.some((name)=>COORDINATION_LABELS.has(name)))
   },
-  openIssueRows() { return ghPaginated(`repos/${REPO}/issues?state=open&per_page=100`) },
   openIssueNumbers() { return ghPaginated(`repos/${REPO}/issues?state=open&per_page=100`).filter((x)=>!x.pull_request).map((x)=>x.number) },
   // DEPENDENCY STATE (Step 3, issue #1366). Fetch every REFERENCED dependency, not
   // just the ones that happen to be open, because a nonexistent number and an
@@ -6285,13 +6281,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     const claims = io.openClaims()
     if (o.returnIssue) { console.log(JSON.stringify(returnIssueToOwner(o.returnIssue, io), null, 2)); return 0 }
     if (o.queueAudit) {
-      // ONE listing of every open issue for the whole audit. It used to be read
-      // up to three times (work issues, then open numbers once per queue build),
-      // which is part of what exhausted the Actions token's quota.
-      const openIssueRows = io.openIssueRows ? io.openIssueRows() : null
-      const issues = openIssueRows ? io.openWorkIssues(() => openIssueRows) : io.openWorkIssues()
-      const openNumbers = openIssueRows ? openIssueRows.filter((x) => !x.pull_request).map((x) => x.number) : null
-      const openIssueNumbers = () => openNumbers ?? io.openIssueNumbers()
+      const issues = io.openWorkIssues()
       // Gather dependency state before building the queue so the pure function
       // stays pure. Referenced numbers come from the scope blocks themselves.
       const referenced = new Set()
@@ -6322,7 +6312,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       // Resolve historical authoring only for the bounded set that would be
       // dispatched. This catches merged work without scanning all historical
       // claim refs or spending an unbounded GitHub API budget.
-      let result = buildDynamicQueues(issues, claims, now, openIssueNumbers(), dependencyStates, claimPullStates)
+      let result = buildDynamicQueues(issues, claims, now, io.openIssueNumbers(), dependencyStates, claimPullStates)
       const authoredOnMain = new Set()
       if (result.dispatchable.length && io.closedClaimsForWork && io.branchPulls && io.treeFiles && io.mainSha && io.mergeCommitInMain) {
         const main = io.mainSha()
@@ -6345,7 +6335,7 @@ export function main(argv, now = new Date(), io = githubIo) {
             if (completed) authoredOnMain.add(issue)
           }
           if (!fresh.some((issue)=>authoredOnMain.has(issue))) break
-          result = buildDynamicQueues(issues, claims, now, openIssueNumbers(), dependencyStates, claimPullStates, authoredOnMain)
+          result = buildDynamicQueues(issues, claims, now, io.openIssueNumbers(), dependencyStates, claimPullStates, authoredOnMain)
         }
       }
       console.log(JSON.stringify(result,null,2))

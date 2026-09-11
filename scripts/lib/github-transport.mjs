@@ -200,7 +200,10 @@ export function runGitHubCommand(args, {
   maxBuffer = 64 * 1024 * 1024,
   input,
   encoding = 'utf8',
-  maxRateLimitWaitMs = rateLimitMaxWaitMs(),
+  // A caller that asked for exactly ONE attempt asked never to be replayed --
+  // a locked reviewer wire budget counts every request, and a quota wait costs
+  // an uncounted probe plus a replay. It therefore fails fast by default.
+  maxRateLimitWaitMs = attempts <= 1 ? 0 : rateLimitMaxWaitMs(),
   now = Date.now,
 } = {}) {
   const mutating = isMutatingCall(args) || input !== undefined

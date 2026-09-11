@@ -198,6 +198,15 @@ test('an unreadable reset, a second exhaustion, a write, or a zero cap all fail 
   assert.equal(capped.calls.length, 1)
 })
 
+test('a caller that asked for exactly one attempt never waits or probes on a rate-limit 403', () => {
+  const { calls, executor } = rateLimitedExecutor({ probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 60) })
+  assert.throws(
+    () => runGitHubCommand(['api', 'repos/o/r/pulls'], { executor, attempts: 1, wait: () => assert.fail('a one-attempt caller waited'), now: () => NOW_MS, reportStderr() {} }),
+    (error) => error instanceof GitHubTransportError,
+  )
+  assert.equal(calls.length, 1, 'one call, no rate_limit probe, no replay')
+})
+
 test('the wait cap is configurable down, never up, and malformed values fail fast', () => {
   assert.equal(rateLimitMaxWaitMs({}), 15 * 60 * 1000)
   assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '0' }), 0)
