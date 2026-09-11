@@ -1,65 +1,49 @@
 {
   "schema_version": 1,
-  "work_issue": 2712,
-  "generation": 2,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Create the governed shared HTS RAG schema hts_rag and four least-privilege NOLOGIN roles for popcre/designflow-backend#94, with mandatory source_environment provenance, RLS, and no PUBLIC or Data API access.",
-  "base_sha": "153b7754155a22b8541349cc7fe372d14c4e4c96",
+  "work_issue": 2772,
+  "generation": 13,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Let a merged low-risk migration promote to production on exact-head ephemeral database CI evidence instead of a shared-preview apply, keeping preview mandatory for high-risk SQL.",
+  "base_sha": "9a62bd23342d66fb1697e9f6965221b8dca27103",
   "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
-  "worker": "Claude sub-agent hts-rag-2712 of marker 2758",
-  "branch": "claude/2712-hts-rag-schema",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/2712-hts-rag-schema",
+  "worker": "Claude process-unblocking sub-agent of marker 2758",
+  "branch": "claude/production-without-preview",
+  "worktree": "C:/repos/shared-db-worktrees/preview-skip",
   "allowed_paths": [
-    "supabase/migrations/20260911185745_hts_rag_shared_schema_least_privilege_roles.sql",
-    "supabase/tests/hts_rag_shared_schema_contract.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
   "file_writes": [
-    "supabase/migrations/20260911185745_hts_rag_shared_schema_least_privilege_roles.sql",
-    "supabase/tests/hts_rag_shared_schema_contract.sql"
+    ".agent/contract.json",
+    ".agent/completion.json",
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
-  "db_reads": [
-    "function app.set_updated_at"
-  ],
-  "db_writes": [
-    "schema hts_rag",
-    "role designflow_hts_prod_runtime",
-    "role designflow_hts_alsand_runtime",
-    "role designflow_hts_prod_worker",
-    "role designflow_hts_alsand_worker",
-    "table hts_rag.hts_rag_rulings",
-    "table hts_rag.hts_rag_product_examples",
-    "table hts_rag.hts_rag_precedents",
-    "table hts_rag.hts_rag_precedent_rulings",
-    "table hts_rag.hts_rag_extraction_jobs",
-    "table hts_rag.hts_rag_determinations",
-    "table hts_rag.hts_rag_provider_responses",
-    "table hts_rag.hts_rag_review_events",
-    "table hts_rag.hts_rag_product_family_allowlist",
-    "table hts_rag.hts_rag_debate_runs",
-    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "Do not touch public.hts_rag_*, hts_rag_split, dflow or dflow_prod.",
-    "No PUBLIC, anon, authenticated or service_role grants; do not add hts_rag to Data API exposed schemas.",
-    "No password in committed SQL; roles stay NOLOGIN.",
-    "No direct production DDL; production only through the governed production workflow.",
-    "No admin merge; no Claude review."
+    "Do not apply any migration or run any production or preview database write.",
+    "Do not relax exact target proof, the production lane lock, review evidence, or post-apply verification.",
+    "Do not let the ephemeral route promote SQL the classifier cannot positively recognise as low-risk."
   ],
   "required_checks": [
     "git diff --check",
-    "bash scripts/check-sql.sh",
-    "hosted ephemeral migration regression suite"
+    "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py"
   ],
   "assumptions": [
-    "Production qsllyeztdwjgirsysgai holds no hts_rag schema and no designflow_hts roles (verified read-only 2026-09-11).",
-    "Migrations 20260907121706, 20260908202651 and 20260909121403 are not applied on production, so this migration is self-contained.",
-    "Generation 2: claim #2763 version 20260911124845 was superseded to 20260911185745 by the governed --supersede-active-claim-version (supersession 0c03ea9c06b9604725585cc2ef3b600d63a0e472) because main gained 20260911152203; a pure rename, SQL unchanged."
+    "The required ephemeral database contract-test job applies every migration and records which applied, so its exact-head success is evidence the merged bytes apply cleanly."
   ],
   "stop_conditions": [
-    "Stop if a login password would be required through a non-governed path.",
-    "Stop if any grant to PUBLIC or a Data API role would be required."
+    "Stop if the change requires a database write.",
+    "Stop if skipping preview would require weakening any production guard other than the preview-evidence input."
   ]
 }
