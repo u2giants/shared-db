@@ -4338,13 +4338,16 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
 
 // The review mutex is shared with author acquisition and is held only for seconds.
 // "is occupied" is thrown by createRef before any write, so the whole draw is safe
-// to repeat; everything else propagates unchanged.
-export function assignWithMutexRetry(request,io=githubIo,{attempts=8,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)}={}){
+// to repeat; everything else propagates unchanged. Owner rate-limit rule
+// (2026-09-11, marker #2758): lock-contention retries wait at least five minutes,
+// so the default is one retry after five minutes plus jitter.
+export const MUTEX_RETRY_WAIT_MS = 300000
+export function assignWithMutexRetry(request,io=githubIo,{attempts=2,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)}={}){
   for(let attempt=1;;attempt++){
     try{return assignNextReviewer(request,io)}
     catch(error){
       if(attempt>=attempts||error?.message!==`${MUTEX_REF} is occupied`)throw error
-      wait(Math.min(1000*attempt,5000)+Math.floor(Math.random()*500))
+      wait(MUTEX_RETRY_WAIT_MS+Math.floor(Math.random()*30000))
     }
   }
 }

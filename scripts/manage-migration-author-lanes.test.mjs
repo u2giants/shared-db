@@ -2396,10 +2396,11 @@ test('live reviewer draws have no global FIFO: a later PR draws a free provider 
 test('a reviewer draw retries only a briefly occupied review mutex',()=>{
   const io=reviewIo(),request={issue:213,pr:313,headSha:'c'.repeat(40)},waits=[]
   io.enableReviewerQueue=false;io.getPr=()=>({number:313,state:'open',head:{sha:request.headSha}})
-  const create=io.createRef.bind(io);let blocked=2
+  const create=io.createRef.bind(io);let blocked=1
   io.createRef=(ref,sha)=>{if(ref===MUTEX_REF&&blocked>0){blocked--;return false}return create(ref,sha)}
   assert.ok(assignWithMutexRetry(request,io,{wait:(ms)=>waits.push(ms)}).reviewer)
-  assert.equal(waits.length,2)
+  assert.equal(waits.length,1)
+  assert.ok(waits[0]>=300000,'lock-contention retry waits at least five minutes')
   const io2=reviewIo();io2.enableReviewerQueue=false;io2.getPr=()=>({number:313,state:'open',head:{sha:request.headSha}});io2.createRef=(ref,sha)=>ref===MUTEX_REF?false:true
   assert.throws(()=>assignWithMutexRetry(request,io2,{attempts:3,wait:()=>{}}),/is occupied/)
 })
