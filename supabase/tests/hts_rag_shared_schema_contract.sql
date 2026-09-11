@@ -40,7 +40,25 @@ $catalog$;
 -- a member of. It created these roles and therefore holds ADMIN on them; the grant is
 -- test-only and rolls back with the transaction. The grantee is named explicitly:
 -- a CURRENT_USER role spec crashed the hosted Supabase backend (run 34603204421).
-grant designflow_hts_prod_worker, designflow_hts_prod_runtime, designflow_hts_alsand_runtime to postgres;
+grant designflow_hts_prod_worker, designflow_hts_alsand_worker, designflow_hts_prod_runtime, designflow_hts_alsand_runtime to postgres;
+
+-- The promotion-gate trigger function has EXECUTE revoked from PUBLIC and is granted to
+-- no role. PostgreSQL checks EXECUTE on a trigger function only when the trigger is
+-- created, never when it fires, so workers must NOT hold it. The worker block below
+-- proves the trigger still fires for a worker.
+do $gate_function_privilege$
+declare
+  v_role text;
+begin
+  foreach v_role in array array['designflow_hts_prod_worker', 'designflow_hts_alsand_worker',
+                                'designflow_hts_prod_runtime', 'designflow_hts_alsand_runtime',
+                                'anon', 'authenticated', 'service_role'] loop
+    if has_function_privilege(v_role, 'hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable()', 'EXECUTE') then
+      raise exception '% holds EXECUTE on the promotion-gate trigger function', v_role;
+    end if;
+  end loop;
+end
+$gate_function_privilege$;
 
 -- ---------------------------------------------------------------------------------
 -- Worker writes: A is a qualified operative precedent, B is not operative, D is
@@ -125,14 +143,69 @@ begin
   update hts_rag.hts_rag_precedents set promotion_gate_result = '{"passed": true}'::jsonb
    where id = '27120000-0000-4000-8000-00000000000a';
 
+  if (select promotion_gate_result from hts_rag.hts_rag_precedents
+       where id = '27120000-0000-4000-8000-00000000000a') is distinct from '{"passed": true}'::jsonb then
+    raise exception 'worker could not set promotion_gate_result for the first time';
+  end if;
+
+  -- The trigger fires for the worker even though the worker holds no EXECUTE on it.
   begin
     update hts_rag.hts_rag_precedents set promotion_gate_result = '{"passed": false}'::jsonb
      where id = '27120000-0000-4000-8000-00000000000a';
     raise exception 'promotion_gate_result changed after its first non-null value';
-  exception when check_violation then null;
+  exception when check_violation then
+    if sqlerrm <> 'hts_rag_precedents.promotion_gate_result is immutable once set' then
+      raise exception 'unexpected check_violation instead of the promotion-gate trigger: %', sqlerrm;
+    end if;
   end;
 end
 $worker_contract$;
+
+reset role;
+
+-- ---------------------------------------------------------------------------------
+-- The Alsand worker has the same bounded write rights, proven by real writes. Its
+-- ruling R4 is linked to no precedent, so neither runtime role may see it below.
+-- ---------------------------------------------------------------------------------
+set local role designflow_hts_alsand_worker;
+
+do $alsand_worker_contract$
+begin
+  insert into hts_rag.hts_rag_rulings (id, ruling_number, full_text, full_text_hash, source_environment)
+  values ('27120000-0000-4000-8000-000000000014', 'ZZ-R4', 'synthetic ruling four', repeat('c', 64), 'alsand');
+
+  update hts_rag.hts_rag_rulings set subject = 'alsand refreshed'
+   where id = '27120000-0000-4000-8000-000000000014';
+  if not found then
+    raise exception 'alsand worker bounded ruling update did not apply';
+  end if;
+
+  begin
+    update hts_rag.hts_rag_rulings set full_text = 'tampered' where id = '27120000-0000-4000-8000-000000000014';
+    raise exception 'alsand worker rewrote immutable ruling text';
+  exception when insufficient_privilege then null;
+  end;
+
+  begin
+    update hts_rag.hts_rag_rulings set source_environment = 'production' where id = '27120000-0000-4000-8000-000000000014';
+    raise exception 'alsand worker rewrote source_environment';
+  exception when insufficient_privilege then null;
+  end;
+
+  begin
+    delete from hts_rag.hts_rag_rulings where id = '27120000-0000-4000-8000-000000000014';
+    raise exception 'alsand worker deleted a ruling';
+  exception when insufficient_privilege then null;
+  end;
+
+  begin
+    update hts_rag.hts_rag_precedents set promotion_gate_result = '{"passed": false}'::jsonb
+     where id = '27120000-0000-4000-8000-00000000000a';
+    raise exception 'alsand worker changed a set promotion_gate_result';
+  exception when check_violation then null;
+  end;
+end
+$alsand_worker_contract$;
 
 reset role;
 
