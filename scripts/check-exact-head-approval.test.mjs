@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { createHash } from 'node:crypto'
 import test from 'node:test'
-import { evaluateExactHeadApproval as evaluateRaw, gatherApprovalInput, parseAssignmentRef, requireDurableVerdictInput, ApprovalCheckError } from './check-exact-head-approval.mjs'
+import { evaluateExactHeadApproval as evaluateRaw, evaluateApprovalWithRefresh, gatherApprovalInput, parseAssignmentRef, requireDurableVerdictInput, ApprovalCheckError } from './check-exact-head-approval.mjs'
 import { isValidatedVerdictArtifact } from './lib/review-verdict-artifact.mjs'
 
 const OLD = 'b494401028464ef8b2e67fe0b5b1836839b2be36'
@@ -394,6 +394,42 @@ test('the merge gate refuses a head whose slot was durably returned and never re
 test('a returned slot is answered only by an assignment drawn after the returned one', () => {
   assert.equal(evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1931' }, returnedSlotGithub({ redrawSequence: 9 }))).approved, true)
   assert.throws(() => evaluateExactHeadApproval(gatherApprovalInput({ PR_NUMBER: '1931' }, returnedSlotGithub({ redrawSequence: 1 }))), /review slot 2 was durably returned/)
+})
+
+// APPROVAL CARRY-FORWARD (#2758). Head A was approved; the PR then merged main and
+// its head is B. The byte-level equivalence proof is tested against real git in
+// lib/pr-content-equivalence.test.mjs; here the gate's use of it is exercised.
+const REFRESHED_HEAD = 'b'.repeat(40)
+function refreshedInput() {
+  const base = returnedSlotGithub({ redrawSequence: 9 })
+  return gatherApprovalInput({ PR_NUMBER: '1931' }, { ...base, json: (args) => /\/pulls\/\d+$/.test(args[args.length - 1]) ? { head: { sha: REFRESHED_HEAD } } : base.json(args) })
+}
+
+test('#2758: a merge-only refresh keeps the APPROVE recorded at the prior head', () => {
+  const input = refreshedInput()
+  assert.equal(input.headSha, REFRESHED_HEAD)
+  assert.throws(() => evaluateRaw(input), ApprovalCheckError)
+  const calls = []
+  const result = evaluateApprovalWithRefresh(input, { contentPreservingRefresh: (a, b) => { calls.push([a, b]); return { ok: true } } })
+  assert.equal(result.approved, true)
+  assert.equal(result.head_sha, REFRESHED_HEAD)
+  assert.equal(result.carried_from, RETURN_HEAD)
+  assert.deepEqual(calls, [[RETURN_HEAD, REFRESHED_HEAD]])
+})
+
+test('POSITIVE CONTROL #2758: a refresh that changed the PR diff (e.g. a migration edit) needs a new review', () => {
+  assert.throws(() => evaluateApprovalWithRefresh(refreshedInput(), { contentPreservingRefresh: () => ({ ok: false, reason: 'diff changed' }) }), ApprovalCheckError)
+})
+
+test('POSITIVE CONTROL #2758: no equivalence proof means no carry-forward', () => {
+  assert.throws(() => evaluateApprovalWithRefresh(refreshedInput(), {}), ApprovalCheckError)
+})
+
+test('POSITIVE CONTROL #2758: a refusal at an equivalent prior head is never carried past', () => {
+  const input = refreshedInput()
+  // In place: a spread copy would drop the non-enumerable validated marker.
+  input.priorHeads[0].verdicts[0].verdict = 'REVISE'
+  assert.throws(() => evaluateApprovalWithRefresh(input, { contentPreservingRefresh: () => ({ ok: true }) }), /carries a durable reviewer refusal/)
 })
 
 // The ref name only SELECTS the record; the commit is what is trusted, and it is

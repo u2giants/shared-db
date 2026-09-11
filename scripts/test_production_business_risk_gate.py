@@ -910,6 +910,57 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
             ):
                 prove_preview_producer_matches_main(ref, exact_main(main), main, api)
 
+    def test_a_later_unrelated_sidecar_on_main_keeps_the_preview_proof(self):
+        """#2758: #2703 was refused twice because #2748 merged its own sidecar.
+
+        The later sidecar belongs to another version whose migration touches
+        different objects, so the preview proof stays valid. POSITIVE CONTROLS:
+        the same drift refuses when that migration shares an object with the
+        promotion, when the drifting sidecar is the promoted version's own, and
+        when no promotion context is supplied.
+        """
+        from production_business_risk_gate import SIDECAR_PATH
+        ref, main = "1" * 40, "3" * 40
+        sidecars = [p for p in PREVIEW_PRODUCER_PATHS if SIDECAR_PATH.fullmatch(p)]
+        later, promoted_sidecar = sidecars[-1], sidecars[0]
+        later_v = SIDECAR_PATH.fullmatch(later).group(1)
+        promoted_v = SIDECAR_PATH.fullmatch(promoted_sidecar).group(1)
+
+        def absent_at_ref(victim):
+            def api(endpoint):
+                r = tree_ref(endpoint)
+                return {"truncated": False, "tree": [
+                    {"path": p, "type": "blob", "sha": "same-blob"}
+                    for p in PREVIEW_PRODUCER_PATHS if not (r == ref and p == victim)
+                ]}
+            return api
+
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            migrations = root / "supabase/migrations"; migrations.mkdir(parents=True)
+            (migrations / f"{promoted_v}_promoted.sql").write_text(
+                "create table catalog.widget (id int);\n", encoding="utf-8")
+            later_sql = migrations / f"{later_v}_later.sql"
+
+            later_sql.write_text("create table orders.list (id int); -- catalog.widget\n", encoding="utf-8")
+            prove_preview_producer_matches_main(
+                ref, exact_main(main), main, absent_at_ref(later),
+                promoted_versions=[promoted_v], repo_root=root)
+
+            later_sql.write_text("alter table catalog.widget add column x int;\n", encoding="utf-8")
+            with self.assertRaisesRegex(RiskGateError, "absent where exact main has it present"):
+                prove_preview_producer_matches_main(
+                    ref, exact_main(main), main, absent_at_ref(later),
+                    promoted_versions=[promoted_v], repo_root=root)
+
+            later_sql.write_text("create table orders.list (id int);\n", encoding="utf-8")
+            with self.assertRaisesRegex(RiskGateError, "absent where exact main has it present"):
+                prove_preview_producer_matches_main(
+                    ref, exact_main(main), main, absent_at_ref(promoted_sidecar),
+                    promoted_versions=[promoted_v], repo_root=root)
+            with self.assertRaisesRegex(RiskGateError, "absent where exact main has it present"):
+                prove_preview_producer_matches_main(ref, exact_main(main), main, absent_at_ref(later))
+
     def test_the_tree_read_receives_transport_retries(self):
         """The tree read now carries the producer pin for a whole promotion.
 

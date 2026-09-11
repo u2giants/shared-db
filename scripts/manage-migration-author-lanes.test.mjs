@@ -162,6 +162,20 @@ test('durable preview approval rejects an older slot verdict after replacement',
   assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 has no durable APPROVE for its latest exact-head assignment/)
 })
 
+// APPROVAL CARRY-FORWARD AT THE PREVIEW GATE (#2758): the same rule as the merge gate.
+test('#2758: durable approval at a prior head carries to a content-identical refreshed head',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40),calls=[]
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,fixture.io))
+  const verdicts=assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,contentPreservingRefresh:(a,b)=>{calls.push([a,b]);return{ok:true}}})
+  assert.equal(verdicts.filter((row)=>row.verdict==='APPROVE').length,3)
+  assert.deepEqual(calls,[[fixture.headSha,refreshed]])
+})
+
+test('POSITIVE CONTROL #2758: a refreshed head whose PR diff changed is not carried',()=>{
+  const fixture=durableApprovalFixture()
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,'c'.repeat(40),{...fixture.io,contentPreservingRefresh:()=>({ok:false,reason:'diff changed'})}))
+})
+
 // THE MULTI-SLOT RETURN HOLE (grok-4.6 review of PR #2077, high finding 2).
 //
 // Dropping a returned assignment from the gate is fail-CLOSED with one slot --

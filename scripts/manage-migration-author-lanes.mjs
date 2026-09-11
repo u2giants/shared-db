@@ -41,6 +41,7 @@ import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; impo
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, assertFindingsRefForPr, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
+import { isContentPreservingRefresh } from './lib/pr-content-equivalence.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -1602,6 +1603,15 @@ export const githubIo = {
     return ghJson(args)
   },
   mainSha() { return ghJson(['api', `repos/${REPO}/git/ref/heads/main`])?.object?.sha ?? null },
+  // Fetches the exact commits it compares, so a stale local checkout cannot answer.
+  // Any failure answers "not equivalent" and the exact-head rule stands.
+  contentPreservingRefresh(approvedHead,head){
+    try{
+      const main=this.mainSha();if(!/^[0-9a-f]{40}$/.test(String(main)))return{ok:false,reason:'main tip unreadable'}
+      execFileSync('git',['fetch','--no-tags','-q','origin',String(head),main],{stdio:['ignore','pipe','pipe']})
+      return isContentPreservingRefresh({approvedHead,head,mainRef:main})
+    }catch(error){return{ok:false,reason:`could not fetch the heads to compare: ${String(error?.message??error).split('\n')[0]}`}}
+  },
   getCommit(sha) { return ghJson(['api', `repos/${REPO}/git/commits/${sha}`]) },
   // ARGUMENT ORDER IS THE WHOLE CHECK. GitHub's compare endpoint is
   // `compare/{base}...{head}` and reports how HEAD relates to BASE. Passing the
@@ -3525,7 +3535,27 @@ export function headVerdictBlocksReplacement(issue,pr,headSha,io,options={}){
   })
 }
 
+// A MERGE FROM MAIN DOES NOT VOID AN APPROVAL (orchestrator marker #2758). The
+// same rule `evaluateApprovalWithRefresh` applies at the merge gate: an APPROVE
+// that fully satisfies an earlier head A stands for head B when A is an ancestor
+// of B and the pull request's own diff is identical at both (`.agent/` aside).
+// A refusal at B, or at any content-identical earlier head, still blocks. With no
+// `io.contentPreservingRefresh` nothing is carried.
 export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
+  const head=String(headSha).toLowerCase()
+  try{return assertExactDurableReviewApproval(issue,pr,head,io)}catch(exactError){
+    if(!(exactError instanceof LaneError)||typeof io.contentPreservingRefresh!=='function')throw exactError
+    if(/durable reviewer refusal/.test(exactError.message))throw exactError
+    const prefix=(p)=>`${p}/${Number(issue)}-${Number(pr)}-`
+    const priors=[...new Set([REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX].flatMap((p)=>io.listRefs(prefix(p))).map(({ref})=>parseAssignmentRef(ref)).filter((named)=>named&&named.issue===Number(issue)&&named.pr===Number(pr)).map((named)=>named.headSha))].filter((sha)=>sha!==head)
+    const equivalent=priors.filter((sha)=>io.contentPreservingRefresh(sha,head)?.ok===true)
+    for(const sha of equivalent)if(readReviewVerdicts(issue,pr,sha,io).some((row)=>row.verdict!=='APPROVE'))throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because head ${sha}, whose pull request diff is identical to this head, carries a durable reviewer refusal`)
+    for(const sha of equivalent){try{return assertExactDurableReviewApproval(issue,pr,sha,io)}catch(error){if(!(error instanceof LaneError))throw error}}
+    throw exactError
+  }
+}
+
+function assertExactDurableReviewApproval(issue,pr,headSha,io){
   const head=String(headSha).toLowerCase(),allVerdicts=readReviewVerdicts(issue,pr,head,io,{includeDisregarded:true})
   const disregarded=allVerdicts.filter((row)=>row.disregarded),verdicts=allVerdicts.filter((row)=>!row.disregarded)
   // #2079. A verdict recorded before the write-side guard existed, by a reviewer
