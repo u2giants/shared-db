@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911063554"
   ],
-  "contract_ref": "refs/db-contracts/2741/8",
-  "contract_sha256": "b5e3aad57844f57d65b598201e8310a812a4ee37a586e4e7fbf99814d9e549b8",
-  "head_sha": "2a43f89f0902ff4abb83ded39f81e9281261f352",
+  "contract_ref": "refs/db-contracts/2741/9",
+  "contract_sha256": "573410ff9ed4c7a3fa5b1131494923a7fe106d77f2f5c611b17694f0f42db265",
+  "head_sha": "7080421cebc3c2c8867b31dd1f0b4f71086f0c3b",
   "files_changed": [
     "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
     "supabase/tests/character_alias_forward_repair_contracts.sql",
@@ -57,17 +57,17 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass on merged implementation 2a43f89f (main dae160a0)."
+      "evidence": "Static SQL guards pass on merged implementation 7080421c (main b68a1900)."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on origin/main..2a43f89f."
+      "evidence": "No whitespace errors on origin/main..7080421c."
     },
     {
       "command": "python -m unittest discover -s scripts -p test_*.py -q",
       "exit_code": 0,
-      "evidence": "939 tests pass, eight existing skips, on merged implementation 2a43f89f."
+      "evidence": "939 tests pass, eight existing skips, on merged implementation 7080421c."
     },
     {
       "command": "Database Contract Tests run34573081462",
@@ -89,7 +89,8 @@
     "No paidindependentreview or sharedpreview/production has run for2743. Parent ownsfinalheadreview andpromotion.",
     "Generation6 refreshes both evidence files after actual implementationdc2ece0b; no SQL, policy, test or claim change. New-head CI and independent review remain required.",
     "Generation7 rebinds both evidence files after merging origin/main 5eaebe7c (implementation cf1a3c6f); no SQL, policy, test or claim change. New-head CI and independent review remain required.",
-    "Generation8 rebinds both evidence files after merging origin/main dae160a0 (implementation 2a43f89f); no SQL, policy, test or claim change."
+    "Generation8 rebinds both evidence files after merging origin/main dae160a0 (implementation 2a43f89f); no SQL, policy, test or claim change.",
+    "Generation9 rebinds both evidence files after merging origin/main b68a1900 (implementation 7080421c); no SQL, policy, test or claim change."
   ],
   "stop_conditions_hit": []
 }
