@@ -6,12 +6,13 @@
   "migration_versions": [
     "20260911170526"
   ],
-  "contract_ref": "refs/db-contracts/2744/1",
-  "contract_sha256": "fc5697c5574d3afdb9e34fa1d47fb218a800f4b4479dd845a75b14686b10ba76",
-  "head_sha": "d2aa81072ca0fb983bd922359bf8851e42f83e57",
+  "contract_ref": "refs/db-contracts/2744/2",
+  "contract_sha256": "6db07986c7204048561950bcadb2ffaf06872e6da2003ba63129887ea23d0921",
+  "head_sha": "db2b97e0148bb5a3430f1adddca8b5d7b5d8f312",
   "files_changed": [
     "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql"
   ],
   "db_reads": [
     "function api.db_data_admin_scraped_properties",
@@ -29,17 +30,17 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on 5761bc5e..d2aa8107."
+      "evidence": "No whitespace errors on 25c4ca3b..db2b97e0."
     },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed on d2aa8107; scripts/test_migration_derivation.py 44 tests OK after adding derived-from 20260911061539."
+      "evidence": "Static checks passed; scripts/test_migration_derivation.py 44 tests OK with derived-from 20260911061539 on db2b97e0."
     },
     {
       "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "Runs on this PR head in GitHub Actions job \"supabase/tests against an ephemeral database\"; the first attempt on f40699f5 stopped before any test with the CI INFRASTRUCTURE psql-install stall and is re-run on this head."
+      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" on a001e0ba applied every migration and passed scraped_properties_page_asset_context_contracts.sql, db_data_admin_scraped_properties.sql and _source_purpose.sql; its one failure was db_data_admin_scraped_properties_opa_groups.sql pinning the removed CTE text, updated in db2b97e0 and re-run on this head."
     }
   ],
   "assumptions_resolved": [
@@ -47,5 +48,5 @@
     "Production body md5 b63154a297ae649811cde7569657a146 equals 20260911061539; read-only parity on production: default page md5 530e12902785646a59c03b9c915d496c (1,067,395 bytes), Bambi and Cars 2 identical between current and new body."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Implementation d2aa8107 on main 5761bc5e. Read-only production EXPLAIN ANALYZE: execution 24.9s to 4.7s, planning 1.26s to 42ms, no temp spill; default page 3.7-6.0s versus 12.4-33.7s. No work_mem, statement_timeout, role or global setting changed."
+  "evidence_note": "Implementation db2b97e0 contains main 25c4ca3b. Read-only production EXPLAIN ANALYZE: execution 24.9s to 4.7s, planning 1.26s to 42ms, no temp spill; default page 3.7-6.0s versus 12.4-33.7s; output md5 identical. No work_mem, statement_timeout, role or global setting changed. Contract generation 2 adds the OPA groups test path."
 }
