@@ -14,6 +14,7 @@
     ".agent/completion.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/coordination-scenarios.test.mjs",
     "scripts/db-coordination-events.mjs",
     "scripts/lib/work-dependencies.mjs",
     "scripts/lib/work-dependencies.test.mjs",
@@ -28,6 +29,7 @@
     ".agent/completion.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/coordination-scenarios.test.mjs",
     "scripts/db-coordination-events.mjs",
     "scripts/lib/work-dependencies.mjs",
     "scripts/lib/work-dependencies.test.mjs",
@@ -60,5 +62,5 @@
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 6
+  "generation": 7
 }

@@ -4,12 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/6",
-  "contract_sha256": "79ff86b954b83e14dc2ab4bf74be4deb1bd9ea8a3c6a9cabcc6e41974673dc56",
-  "head_sha": "c2baef2778ba023bb9c9399d12b1281a34aa3919",
+  "contract_ref": "refs/db-contracts/2727/7",
+  "contract_sha256": "ab931efead3de6ec044de3afc30a13c2841e19b1c20b51d3bfd77c9b99aab19a",
+  "head_sha": "a090ff58b593ec1534928f911824281bc8883716",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/coordination-scenarios.test.mjs",
     "scripts/db-coordination-events.mjs",
     "scripts/lib/work-dependencies.mjs",
     "scripts/lib/work-dependencies.test.mjs",
@@ -30,12 +33,12 @@
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "656 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 1009 tests."
+      "evidence": "658 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 1011 tests."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK with 276 semantically reviewed call sites."
+      "evidence": "truth audit OK with 277 semantically reviewed call sites."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
@@ -47,7 +50,8 @@
     "No database or production operation was performed; the work is repository policy and manager code only.",
     "The sealed be971275 review REJECT is retained in PR evidence, and all three findings were repaired before this report.",
     "PR 2737 and its successful prose-only canary are integrated; its mutex-only command remains outside claims, reviewer assignment, shared stages, and lifecycle events.",
-    "PR 2736 remains correctly held until this resolver and admission interface reaches main."
+    "PR 2736 remains correctly held until this resolver and admission interface reaches main.",
+    "The final sealed review rejected unadmitted legacy dispatch and unbound claim objects; both findings are fixed and covered by adversarial tests before this report."
   ],
   "stop_conditions_hit": []
 }
