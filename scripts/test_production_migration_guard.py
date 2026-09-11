@@ -2075,6 +2075,10 @@ class ApplyLaneTests(unittest.TestCase):
             self.assertIn("issues: write", header, workflow)
             self.assertIn("--admit-issue", text, workflow)
         self.assertIn("--resolve-admitted-issue-for-pr", WORKFLOW_TEXT)
+        for job_name in ("preview", "production-apply"):
+            permissions = _job(job_name).split("\n    steps:", 1)[0]
+            self.assertIn("issues: write", permissions, job_name)
+            self.assertNotIn("issues: read", permissions, job_name)
 
     def test_phase_2_preserves_required_job_graph_and_deliberately_first_checks(self) -> None:
         self.assertIn("needs: validate", _job("preview"))

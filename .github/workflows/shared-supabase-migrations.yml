@@ -280,7 +280,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: write
-      issues: read
+      issues: write # admission may reopen the validated merge-closed source issue
       pull-requests: read
     env:
       # CONFIGURED, not hard-coded. The preview branch is rebuilt from time to time and its
@@ -1335,7 +1335,7 @@ jobs:
       contents: write
       actions: read
       checks: read
-      issues: read
+      issues: write # admission may reopen the validated merge-closed source issue
       pull-requests: read
       statuses: write
     # Keep the production environment binding. Environment policy is managed in
