@@ -4,11 +4,11 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "25c4ca3ba4e50aea22a44fac8116b9e391d9b787",
+  "base_sha": "153b7754155a22b8541349cc7fe372d14c4e4c96",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
-  "worktree": "C:/repos/shared-db-worktrees/cl-2738",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2727-steps2-3-codex401",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
@@ -50,7 +50,7 @@
   "prohibited_actions": [
     "Do not claim a database author lane or any shared preview, merge, or production stage for this repository-maintenance work.",
     "Do not mutate preview, production, shared cloud infrastructure, application rows, or database schema.",
-    "Do not bypass existing object conflicts, eight-author capacity, review, preview, merge, production, or live-application proof gates."
+    "Do not bypass existing object conflicts, version reservations, review, preview, merge, production, or live-application proof gates, and preserve the owner-ruling removal of the author-lane cap."
   ],
   "required_checks": [
     "git diff --check",
@@ -66,12 +66,13 @@
     "Admission, dependent claim creation, dispatched recording, manual lifecycle advancement, reviewer entry, preview preparation, and shared-stage entry revalidate inside the operation's single author-mutex ownership interval.",
     "Only completion and lifecycle evidence by repository owner u2giants with explicit OWNER association is trusted; every refused admission publishes current owner proof rather than trusting or deduplicating against stale comments; lost dispatch responses preserve ambiguous claims; completion is mutex-serialized through live verification, evidence, and closure; lifecycle advancement requires durable evidence; preview preparation rechecks marker ownership inside its mutex; unsupported multi-command routing refuses; completion reads exact production apply, manifest, after-ledger, and catalog proof; closed issues mutate only after validation; and every supported multi-target DROP binds all objects.",
     "Generation 26 is a takeover by the Claude shared-db orchestrator sub-agent (marker #2758) after the Codex worker was idle from 14:29Z to 16:43Z; scope is unchanged and limited to refreshing on main 9b02ad48 (#2767) and resolving the lane-manager conflict by keeping admission enforcement inside assignWithMutexRetry with the reviewer queue disabled.",
-    "Generation 27 refreshes the same takeover on main 5761bc5e (#2764, #2761); only the .agent evidence pair conflicted and no code changed."
+    "Generation 27 refreshes the same takeover on main 5761bc5e (#2764, #2761); only the .agent evidence pair conflicted and no code changed.",
+    "Generation 29 is the explicit handoff back to the Codex issue 401 owner and integrates main 153b7754 while preserving #2767 reviewer queue removal and #2777 unlimited author lanes."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 28
+  "generation": 29
 }
