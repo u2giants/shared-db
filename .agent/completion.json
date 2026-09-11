@@ -1,46 +1,54 @@
 {
   "schema_version": 1,
-  "work_issue": 2798,
+  "work_issue": 2744,
   "outcome": "ready-for-merge",
-  "pr": 2801,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2798/4",
-  "contract_sha256": "8b055637ada1491b4c9ead01aad03180a69ba306cb2861c1ecd76c821d97b934",
-  "head_sha": "9defdc538c23bb2548a19b3d3197e72dbedd7d57",
+  "pr": 2793,
+  "migration_versions": [
+    "20260911170526"
+  ],
+  "contract_ref": "refs/db-contracts/2744/6",
+  "contract_sha256": "af4910f98daa536a790080e6ba2603abc17586745ce4f7059b08907873583148",
+  "head_sha": "8cd2e015bb4fa3fc96c175df965daf2a427184d8",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs"
+    "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "function api.db_data_admin_scraped_properties",
+    "table plm.dcp_asset",
+    "table plm.lucasfilm_dcp_asset",
+    "table plm.dcp_style_guide",
+    "table plm.lucasfilm_dcp_style_guide",
+    "table plm.dcp_asset_property_observation",
+    "table plm.lucasfilm_dcp_asset_property_observation"
+  ],
+  "db_writes": [
+    "function api.db_data_admin_scraped_properties"
+  ],
   "checks": [
     {
-      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "41 tests, 41 pass, 0 fail, 0 skipped."
+      "evidence": "No whitespace errors on 25c4ca3b..db2b97e0."
     },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed."
+      "evidence": "Static checks passed; scripts/test_migration_derivation.py 44 tests OK with derived-from 20260911061539 on db2b97e0."
     },
     {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on 34b872e6 (run 34630156916, job 103364730068), whose supabase files are identical to implementation db2b97e0; it applied every migration and ran scraped_properties_page_asset_context_contracts.sql, db_data_admin_scraped_properties.sql, _opa_groups.sql and _source_purpose.sql."
     }
   ],
   "assumptions_resolved": [
-    "Run 34636342626 log binding confirmed: rehearsalMode claim, appliedCommit 1eae69db6ed5c938a109fde0c9040849ec30bffe, previewProjectRef mvpkijzfmfcxhnzqogzs, allowlist [20260911170526].",
-    "git hash-object shows blob 15317e82ef011de07d076224cd20638e52e6622c at 1eae69db and at PR #2793 head d00fc24e; the applied bytes validate against the new pin."
+    "Production plm.dcp_asset, plm.lucasfilm_dcp_asset, plm.dcp_style_guide and plm.lucasfilm_dcp_style_guide all have PRIMARY KEY (id), so resolving style guides from page assets yields the same set.",
+    "Production body md5 b63154a297ae649811cde7569657a146 equals 20260911061539; read-only parity on production: default page md5 530e12902785646a59c03b9c915d496c (1,067,395 bytes), Bambi and Cars 2 identical between current and new body."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Registry-only change; ready for exact-head governed review, CI, and guarded merge."
+  "evidence_note": "Implementation db2b97e0 contains main 25c4ca3b. Read-only production EXPLAIN ANALYZE: execution 24.9s to 4.7s, planning 1.26s to 42ms, no temp spill; default page 3.7-6.0s versus 12.4-33.7s; output md5 identical. No work_mem, statement_timeout, role or global setting changed. Contract generation 2 adds the OPA groups test path."
 }
