@@ -4,21 +4,21 @@
   "outcome": "ready-for-merge",
   "pr": 2726,
   "migration_versions": [
-    "20260911051552"
+    "20260911124016"
   ],
-  "contract_ref": "refs/db-contracts/2506/19",
-  "contract_sha256": "1509db3e505fc3772db72c0fd29d9eaa87b536551a6ca9c3d38b020f0d247601",
-  "head_sha": "4d17cc6936498ce7c98d9f904c2744afdcd8fb02",
+  "contract_ref": "refs/db-contracts/2506/20",
+  "contract_sha256": "444fe84544383081bcc4affc7c6e1ddf690ac5dfd444edae8792f4183ea8f17f",
+  "head_sha": "967d6349dc058139cefa33c5452986eb1cf74972",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911051552.json",
+    "scripts/production-verification-sidecars/20260911124016.json",
     "scripts/production_business_risk_gate.py",
     "scripts/production_catalog_verification.py",
-    "supabase/migrations/20260911051552_popsg_search_v2_production_performance.sql"
+    "supabase/migrations/20260911124016_popsg_search_v2_production_performance.sql"
   ],
   "db_reads": [
     "table public.style_guide_search_documents",
@@ -35,22 +35,22 @@
     {
       "command": "python scripts/benchmark_popsg_search_v2_production.py --parity-only",
       "exit_code": 0,
-      "evidence": "160 exact full-JSON parity cases passed including live-state NULL/empty strings and all queue states; zero skipped."
+      "evidence": "PASS: 160 exact full-JSON parity cases, 0 skipped, on a disposable local PostgreSQL after the benchmark was pointed at 20260911124016."
     },
     {
       "command": "python -m unittest scripts.test_production_catalog_verification",
       "exit_code": 0,
-      "evidence": "188 tests passed."
+      "evidence": "Ran 188 tests, OK, on the refreshed head."
     },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards passed against main39ee46b2 after supported supersession. Live-ledger guard not configured; parent owns shared target acceptance."
+      "evidence": "Static SQL guards passed on main5eaebe7c integration after supported supersession to 20260911124016."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "275 semantically bound call sites verified; added one explicit exclusion for the synthetic missing-state input literal, not live absence evidence."
+      "evidence": "truth audit OK: 276 semantically bound call sites after main5eaebe7c merge; digest recomputed, no disposition changed."
     }
   ],
   "assumptions_resolved": [
@@ -62,7 +62,8 @@
     "Exact-PR supported expansion added the CREATE INDEX parent table to claim2722; no structural SQL changed. Contract16 immutable ref readback confirmed after transient GitHub visibility delay.",
     "Main8e81462f integration preserves SQL and benchmarks; 188 catalog tests and 275-site truth audit pass again. Contract17 published for refreshed exact-head review.",
     "Main5af3fafa maintenance integration changes no migration or benchmark bytes. Prior GLM approval remains historical only; new exact-head review required.",
-    "Main208ba30d integration preserves SQL/benchmark bytes; contract19 replaces metadata authority, fresh exact-head CI and review pending."
+    "Main208ba30d integration preserves SQL/benchmark bytes; contract19 replaces metadata authority, fresh exact-head CI and review pending.",
+    "Main5eaebe7c integrated; supersession re-reserved 20260911051552 as 20260911124016 (rename only, SQL bytes unchanged). Contract20 published; Grok assignment2323 stays bound to superseded head84e9bd0c, fresh exact-head review pending."
   ],
   "stop_conditions_hit": []
 }
