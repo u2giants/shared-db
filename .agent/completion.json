@@ -4,15 +4,17 @@
   "outcome": "ready-for-merge",
   "pr": 2526,
   "migration_versions": [
-    "20260907154543"
+    "20260910223341"
   ],
-  "contract_ref": "refs/db-contracts/2493/1",
-  "contract_sha256": "55661be14b88cad817ec6f62e3b51ca5463863ffa1386e059b6a7344e92ec736",
-  "head_sha": "df910cceaf3e901f44ffa3fe08795c4e3eedf0fb",
+  "contract_ref": "refs/db-contracts/2493/2",
+  "contract_sha256": "25a3496bd43956430c27a4b1f308336081169882052c195d739b7ae5cf91bd3c",
+  "head_sha": "64d15debefcc2017d03f8f70e858ebbede449419",
   "files_changed": [
-    "scripts/production-verification-sidecars/20260907154543.json",
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/production-verification-sidecars/20260910223341.json",
     "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/migrations/20260910223341_source_resolution_new_kind_read_parity.sql",
     "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "db_reads": [
@@ -52,5 +54,6 @@
     "Migration SHA256 remains 7cff10dcf68d2ba8993201790e8c276d517fd2410efa049e3e2026504abf6c50 after current-main integration.",
     "Implementation is ready for coordinator review gates; independent exact-head review, fresh CI, preview and production/consumer acceptance remain pending and are not asserted by this report."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Prior runtime evidence below is retained historical evidence. Current successor changed no SQL or tests, preserved predecessor supersession and refreshed shared evidence only. Fresh exact-head CI and governed review are required."
 }

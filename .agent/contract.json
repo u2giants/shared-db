@@ -1,27 +1,26 @@
 {
-
   "schema_version": 1,
   "work_issue": 2493,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Recover inherited PR2526 under enforced contract governance, preserving its four-file implementation and adding six-kind helper and role runtime tests. This records prospective recovery authority; original implementation predates publication.",
-  "base_sha": "4f093e3d4c97e4272d147d38e7243ec57d3c08f1",
-  "dispatcher": "shared-db-orchestrator/2536",
-  "worker": "codex-orch-2517-issue-2493",
+  "base_sha": "71dca7b3deae7eea2ab0c2e47a320e1291dc0580",
+  "dispatcher": "codex shared-db orchestrator marker2714",
+  "worker": "codex finish_2493 successor",
   "branch": "codex/issue-2493-source-resolution-new-kinds",
-  "worktree": "/tmp/shared-db-orch-2517-2493",
+  "worktree": "C:/repos/shared-db-worktrees/finish-2493-2714",
   "allowed_paths": [
-    "scripts/production-verification-sidecars/20260907154543.json",
+    "scripts/production-verification-sidecars/20260910223341.json",
     "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/migrations/20260910223341_source_resolution_new_kind_read_parity.sql",
     "supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "scripts/production-verification-sidecars/20260907154543.json",
+    "scripts/production-verification-sidecars/20260910223341.json",
     "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260907154543_source_resolution_new_kind_read_parity.sql",
+    "supabase/migrations/20260910223341_source_resolution_new_kind_read_parity.sql",
     "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "db_reads": [
@@ -43,7 +42,7 @@
     "Do not edit applied migration bytes.",
     "Do not rewrite or retire either existing setter or five-argument helper.",
     "No production or preview writes outside governed coordinator gates.",
-    "No push during the coordinator hold."
+    "No merge or preview/production write by worker; parent orchestrator serializes those stages."
   ],
   "required_checks": [
     "git diff --check",
@@ -52,12 +51,13 @@
   ],
   "assumptions": [
     "Inherited implementation and earlier test patch predate this recovery contract; no retrospective publication claim.",
-    "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record."
+    "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record.",
+    "Generation2 binds existing predecessor supersession to20260910223341 and current-main reconciliation. SQL hash unchanged. Current hosted CI and one governed exact-head reviewer required."
   ],
   "stop_conditions": [
     "Stop if migration bytes or setter definitions change.",
     "Stop if test assertions fail.",
     "Stop if scope extends beyond the four implementation files."
   ],
-  "generation": 1
+  "generation": 2
 }
