@@ -1,33 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2759,
+  "work_issue": 2703,
   "outcome": "ready-for-merge",
-  "pr": 2760,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2759/1",
-  "contract_sha256": "915f615a7aa3e69b1c1067a6d806983bb20cf73c253357d278aa608d11d5df18",
-  "head_sha": "443f8254cbdd138c65befcc3cdc90a6262e4e5d5",
+  "pr": 2740,
+  "migration_versions": [
+    "20260911061539"
+  ],
+  "contract_ref": "refs/db-contracts/2703/6",
+  "contract_sha256": "89e5ad2bb883f83f248226b378df039b9836eb1877df7ecbc8e53f8bae509919",
+  "head_sha": "bb8dcce7440e323e5dc2097778539d2d92a106cd",
   "files_changed": [
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
+    "docs/business-rules/licensing-master-data.md",
+    "supabase/migrations/20260911061539_opa_route_compliance.sql",
+    "supabase/tests/opa_route_compliance_contracts.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "column plm.opa_property_scope_membership.compliance_status",
+    "function api.db_data_admin_scraped_properties",
+    "function plm.finalize_opa_property_compliance_capture",
+    "function plm.guard_opa_property_compliance_capture",
+    "function plm.guard_opa_property_compliance_membership",
+    "index plm.opa_compliance_capture_route_time_idx",
+    "index plm.opa_compliance_membership_capture_idx",
+    "table plm.opa_property_compliance_capture",
+    "table plm.opa_property_current_compliance",
+    "table plm.opa_property_scope_membership",
+    "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
+    "trigger opa_compliance_capture_truncate_guard on plm.opa_property_compliance_capture",
+    "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
+    "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
+    "view plm.opa_property_current_compliance"
+  ],
   "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards passed. No local disposable database configured; PR database CI remains required."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors between base 5eaebe7c and implementation head 443f8254."
-    },
-    {
-      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
-      "exit_code": 0,
-      "evidence": "48 tests passed, 0 failed, 0 skipped at 443f8254."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "The exemption is filtered against the mirror, so a required context of the same name would still be enforced."
+    "Exact route/account latest approved complete explicit observations define current rights; retained source identity is separate.",
+    "Private loader contract requires reviewed companion route/authentication proof; no rows loaded.",
+    "Final database CI and independent review remain required; production timeout investigation remains open before final review.",
+    "Initial database replay34569988648 passed; supported claim expansions account for GRANT view/table alias, column comment and explicit capture truncate guard."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
+  "stop_conditions_hit": []
 }

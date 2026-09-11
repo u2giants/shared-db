@@ -1,42 +1,65 @@
 {
   "schema_version": 1,
-  "work_issue": 2759,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Exempt the non-required Documents-only merge authorization routing diagnostic from the guarded-merge committed-mirror preflight so code pull requests can merge again.",
-  "base_sha": "5eaebe7c09683aef77bdef92aec454af5dddf2cb",
-  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
-  "worker": "Claude process-unblocking sub-agent of marker 2758",
-  "branch": "claude/fix-2759-docs-diagnostic-blocks-merge",
-  "worktree": "C:/repos/shared-db-worktrees/pr-2760",
+  "generation": 6,
+  "work_issue": 2703,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Preserve explicit route/account OPA compliance observations, admit only newest approved complete evidence as current rights, and retain historical source identity and visibility.",
+  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
+  "dispatcher": "Claude orchestrator #2758",
+  "worker": "claude-2758-2703",
+  "branch": "codex/issue-2703",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2703",
   "allowed_paths": [
+    "supabase/migrations/20260911061539_opa_route_compliance.sql",
+    "supabase/tests/opa_route_compliance_contracts.sql",
+    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
+    "docs/business-rules/licensing-master-data.md",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+    ".agent/completion.json"
   ],
   "file_writes": [
+    "supabase/migrations/20260911061539_opa_route_compliance.sql",
+    "supabase/tests/opa_route_compliance_contracts.sql",
+    "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
+    "docs/business-rules/licensing-master-data.md",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/check-required-checks-preflight.mjs",
-    "scripts/check-required-checks-preflight.test.mjs"
+    ".agent/completion.json"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "column plm.opa_property_scope_membership.compliance_status",
+    "function api.db_data_admin_scraped_properties",
+    "function plm.finalize_opa_property_compliance_capture",
+    "function plm.guard_opa_property_compliance_capture",
+    "function plm.guard_opa_property_compliance_membership",
+    "index plm.opa_compliance_capture_route_time_idx",
+    "index plm.opa_compliance_membership_capture_idx",
+    "table plm.opa_property_compliance_capture",
+    "table plm.opa_property_current_compliance",
+    "table plm.opa_property_scope_membership",
+    "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
+    "trigger opa_compliance_capture_truncate_guard on plm.opa_property_compliance_capture",
+    "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
+    "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
+    "view plm.opa_property_current_compliance"
+  ],
   "prohibited_actions": [
-    "Do not modify a migration or any database state.",
-    "Do not exempt any context that appears in the required-checks mirror.",
-    "Do not claim an author lane, preview, or production lane."
+    "No shared database writes by worker; parent merges and promotes.",
+    "No private source row loads, private rows in public artifacts, or invented route/account evidence.",
+    "Preserve2706/2579 source arms, authentication, historical mappings and signed studio identity."
   ],
   "required_checks": [
-    "git diff --check",
-    "node --test scripts/check-required-checks-preflight.test.mjs"
+    "bash scripts/check-sql.sh",
+    "git diff --check"
   ],
   "assumptions": [
-    "Documents-only merge authorization is a routing diagnostic and is not a required status context in branch protection or the committed mirror."
+    "Current rights require explicit compliant observation in newest approved complete capture for exact Property, route and account.",
+    "Absence is not deletion or deactivation; legacy is unknown.",
+    "Private companion route/auth binding is a loader prerequisite."
   ],
   "stop_conditions": [
-    "Stop if implementation requires a database or production write.",
-    "Stop if the exemption would cover a context present in the required-checks mirror."
+    "Exact object collision.",
+    "Regression in source visibility, append-only evidence, source identity or authorization."
   ]
 }
