@@ -1,35 +1,78 @@
 {
   "schema_version": 1,
-  "work_issue": 2789,
+  "work_issue": 2785,
   "outcome": "ready-for-merge",
-  "pr": 2790,
+  "pr": 2786,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2789/2",
-  "contract_sha256": "a0e3ea60de66ae26f74b55bdc64225506ac3bdbdf62b821180c9032fafd33e19",
-  "head_sha": "0f762cdac47f2f91452aa112ed05ef043c3ce266",
+  "contract_ref": "refs/db-contracts/2785/4",
+  "contract_sha256": "6a0b917ab5090675eac198904e26eacacc293505b192ba09a119c9bb303372c5",
+  "head_sha": "58c8cab9a1b577b1d4be2439e67311aa73be548f",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
+    ".github/workflows/business-rule-library.yml",
+    ".github/workflows/documents-only-merge-authorization.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    ".github/workflows/orchestrator-marker-guard.yml",
+    ".github/workflows/pr-object-collision.yml",
     ".github/workflows/shared-supabase-migrations.yml",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/test_production_review_source_pr_preflight.py"
+    ".github/workflows/task-gates.yml",
+    "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
+    "scripts/check-actions-quota.mjs",
+    "scripts/check-actions-quota.test.mjs",
+    "scripts/check-dispatch-collision.test.mjs",
+    "scripts/check-pr-object-collisions.mjs",
+    "scripts/check-pr-source-collisions.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-transport.test.mjs",
+    "scripts/lib/open-pr-files.mjs",
+    "scripts/lib/open-pr-files.test.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "python -m unittest scripts/test_production_review_source_pr_preflight.py",
+      "command": "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
       "exit_code": 0,
-      "evidence": "Ran 5 tests, OK. The same test against origin/main 5761bc5e's workflow fails 5/5 (step absent). Full scripts/test_*.py: Ran 943 tests, OK (skipped=8)."
+      "evidence": "663 tests, 663 pass, 0 fail, 0 skipped after merging main 25c4ca3b. Includes: with no opt-in a rate-limit 403 fails after one call with no wait or probe; an opted-in read waits 301 s then succeeds; other 403s fail after one call; every open PR gets the changed_files proof and a short truncated list is refused; the quota preflight never waits with the cap unset, 0, or shorter than the reset."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_business_risk_gate",
+      "exit_code": 0,
+      "evidence": "Ran 141 tests, OK, after merging main 25c4ca3b."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors in the diff from main 25c4ca3b to the head."
+    },
+    {
+      "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "12 tests, 12 pass, 0 fail."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=276 at 0f762cda; one new site (the new step's name line) recorded with a substantive disposition, no existing site changed."
+      "evidence": "truth audit OK: call_sites=276 (main 25c4ca3b added one site in #2789)."
+    },
+    {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "216 files scanned; every GitHub call goes through the governed transport."
     }
   ],
   "assumptions_resolved": [
-    "Confirmed: the new step reads only inputs.source_pr and the activation file, and sits after Verify exact main commit and before the first secrets use in the review job; the later test -n checks in both production jobs are unchanged."
+    "Only primary quota exhaustion (403/429 with remaining 0) can wait, at most 15 minutes, only for reads, and only when the step opted in with GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS; secondary limits and other 403s still fail immediately.",
+    "The wait is opt-in, so every lock-holding step (merge lane, author mutex, production lane, including unedited steps) fails fast exactly as on main.",
+    "The dispatch collision check proves changed_files for every open PR, unchanged from main.",
+    "The shared open-PR snapshot keeps every completeness proof and is bound to repo, PR number and schema; a mismatch fails closed.",
+    "No database reads or writes.",
+    "The lanes script change (list issues once) was moved to follow-up #2787 to clear the protected-source collision; the lanes script is unchanged here."
   ],
   "stop_conditions_hit": []
 }

@@ -1,42 +1,90 @@
 {
   "schema_version": 1,
-  "work_issue": 2789,
-  "generation": 2,
-  "work_type": "tooling",
-  "route": "shared-db-orchestrator",
-  "goal": "Make the production apply review refuse a missing or non-numeric source_pr by name, before any production credential is used, whenever the automatic risk policy is active, without relaxing, removing or reordering any existing guard.",
-  "base_sha": "5761bc5e8763817c6deb722cac627f8924b5baaf",
-  "dispatcher": "Albert Hazan (owner request in chat)",
-  "worker": "Claude production-review source-pr worker",
-  "branch": "claude/production-review-source-pr",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/jovial-moore-5fd4c8",
+  "work_issue": 2785,
+  "generation": 4,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Cut GitHub Actions installation API quota use so production applies stop failing at about ten active PRs, without weakening any safety check or changing which collisions are found.",
+  "base_sha": "25c4ca3ba4e50aea22a44fac8116b9e391d9b787",
+  "dispatcher": "Claude coordinator session",
+  "worker": "Claude api-quota-reduction worker",
+  "branch": "claude/api-quota-reduction",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
+    ".github/workflows/business-rule-library.yml",
+    ".github/workflows/documents-only-merge-authorization.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    ".github/workflows/orchestrator-marker-guard.yml",
+    ".github/workflows/pr-object-collision.yml",
     ".github/workflows/shared-supabase-migrations.yml",
-    "scripts/test_production_review_source_pr_preflight.py",
-    "docs/verification/throughput-guard-truth-audit-20260828.json"
+    ".github/workflows/task-gates.yml",
+    "scripts/check-actions-quota.mjs",
+    "scripts/check-actions-quota.test.mjs",
+    "scripts/check-dispatch-collision.mjs",
+    "scripts/check-dispatch-collision.test.mjs",
+    "scripts/check-pr-object-collisions.mjs",
+    "scripts/check-pr-source-collisions.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-transport.test.mjs",
+    "scripts/lib/open-pr-files.mjs",
+    "scripts/lib/open-pr-files.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
+    ".github/workflows/business-rule-library.yml",
+    ".github/workflows/documents-only-merge-authorization.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    ".github/workflows/orchestrator-marker-guard.yml",
+    ".github/workflows/pr-object-collision.yml",
     ".github/workflows/shared-supabase-migrations.yml",
-    "scripts/test_production_review_source_pr_preflight.py",
-    "docs/verification/throughput-guard-truth-audit-20260828.json"
+    ".github/workflows/task-gates.yml",
+    "scripts/check-actions-quota.mjs",
+    "scripts/check-actions-quota.test.mjs",
+    "scripts/check-dispatch-collision.mjs",
+    "scripts/check-dispatch-collision.test.mjs",
+    "scripts/check-pr-object-collisions.mjs",
+    "scripts/check-pr-source-collisions.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-transport.test.mjs",
+    "scripts/lib/open-pr-files.mjs",
+    "scripts/lib/open-pr-files.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "No shared database reads or writes, no production or preview apply or workflow dispatch, no migration files, no removal or weakening of any existing guard or check, no fabricated reviews."
+    "No database reads or writes, no production infrastructure changes, no weakening of any collision, lease, lock or production safety check.",
+    "No quota wait while holding the merge or production lane."
   ],
   "required_checks": [
-    "python -m unittest scripts/test_production_review_source_pr_preflight.py"
+    "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
+    "python -m unittest scripts.test_production_business_risk_gate",
+    "git diff --check",
+    "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs"
   ],
   "assumptions": [
-    "source_pr is required whenever the automatic policy is active; preview inputs may become conditional (open PR #2771), so only source_pr is checked early."
+    "Quota exhaustion is the primary rate limit (403/429 with remaining 0); secondary limits and other 403s must keep failing immediately.",
+    "The shared open-PR file snapshot proves completeness exactly as each check did before.",
+    "The GitHub quota wait is opt-in: unset means no wait, and only steps that hold no lock set GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS.",
+    "The dispatch collision check proves changed_files for every open PR, unchanged from main."
   ],
   "stop_conditions": [
-    "Any required check fails.",
-    "The fix would need to remove, weaken or reorder an existing guard."
+    "Any collision test finds a different set of conflicts than the previous algorithm.",
+    "Any safety check would need to be relaxed to reduce quota use."
   ]
 }
