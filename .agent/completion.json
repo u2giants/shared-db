@@ -1,59 +1,42 @@
 {
   "schema_version": 1,
-  "work_issue": 2493,
+  "work_issue": 2706,
   "outcome": "ready-for-merge",
-  "pr": 2526,
+  "pr": 2721,
   "migration_versions": [
-    "20260911045438"
+    "20260911050646"
   ],
-  "contract_ref": "refs/db-contracts/2493/3",
-  "contract_sha256": "c39be8af16a8dd521e2565d1d065d9850dae47d407387fd1f9397402541b579e",
-  "head_sha": "3ddbf9eff36d3d8941944218b659249e892e2616",
+  "contract_ref": "refs/db-contracts/2706/5",
+  "contract_sha256": "564e86502d6b893b2ccb92c55378eb0eb2ca5eb5a6aba5bd739af6f7b187a28f",
+  "head_sha": "aabfe17f29903976662ebdaf652f1da8d7a8e4a7",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/production-verification-sidecars/20260911045438.json",
-    "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
-    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
+    "supabase/migrations/20260911050646_dcp_stable_identity_presentation.sql",
+    "supabase/tests/dcp_stable_identity_presentation_contracts.sql"
   ],
-  "db_reads": [
-    "table core.property",
-    "table core.character",
-    "table core.style_guide",
-    "table dam.asset",
-    "table core.licensor",
-    "table core.franchise",
-    "table plm.source_resolution",
-    "function plm.set_source_resolution",
-    "function api.set_source_resolution"
-  ],
+  "db_reads": [],
   "db_writes": [
-    "function plm.source_resolution_target_missing",
-    "view api.source_resolution"
+    "function api.db_data_admin_scraped_properties"
   ],
   "checks": [
     {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL, expected-count, verify-cost and EOL guards passed. No disposable local database was configured; SQL behaviour is covered by the PR ephemeral-database workflow, which remains required."
+    },
+    {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors after normal integration of current main fe5fa74db889652768029116e636f8cbe69b955e."
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs",
-      "exit_code": 0,
-      "evidence": "Hash-bound sidecar validation succeeded: status OK, 45 sidecars."
-    },
-    {
-      "command": "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
-      "exit_code": 0,
-      "evidence": "Retained synthetic PostgreSQL 17 container database case2493runtime; all assertions passed at line 653 and rolled back, including five/seven-argument helper behavior, ten/twelve-argument setter compatibility, six-kind existing/missing/null targets, authenticated reads, dangling visibility, and anonymous denial."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "Inherited implementation retained; original work predates recovery contract publication.",
-    "Migration SHA256 remains 7cff10dcf68d2ba8993201790e8c276d517fd2410efa049e3e2026504abf6c50 after current-main integration.",
-    "Implementation is ready for coordinator review gates; independent exact-head review, fresh CI, preview and production/consumer acceptance remain pending and are not asserted by this report."
+    "Production function read after #2579 includes new source groups, all retained verbatim.",
+    "Presentation authority now uses latest terminal per copy and stable dcpvault identity across copies; pending proposals cannot hide mapped authority.",
+    "Member disagreement and conflicting signed studio assertions retain conflict treatment; non-authoritative Marvel tags remain raw evidence.",
+    "Preserved independent twentieth source presentation; regression tests now cover member-equivalent signed studio preservation and conflicting studio assertions. Final current-main review and ephemeral tests remain required.",
+    "Database workflow34565404888 passed169 test files with zero nonquarantined failures; twelve existing quarantined failures retained. Final main refresh adds no change to this function."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Historical runtime evidence retained. Final reconciliation incorporates main f3eff56d and supported version supersession; SQL bytes remain unchanged. Fresh CI and one independent exact-head review required."
+  "stop_conditions_hit": []
 }
