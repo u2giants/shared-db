@@ -1,46 +1,59 @@
 {
   "schema_version": 1,
-  "work_issue": 2766,
+  "work_issue": 2662,
   "outcome": "ready-for-merge",
-  "pr": 2767,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2766/7",
-  "contract_sha256": "c7325f650f6ec0e781929f0a35bc6ea8895a7c421698971675d8bec5345074da",
-  "head_sha": "97c6251d39e651c075c5983a84867c2a888a3ab3",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/agents/section-4-anti-collision-rules.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+  "pr": 2764,
+  "migration_versions": [
+    "20260911124746"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2662/6",
+  "contract_sha256": "d147d233f14733d214884880d2bbe10fac7dcc0703b00ba75a080a43ec6dcde4",
+  "head_sha": "439cc01bc1f07a5b5a2fa8fb4073e663c364ef23",
+  "files_changed": [
+    "supabase/migrations/20260911124746_crm_definer_views_caller_gate.sql",
+    "supabase/tests/crm_definer_views_caller_gate_contracts.sql"
+  ],
+  "db_reads": [
+    "table core.customer",
+    "table crm.ingested_domain",
+    "table plm.customer_import",
+    "table app.app_access",
+    "table app.profile",
+    "view api.crm_contact_list",
+    "table core.contact",
+    "table public.sku_files_used",
+    "table public.style_guide_files",
+    "table public.style_groups"
+  ],
+  "db_writes": [
+    "view api.crm_customer_list",
+    "view api.crm_account_list",
+    "view api.crm_ingested_domain_list",
+    "view api.crm_contact_segment_list",
+    "view api.crm_contact_segment_counts",
+    "view public.sg_archive_usage"
+  ],
   "checks": [
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors on 9b02ad48..439cc01b."
     },
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "524 tests passed, 0 failed, 0 skipped."
+      "evidence": "Static checks passed on 439cc01b."
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=275"
-    },
-    {
-      "command": "node scripts/check-github-transport-conformance.mjs",
-      "exit_code": 0,
-      "evidence": "212 files scanned, all calls governed."
+      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on commit a4848fde (run 34617412771, job 103322678124), whose supabase files are byte-identical to implementation commit 439cc01b; it applied every migration, including the base-table policy and contact-gate assertions, and ran supabase/tests/crm_definer_views_caller_gate_contracts.sql with non-zero contact and archive fixtures as the authenticated role."
     }
   ],
   "assumptions_resolved": [
-    "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
+    "App consumer search across popcrm-web, popdam3, poppim-web, dflow_plm and edge functions found only popcrm-web authenticated browser reads of the changed views; no service-role consumer.",
+    "Read-only preview baseline: CRM callers with and without a role read 862/862/96 customer/account/domain rows; a DAM-only caller also read 862/862/96, which is the leak closed here."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Rebased on main dae160a0; mutex retry spaced at five minutes per owner rate-limit rule. Muse REVISE on 5ecafd35 addressed in 451575a5 (stale eight-lane wording, non-mutex zero-wait test). Ready for exact-head review, required CI, and guarded merge."
+  "evidence_note": "Implementation 439cc01b on main 9b02ad48 (supabase files identical to a4848fde) addresses the REVISE on 4a262c06 (refs/db-review-verdicts/2662-2764-4a262c06b52ea83e9912e4a8edf8db4464aec7ca): base-table grant and open-policy guard for sg_archive_usage, definer and gate guard on api.crm_contact_list, OR rejection on gated view text, non-vacuous contact and archive fixtures. Contract generation 6 declares the added reads. Diff check, static SQL checks and the hosted ephemeral suite all exit 0."
 }
