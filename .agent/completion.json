@@ -6,10 +6,10 @@
   "migration_versions": [
     "20260911210844"
   ],
-  "contract_ref": "refs/db-contracts/2482/11",
-  "contract_sha256": "d42a4b0dcb0381b7b24c2515266ab6982f1af66c2f596b8b0cb55d50d4fe349a",
-  "head_sha": "ab7a1f04d1aa80c9db1e3ac5ec37bcfe0d48b90c",
-  "evidence_note": "Implementation head ab7a1f04 (contract generation 11) merges main f938f36f into the earlier reviewed head 3b2c0ca8 (main touched none of its files) and then renames the migration to the re-reserved version 20260911210844 because main added the later 20260911203057; the file content is unchanged and uses reserved version 20260911210844 from claim #2778 (re-reserved from 20260911150805, then 20260911184026 after main passed it). It was rebuilt after main moved and then revised for governed review findings: the migration now locks both retiring tables before the frozen copy, and the dependency guard also covers write statements, quoted identifiers, RLS policies and publications. Read-only production proof: the only dependents of public.erp_items_current were api.plm_item_list, the bridge legacy FK, plm.refresh_style_tracker_item_bridge and public.resolve_product_category_prediction_item_identity; the widened guard query on production matched only those two routines, with no policies, publications or cron jobs, and PopDAM app code has no references. The committed function bodies are md5-identical to production and change only the table reference. The view rewritten against the crosswalk returned 19,362 rows with md5 7f214c4a3178143a41d2741c8cad677a, identical to the live view. Nothing is dropped: both legacy tables move to a revoked archive schema. The following evidence-only commit changes only .agent/completion.json and .agent/contract.json (whitespace).",
+  "contract_ref": "refs/db-contracts/2482/12",
+  "contract_sha256": "2ae0a120980b63101cf8219ea8ad993f9b4dafa77439a6a20345fd91a9237e79",
+  "head_sha": "3eb35d9360b730555aff0ac0f3fd97a885d9c8f5",
+  "evidence_note": "Implementation head 3eb35d93 (contract generation 12) merges main 72c299b8 into reviewed head 3f784ba7 (muse APPROVE; main touched none of its files and adds no later migration version). That head merged main f938f36f into the earlier reviewed head 3b2c0ca8 and then renamed the migration to the re-reserved version 20260911210844 because main added the later 20260911203057; the file content is unchanged and uses reserved version 20260911210844 from claim #2778 (re-reserved from 20260911150805, then 20260911184026 after main passed it). It was rebuilt after main moved and then revised for governed review findings: the migration now locks both retiring tables before the frozen copy, and the dependency guard also covers write statements, quoted identifiers, RLS policies and publications. Read-only production proof: the only dependents of public.erp_items_current were api.plm_item_list, the bridge legacy FK, plm.refresh_style_tracker_item_bridge and public.resolve_product_category_prediction_item_identity; the widened guard query on production matched only those two routines, with no policies, publications or cron jobs, and PopDAM app code has no references. The committed function bodies are md5-identical to production and change only the table reference. The view rewritten against the crosswalk returned 19,362 rows with md5 7f214c4a3178143a41d2741c8cad677a, identical to the live view. Nothing is dropped: both legacy tables move to a revoked archive schema. The following evidence-only commit changes only .agent/completion.json and .agent/contract.json (whitespace).",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -47,7 +47,7 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed on ab7a1f04. Guard B2 disclosed no live-ledger source was configured locally, so no database clearance is claimed from this run."
+      "evidence": "Static checks passed on 3eb35d93. Guard B2 disclosed no live-ledger source was configured locally, so no database clearance is claimed from this run."
     },
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
@@ -67,12 +67,12 @@
     {
       "command": "supabase/tests/erp_items_retirement_contracts.sql on a disposable database",
       "exit_code": 0,
-      "evidence": "Not run locally (no disposable Supabase stack on this machine). Executed in CI from an empty database at exact implementation head ab7a1f04d1aa80c9db1e3ac5ec37bcfe0d48b90c: Database Contract Tests https://github.com/u2giants/shared-db/actions/runs/34647925149 completed success. The focused contract covers the archive move and revokes, no remaining view/FK/routine dependents, repointed readers, FK dropped with column kept, the 21-column contract and legacy UUID resolution with a control."
+      "evidence": "Not run locally (no disposable Supabase stack on this machine). Executed in CI from an empty database at exact implementation head 3eb35d9360b730555aff0ac0f3fd97a885d9c8f5: Database Contract Tests https://github.com/u2giants/shared-db/actions/runs/34649206964 completed success. The focused contract covers the archive move and revokes, no remaining view/FK/routine dependents, repointed readers, FK dropped with column kept, the 21-column contract and legacy UUID resolution with a control."
     },
     {
       "command": "Database Contract Tests CI from empty",
       "exit_code": 0,
-      "evidence": "https://github.com/u2giants/shared-db/actions/runs/34647925149 at exact implementation head ab7a1f04d1aa80c9db1e3ac5ec37bcfe0d48b90c: completed success, replaying all migrations from empty (including the lock and widened dependency guard) and running every supabase/tests file including erp_items_retirement_contracts.sql."
+      "evidence": "https://github.com/u2giants/shared-db/actions/runs/34649206964 at exact implementation head 3eb35d9360b730555aff0ac0f3fd97a885d9c8f5: completed success, replaying all migrations from empty (including the lock and widened dependency guard) and running every supabase/tests file including erp_items_retirement_contracts.sql."
     }
   ],
   "assumptions_resolved": [
