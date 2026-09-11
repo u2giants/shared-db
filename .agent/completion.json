@@ -4,10 +4,12 @@
   "outcome": "ready-for-merge",
   "pr": 2810,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2809/1",
-  "contract_sha256": "26023b2615ca3511465c94d4c7100bc0a30dade14a2b746b6f3c70f4b260b504",
-  "head_sha": "d057ee689de0e352be022d9637de5efa4174fd93",
+  "contract_ref": "refs/db-contracts/2809/2",
+  "contract_sha256": "5f51ba833eb9a5a2a3b6c5dfc73a3d9f16e3562b5f6064fd56f41c174514b798",
+  "head_sha": "215bd87d8f5aea8c16ad488dcb08c073790a5823",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/production_migration_guard.py",
     "scripts/test_production_migration_guard.py"
@@ -18,12 +20,12 @@
     {
       "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "243 tests passed, 0 failures, on the tree merged with main 26d9345b. Suite went 241 to 243: the two added cases are the archive-a-table case that now passes preflight, and the negative control proving the OLD name after a move is still refused with 'DROPPED (or renamed away) by 20260102000000'."
+      "evidence": "243 tests passed, 0 failures, on the tree merged with main 485a0ba5. Suite went 241 to 243: the two added cases are the archive-a-table case that now passes preflight, and the negative control proving the OLD name after a move is still refused with 'DROPPED (or renamed away) by 20260102000000'."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=277. The one new site is the explanatory comment at scripts/production_migration_guard.py:1969, registered as excluded because it is prose quoting the refusal text rather than a detection site."
+      "evidence": "truth audit OK: call_sites=278 on the tree merged with main 485a0ba5. Two sites were added from a shared base of 276 by two lanes independently, so each side read 277; the merged inventory holds both entries. The count and digest were recomputed from the checker's own discover() inventory rather than hand-edited. This lane's site is the explanatory comment at scripts/production_migration_guard.py:1969, registered as excluded because it is prose quoting the refusal text rather than a detection site."
     },
     {
       "command": "git diff --check",
