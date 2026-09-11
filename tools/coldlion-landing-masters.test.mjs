@@ -83,7 +83,7 @@ test("unknown fields fail loudly before projection",()=>{
   assert.throws(()=>projectCurrentRows(MASTER_SPECS.vendor,[sourceFor(MASTER_SPECS.vendor,{newPrivateField:"x"})],{runId:RUN,fetchedAt:NOW}),/unreviewed field/);
 });
 
-test("current rows normalize sentinels, hash approved projections, dedupe replay, and exclude EP001",()=>{
+test("current rows normalize sentinels, hash complete records, dedupe replay, and exclude EP001",()=>{
   const spec=MASTER_SPECS.season;
   const good=sourceFor(spec,{companyCode:"SYNCO",divisionCode:"SD001",seasonCode:"S1",createdTime:"1900-01-01"});
   const excluded=sourceFor(spec,{companyCode:"SYNCO",divisionCode:"EP001",seasonCode:"S2"});
@@ -109,8 +109,8 @@ test("generated SQL is a re-runnable upsert, reconciles cleared slots, and never
   const order=["division","customer","vendor","salesperson","season","merch_group_header","merch_group_detail","item_header","item_detail"];
   const loads=order.map((table)=>{ const spec=MASTER_SPECS[table]??ITEM_SPECS[table]; const source=sourceFor(spec); const rows=projectCurrentRows(spec,[source],{runId:RUN,fetchedAt:NOW}).rows; return {table,spec,rows,run:{id:RUN,endpoint:spec.endpoint,companyCode:"SYNCO",requestParams:{fullSnapshot:true},requestedBy:"test",startedAt:NOW,finishedAt:NOW,durationMs:0,rowsFetched:1}}; });
   const source=sourceFor(ITEM_SPECS.item_header,{companyCode:"SYNCO",divisionCode:"SD001",itemNo:"ITEM-A"});
-  const sql=buildMasterLoadSql({loads,itemSlots:projectItemSlots([source],{runId:RUN,fetchedAt:NOW}),affectedItemGrains:[{company_code:"SYNCO",division_code:"SD001",item_no:"ITEM-A",item_pkey:null}]});
-  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/approved landing projection/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
+  const sql=buildMasterLoadSql({loads,itemSlots:projectItemSlots([source],{runId:RUN,fetchedAt:NOW}),affectedItemGrains:[{company_code:"SYNCO",division_code:"SD001",item_no:"ITEM-A",item_pkey:null,run_id:RUN}]});
+  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/complete fetched record; declined values not retained/i); assert.match(sql,/absent from current source snapshot/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
 });
 
 test("an empty item snapshot still generates valid reconciliation SQL",()=>{
@@ -159,13 +159,13 @@ test("identical repeated source items cannot create duplicate slot conflict keys
   assert.equal(slots.length,2); assert.equal(dedupeSlots(slots).length,1);
 });
 
-test("declined field changes do not alter the approved projection hash",()=>{
+test("declined field changes remain observable through the complete-record hash",()=>{
   const spec=MASTER_SPECS.vendor;
   const a=sourceFor(spec,{companyCode:"SYNCO",vendorCode:"V1",address1:"private-a"});
   const b={...a,address1:"private-b"};
   const first=projectCurrentRows(spec,[a],{runId:RUN,fetchedAt:NOW}).rows[0];
   const second=projectCurrentRows(spec,[b],{runId:RUN,fetchedAt:NOW}).rows[0];
-  assert.equal(first.source_hash,second.source_hash);
+  assert.notEqual(first.source_hash,second.source_hash);
 });
 
 test("workflow is the sole live path and runs masters before history",()=>{

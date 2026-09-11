@@ -28,9 +28,9 @@ export function projectCurrentRows(spec, sourceRows, { runId, fetchedAt, exclude
     if (text(source.divisionCode) === excludeDivision) { excluded += 1; continue; }
     const row = {};
     for (const field of spec.fields) row[field.column] = converters[field.type](source[field.api]);
-    // Declined fields are shape-checked but neither stored nor allowed to create
-    // a change event. The durable hash covers exactly the approved projection.
-    row.source_hash = sourceHash(Object.fromEntries(spec.fields.map((field) => [field.column, row[field.column]])));
+    // The schema contract requires a complete-record hash before projection so
+    // changes to declined fields remain detectable without retaining their values.
+    row.source_hash = sourceHash(source);
     row.run_id = runId;
     row.fetched_at = fetchedAt;
     const key = spec.key.map((column) => row[column] ?? "").join("\u001f");

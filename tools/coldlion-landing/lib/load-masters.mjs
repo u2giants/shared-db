@@ -26,7 +26,7 @@ function currentTableSql(table, spec, rows) {
   const naturalKey = `jsonb_build_object(${keys.flatMap((key) => [sqlText(key), `s.${key}`]).join(", ")})`;
   const projected = `(to_jsonb(s) - array['run_id','fetched_at']::text[])`;
   const previous = `(to_jsonb(t) - array['run_id','fetched_at','first_seen_at','last_seen_at']::text[])`;
-  const auditProjection = `${projected} || jsonb_build_object('_source_hash_scope', 'approved landing projection')`;
+  const auditProjection = `${projected} || jsonb_build_object('_source_hash_scope', 'complete fetched record; declined values not retained')`;
   const updates = [...data.filter((c) => !keys.includes(c)).map((c) => `${c} = excluded.${c}`), "run_id = excluded.run_id", "fetched_at = excluded.fetched_at", "source_hash = excluded.source_hash", "last_seen_at = excluded.last_seen_at"].join(",\n      ");
   return `${stageSql(stage, spec, rows)}
 create temp table _counts_${table} as
@@ -60,11 +60,31 @@ function slotStageSql(rows) {
 }
 
 function itemSlotSql(rows, affected) {
-  const affectedValues = affected.map((r) => `  (${sqlText(r.company_code)}, ${sqlText(r.division_code)}, ${sqlText(r.item_no)}, ${sqlText(r.item_pkey)})`).join(",\n");
+  const affectedValues = affected.map((r) => `  (${sqlText(r.company_code)}, ${sqlText(r.division_code)}, ${sqlText(r.item_no)}, ${sqlText(r.item_pkey)}, ${sqlUuid(r.run_id)})`).join(",\n");
   const affectedInsert = affected.length === 0 ? "" : `insert into _affected_item_grains values\n${affectedValues};`;
   return `${slotStageSql(rows)}
-create temp table _affected_item_grains (company_code text, division_code text, item_no text, item_pkey text) on commit drop;
+create temp table _affected_item_grains (company_code text, division_code text, item_no text, item_pkey text, run_id uuid) on commit drop;
 ${affectedInsert}
+
+insert into coldlion.change_log
+  (table_name,natural_key,change_kind,previous_source_hash,new_source_hash,previous_raw,new_raw,run_id)
+select 'item_merch_group', jsonb_build_object('company_code',s.company_code,'division_code',s.division_code,'item_no',s.item_no,'item_pkey',s.item_pkey,'slot_no',s.slot_no),
+       case when t.company_code is null then 'inserted' else 'updated' end, t.source_hash, s.source_hash,
+       case when t.company_code is null then null else to_jsonb(t)-array['run_id','fetched_at','first_seen_at','last_seen_at']::text[] end,
+       to_jsonb(s)-array['run_id','fetched_at']::text[], s.run_id
+  from _stage_item_merch_group s
+  left join coldlion.item_merch_group t on t.company_code=s.company_code and t.division_code=s.division_code and t.item_no=s.item_no and t.item_pkey is not distinct from s.item_pkey and t.slot_no=s.slot_no
+ where t.company_code is null or t.source_hash<>s.source_hash;
+
+insert into coldlion.change_log
+  (table_name,natural_key,change_kind,previous_source_hash,new_source_hash,previous_raw,new_raw,run_id)
+select 'item_merch_group', jsonb_build_object('company_code',t.company_code,'division_code',t.division_code,'item_no',t.item_no,'item_pkey',t.item_pkey,'slot_no',t.slot_no),
+       'updated', t.source_hash, encode(digest('absent from current source snapshot','sha256'),'hex'),
+       to_jsonb(t)-array['run_id','fetched_at','first_seen_at','last_seen_at']::text[],
+       jsonb_build_object('_state','absent from current source snapshot'), a.run_id
+  from coldlion.item_merch_group t join _affected_item_grains a
+    on t.company_code=a.company_code and t.division_code=a.division_code and t.item_no=a.item_no and t.item_pkey is not distinct from a.item_pkey
+ where not exists (select 1 from _stage_item_merch_group s where s.company_code=t.company_code and s.division_code=t.division_code and s.item_no=t.item_no and s.item_pkey is not distinct from t.item_pkey and s.slot_no=t.slot_no);
 
 delete from coldlion.item_merch_group t
  using _affected_item_grains a

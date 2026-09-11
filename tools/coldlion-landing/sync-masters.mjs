@@ -77,8 +77,8 @@ export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOp
     ...projectItemSlots(source.item_detail, { runId: byTable.item_detail.run.id, fetchedAt: finishedAt, itemPkey: "source" }),
   ]);
   const affectedItemGrains = [
-    ...byTable.item_header.rows.map((r)=>({company_code:r.company_code,division_code:r.division_code,item_no:r.item_no,item_pkey:null})),
-    ...byTable.item_detail.rows.map((r)=>({company_code:r.company_code,division_code:r.division_code,item_no:r.item_no,item_pkey:r.item_pkey})),
+    ...byTable.item_header.rows.map((r)=>({company_code:r.company_code,division_code:r.division_code,item_no:r.item_no,item_pkey:null,run_id:r.run_id})),
+    ...byTable.item_detail.rows.map((r)=>({company_code:r.company_code,division_code:r.division_code,item_no:r.item_no,item_pkey:r.item_pkey,run_id:r.run_id})),
   ];
   return { loads, itemSlots, affectedItemGrains };
 }
