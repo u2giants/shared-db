@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Remove the migration author lane cap entirely: no capacity refusal anywhere, with exact object collision locks and version reservations unchanged.",
-  "base_sha": "9b02ad489d09427fc0556248c0a85b7cc78807ff",
+  "base_sha": "5761bc5e8763817c6deb722cac627f8924b5baaf",
   "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
   "worker": "Claude sub-agent of marker 2758 (no lane cap)",
   "branch": "claude/author-lanes-no-cap-2775",
@@ -46,5 +46,5 @@
   "stop_conditions": [
     "Stop if implementation requires a database or production write."
   ],
-  "generation": 2
+  "generation": 3
 }
