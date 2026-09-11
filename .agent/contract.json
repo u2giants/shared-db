@@ -4,11 +4,11 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "9ea5c664443f5c3fcdf43c5c40ca355450d0d394",
+  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2727-review-fix-401",
+  "worktree": "C:/repos/shared-db-worktrees/2738-routing-boundary",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
@@ -58,7 +58,7 @@
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not claim a database author lane or any shared preview, merge, or production stage for this repository-maintenance work.",
+    "Do not claim a database author lane or any shared preview or production stage for this repository-maintenance work; the ordinary exact-head reviewer and guarded merge gates still apply.",
     "Do not mutate preview, production, shared cloud infrastructure, application rows, or database schema.",
     "Do not bypass existing object conflicts, version reservations, review, preview, merge, production, or live-application proof gates, and preserve the owner-ruling removal of the author-lane cap."
   ],
@@ -92,12 +92,13 @@
     "Generation 41 repairs effective job permissions at 66b9ca83 and seals the effective-scope regression at 590eb037: preview and production-apply explicitly retain issues write despite job-level overrides, and the Python permission regression is included in the sealed work scope.",
     "Generation 42 refreshes the completed repair onto current main 9ea5c664; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
     "Generation 43 aligns the existing production-owner permission regression with the required effective production-apply issues write scope while preserving production-apply-review as read-only.",
-    "Generation 44 restores shared-supabase default issues read and limits job-level issues write to preview and production-apply, with effective-permission coverage for validate, production-dry-run, and production-apply-review."
+    "Generation 44 restores shared-supabase default issues read and limits job-level issues write to preview and production-apply, with effective-permission coverage for validate, production-dry-run, and production-apply-review.",
+    "Generation 45 integrates current main 26d9345b and repairs the guarded-operation routing boundary: structural and mixed or unknown pull requests still require two-sided DDL admission, while deterministic repository-maintenance code retains exact-head review, CI, and guarded merge without fabricated database admission or database stages."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
-    "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
+    "Stop if repository-maintenance work can consume a database author, preview, or production lane; exact-head reviewer and guarded merge use remain required.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 44
+  "generation": 45
 }

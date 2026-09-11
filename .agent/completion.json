@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/44",
-  "contract_sha256": "38aceccb7dc370f65eb8d995fc67108ddf36f1499637051211e9d8e321edc6cc",
-  "head_sha": "f76cba00ca789f1f1449add6cac9f56286037a41",
+  "contract_ref": "refs/db-contracts/2727/45",
+  "contract_sha256": "80e015d3199795504c25637f4881d505571abf1274c6d6394772494f6e4ff407",
+  "head_sha": "e831d5f859aca8717294e5ef972b71d7e77208f3",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -36,37 +36,37 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 9ea5c664 f76cba00 reports no whitespace errors."
+      "evidence": "git diff --check 26d9345b e831d5f8 reports no whitespace errors."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at f76cba00."
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at e831d5f8."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "727 tests, 727 pass, 0 fail, 0 skipped at f76cba00."
+      "evidence": "736 tests, 736 pass, 0 fail, 0 skipped at e831d5f8."
     },
     {
       "command": "python -m unittest scripts.test_production_owner_decision_evidence",
       "exit_code": 0,
-      "evidence": "9 tests passed at f76cba00, including effective production job permission coverage."
+      "evidence": "9 tests passed at e831d5f8, including effective production job permission coverage."
     },
     {
       "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "242 tests passed at f76cba00, including effective job-level permission regression and the negative top-level-write/job-level-read fixture."
+      "evidence": "242 tests passed at e831d5f8, including effective job-level permission and guarded-operation routing coverage."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=279 at f76cba00."
+      "evidence": "truth audit OK: call_sites=279 at e831d5f8."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "221 files scanned at f76cba00; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "221 files scanned at e831d5f8; every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
@@ -88,7 +88,8 @@
     "Preview and production-apply now have effective job-level issues write permission, while production-apply-review remains read-only; the permission regression test is part of allowed paths, file writes, and changed-file evidence.",
     "Current main 9ea5c664 is integrated; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
     "The existing production owner decision regression now parses inline permission comments and requires effective issues write for production-apply while retaining issues read for production-apply-review.",
-    "The shared workflow defaults to issues read; only preview and production-apply override to issues write, while validate, production-dry-run, and production-apply-review remain effectively read-only for issues."
+    "The shared workflow defaults to issues read; only preview and production-apply override to issues write, while validate, production-dry-run, and production-apply-review remain effectively read-only for issues.",
+    "Current main 26d9345b is integrated. Guarded merge and reviewer assignment now rederive structural versus deterministic repository-maintenance routing from the exact live pull request and linked issue inside the held mutex; no caller-controlled bypass exists, and ambiguous or mixed routing refuses."
   ],
   "stop_conditions_hit": []
 }
