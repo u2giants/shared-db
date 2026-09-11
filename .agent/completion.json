@@ -1,54 +1,85 @@
 {
   "schema_version": 1,
-  "work_issue": 2744,
+  "work_issue": 2482,
   "outcome": "ready-for-merge",
-  "pr": 2793,
+  "pr": 2779,
   "migration_versions": [
-    "20260911170526"
+    "20260911210844"
   ],
-  "contract_ref": "refs/db-contracts/2744/6",
-  "contract_sha256": "af4910f98daa536a790080e6ba2603abc17586745ce4f7059b08907873583148",
-  "head_sha": "8cd2e015bb4fa3fc96c175df965daf2a427184d8",
+  "contract_ref": "refs/db-contracts/2482/14",
+  "contract_sha256": "0b0d8d2b110c6f732a57b1d6b392146a0e68e2748112662c181c7cdb18ff346d",
+  "head_sha": "c3255e332e727fe725280cb159887054428ce955",
+  "evidence_note": "Implementation head c3255e33 (contract generation 14) merges main 9ea5c664 into reviewed head 3f784ba7 (muse APPROVE; main touched none of its files and adds no later migration version). That head merged main f938f36f into the earlier reviewed head 3b2c0ca8 and then renamed the migration to the re-reserved version 20260911210844 because main added the later 20260911203057; the file content is unchanged and uses reserved version 20260911210844 from claim #2778 (re-reserved from 20260911150805, then 20260911184026 after main passed it). It was rebuilt after main moved and then revised for governed review findings: the migration now locks both retiring tables before the frozen copy, and the dependency guard also covers write statements, quoted identifiers, RLS policies and publications. Read-only production proof: the only dependents of public.erp_items_current were api.plm_item_list, the bridge legacy FK, plm.refresh_style_tracker_item_bridge and public.resolve_product_category_prediction_item_identity; the widened guard query on production matched only those two routines, with no policies, publications or cron jobs, and PopDAM app code has no references. The committed function bodies are md5-identical to production and change only the table reference. The view rewritten against the crosswalk returned 19,362 rows with md5 7f214c4a3178143a41d2741c8cad677a, identical to the live view. Nothing is dropped: both legacy tables move to a revoked archive schema. The following evidence-only commit changes only .agent/completion.json and .agent/contract.json (whitespace).",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
-    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
+    "config/db-data-admin-property-source-coverage.json",
+    "supabase/migrations/20260911210844_retire_erp_items_to_archive.sql",
+    "supabase/tests/erp_items_retirement_contracts.sql",
+    "supabase/tests/plm_item_import_phase2_contracts.sql",
+    "supabase/tests/plm_item_list_repoint_contracts.sql",
+    "supabase/tests/popdam_item_bridge_additive_cutover_contract.sql",
+    "supabase/tests/popdam_item_state_contracts.sql"
   ],
   "db_reads": [
-    "function api.db_data_admin_scraped_properties",
-    "table plm.dcp_asset",
-    "table plm.lucasfilm_dcp_asset",
-    "table plm.dcp_style_guide",
-    "table plm.lucasfilm_dcp_style_guide",
-    "table plm.dcp_asset_property_observation",
-    "table plm.lucasfilm_dcp_asset_property_observation"
+    "table public.erp_items_current",
+    "table public.erp_items_raw",
+    "view api.plm_item_list",
+    "table plm.item",
+    "table plm.style_tracker_item_bridge",
+    "table public.product_category_predictions"
   ],
   "db_writes": [
-    "function api.db_data_admin_scraped_properties"
+    "schema archive",
+    "table plm.legacy_erp_item_identity",
+    "policy legacy_erp_item_identity_admin_read on plm.legacy_erp_item_identity",
+    "view api.plm_item_list",
+    "table api.plm_item_list",
+    "function plm.refresh_style_tracker_item_bridge",
+    "function public.resolve_product_category_prediction_item_identity",
+    "table plm.style_tracker_item_bridge",
+    "table public.erp_items_current",
+    "table public.erp_items_raw",
+    "table archive.erp_items_current",
+    "table archive.erp_items_raw"
   ],
   "checks": [
     {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors on 25c4ca3b..db2b97e0."
-    },
-    {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed; scripts/test_migration_derivation.py 44 tests OK with derived-from 20260911061539 on db2b97e0."
+      "evidence": "Static checks passed on c3255e33. Guard B2 disclosed no live-ledger source was configured locally, so no database clearance is claimed from this run."
     },
     {
-      "command": "hosted ephemeral migration regression suite",
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on 34b872e6 (run 34630156916, job 103364730068), whose supabase files are identical to implementation db2b97e0; it applied every migration and ran scraped_properties_page_asset_context_contracts.sql, db_data_admin_scraped_properties.sql, _opa_groups.sql and _source_purpose.sql."
+      "evidence": "Status OK; 49 sidecars validated and the new migration needs none."
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "exit_code": 0,
+      "evidence": "Migration claim verified: #2778, version 20260911210844 (PR_NUMBER=2779; re-reserved from 20260911150805, then 20260911184026)."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "supabase/tests/erp_items_retirement_contracts.sql on a disposable database",
+      "exit_code": 0,
+      "evidence": "Not run locally (no disposable Supabase stack on this machine). Executed in CI from an empty database at exact implementation head c3255e332e727fe725280cb159887054428ce955: Database Contract Tests https://github.com/u2giants/shared-db/actions/runs/34651929781 completed success. The focused contract covers the archive move and revokes, no remaining view/FK/routine dependents, repointed readers, FK dropped with column kept, the 21-column contract and legacy UUID resolution with a control."
+    },
+    {
+      "command": "Database Contract Tests CI from empty",
+      "exit_code": 0,
+      "evidence": "https://github.com/u2giants/shared-db/actions/runs/34651929781 at exact implementation head c3255e332e727fe725280cb159887054428ce955: completed success, replaying all migrations from empty (including the lock and widened dependency guard) and running every supabase/tests file including erp_items_retirement_contracts.sql."
     }
   ],
   "assumptions_resolved": [
-    "Production plm.dcp_asset, plm.lucasfilm_dcp_asset, plm.dcp_style_guide and plm.lucasfilm_dcp_style_guide all have PRIMARY KEY (id), so resolving style guides from page assets yields the same set.",
-    "Production body md5 b63154a297ae649811cde7569657a146 equals 20260911061539; read-only parity on production: default page md5 530e12902785646a59c03b9c915d496c (1,067,395 bytes), Bambi and Cars 2 identical between current and new body."
+    "View column list, types, row count and key hash are unchanged (production proof above).",
+    "Legacy UUIDs resolve through the frozen crosswalk for view ids, bridge links and prediction identity.",
+    "Only the bridge FK is dropped; erp_item_id and its values are kept.",
+    "Both legacy tables are kept in archive with API access revoked, so retirement is reversible."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Implementation db2b97e0 contains main 25c4ca3b. Read-only production EXPLAIN ANALYZE: execution 24.9s to 4.7s, planning 1.26s to 42ms, no temp spill; default page 3.7-6.0s versus 12.4-33.7s; output md5 identical. No work_mem, statement_timeout, role or global setting changed. Contract generation 2 adds the OPA groups test path."
+  "stop_conditions_hit": []
 }
