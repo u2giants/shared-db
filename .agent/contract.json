@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2703,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -28,18 +28,21 @@
   ],
   "db_reads": [],
   "db_writes": [
-    "table plm.opa_property_scope_membership",
-    "table plm.opa_property_compliance_capture",
-    "view plm.opa_property_current_compliance",
+    "column plm.opa_property_scope_membership.compliance_status",
+    "function api.db_data_admin_scraped_properties",
+    "function plm.finalize_opa_property_compliance_capture",
     "function plm.guard_opa_property_compliance_capture",
     "function plm.guard_opa_property_compliance_membership",
-    "function plm.finalize_opa_property_compliance_capture",
-    "function api.db_data_admin_scraped_properties",
+    "index plm.opa_compliance_capture_route_time_idx",
+    "index plm.opa_compliance_membership_capture_idx",
+    "table plm.opa_property_compliance_capture",
+    "table plm.opa_property_current_compliance",
+    "table plm.opa_property_scope_membership",
     "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
+    "trigger opa_compliance_capture_truncate_guard on plm.opa_property_compliance_capture",
     "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
     "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
-    "index plm.opa_compliance_membership_capture_idx",
-    "index plm.opa_compliance_capture_route_time_idx"
+    "view plm.opa_property_current_compliance"
   ],
   "prohibited_actions": [
     "No shared database writes by worker; parent merges and promotes.",

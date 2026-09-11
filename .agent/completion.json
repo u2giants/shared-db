@@ -6,30 +6,38 @@
   "migration_versions": [
     "20260911061539"
   ],
-  "contract_ref": "refs/db-contracts/2703/2",
-  "contract_sha256": "64f8fbffa0c8fa9053d9e661b22f0ce6abf026f62feae3e230f9415465ac7228",
-  "head_sha": "c56285a2b2f440cf281afff7f8ea8811baf0941d",
+  "contract_ref": "refs/db-contracts/2703/3",
+  "contract_sha256": "5e3e2ab391a30d85e8b4308cadc110bb27e55bcd9b378b78e96b5c8585e125ca",
+  "head_sha": "938c88529629051ad7c70273786a1ef5664f3d50",
   "files_changed": [
+    ".agent/completion.json",
     ".agent/contract.json",
     "docs/app-migration-notes/opa-route-compliance-loader-contract.md",
     "docs/business-rules/licensing-master-data.md",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
     "supabase/migrations/20260911061539_opa_route_compliance.sql",
     "supabase/tests/opa_route_compliance_contracts.sql"
   ],
   "db_reads": [],
   "db_writes": [
-    "table plm.opa_property_scope_membership",
-    "table plm.opa_property_compliance_capture",
-    "view plm.opa_property_current_compliance",
+    "column plm.opa_property_scope_membership.compliance_status",
+    "function api.db_data_admin_scraped_properties",
+    "function plm.finalize_opa_property_compliance_capture",
     "function plm.guard_opa_property_compliance_capture",
     "function plm.guard_opa_property_compliance_membership",
-    "function plm.finalize_opa_property_compliance_capture",
-    "function api.db_data_admin_scraped_properties",
+    "index plm.opa_compliance_capture_route_time_idx",
+    "index plm.opa_compliance_membership_capture_idx",
+    "table plm.opa_property_compliance_capture",
+    "table plm.opa_property_current_compliance",
+    "table plm.opa_property_scope_membership",
     "trigger opa_compliance_capture_guard on plm.opa_property_compliance_capture",
+    "trigger opa_compliance_capture_truncate_guard on plm.opa_property_compliance_capture",
     "trigger opa_compliance_membership_guard on plm.opa_property_scope_membership",
     "trigger opa_compliance_membership_truncate_guard on plm.opa_property_scope_membership",
-    "index plm.opa_compliance_membership_capture_idx",
-    "index plm.opa_compliance_capture_route_time_idx"
+    "view plm.opa_property_current_compliance"
   ],
   "checks": [
     {
@@ -46,7 +54,8 @@
   "assumptions_resolved": [
     "Exact route/account latest approved complete explicit observations define current rights; retained source identity is separate.",
     "Private loader contract requires reviewed companion route/authentication proof; no rows loaded.",
-    "Final database CI and independent review remain required; production timeout investigation remains open before final review."
+    "Final database CI and independent review remain required; production timeout investigation remains open before final review.",
+    "Initial database replay34569988648 passed; supported claim expansions account for GRANT view/table alias, column comment and explicit capture truncate guard."
   ],
   "stop_conditions_hit": []
 }
