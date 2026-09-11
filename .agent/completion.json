@@ -4,16 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/1",
-  "contract_sha256": "57de634a1e311f2e22e550a73b6ad068a351dbf2d9530c7cd029bc9922860b89",
-  "head_sha": "eb95f88c9ee6a7361e4f28dd0ff35905c8bee30e",
+  "contract_ref": "refs/db-contracts/2727/2",
+  "contract_sha256": "1f74edb62ac59f53055f187ccaac6552c39bfe1e902d64f92eabd8a3aff9408f",
+  "head_sha": "5c9ce28c36e97ad4c9fa64c7284886a40b8b2d95",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/db-coordination-events.mjs",
     "scripts/lib/work-dependencies.mjs",
+    "scripts/lib/work-dependencies.test.mjs",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "scripts/orchestrator-flow/admission.mjs",
@@ -29,9 +28,9 @@
       "evidence": "No whitespace errors after the reviewer repairs and current base check."
     },
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "606 tests passed; zero failed, skipped, cancelled, or todo."
+      "evidence": "636 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 997 tests."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
