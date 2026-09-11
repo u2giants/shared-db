@@ -8,8 +8,6 @@
   "contract_sha256": "8fb07821210b281cbd983e43768bc7ccb0439b94d794b62e2e60c25a4aa6b8e1",
   "head_sha": "d8676c8f14b829f919d26f2ed81e5b76c4c19ce3",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
     "scripts/test_historical_preview_recovery.py",
     "scripts/test_production_business_risk_gate.py",
     "scripts/tests/test_import_order_list.py"
