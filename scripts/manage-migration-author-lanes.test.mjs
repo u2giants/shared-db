@@ -542,6 +542,7 @@ function giveVerdict(io,{issue,pr,headSha,slot=1,replacementSequence=null}){
 function reviewIo(){
   const io=memoryIo(), commits=new Map();let seq=0
   io.resolveOrchestratorEngine=()=> 'claude'
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:'ready',usable:true}]))
   io.refs.set(REVIEW_ACTIVE_CUTOVER_REF,'cutover-complete')
   io.makeOwnerCommit=(message)=>{const sha=(++seq).toString(16).padStart(40,'0');commits.set(sha,{message});return sha}
   io.getCommit=(sha)=>commits.get(sha)
@@ -552,6 +553,28 @@ function reviewIo(){
   io.getPrReviews=()=>[]
   return io
 }
+
+test('#2705 reviewer assignment skips a provider that reconciled preflight says is unusable',()=>{
+  const io=reviewIo(), skipped=ACTIVE_REVIEWERS[0]
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.name===skipped.name?'quarantined':'ready',failure_class:row.name===skipped.name?'live-qualification-required':null,usable:row.name!==skipped.name}]))
+  const assigned=assignNextReviewer({issue:2705,pr:2706,headSha:'a'.repeat(40)},io)
+  assert.notEqual(assigned.reviewer,skipped.name)
+  assert.equal(assigned.sequence,1,'skipping an unusable provider must not burn a durable sequence')
+})
+
+test('#2705 reviewer assignment refuses when reconciled preflight state is unreadable',()=>{
+  const io=reviewIo()
+  io.reviewerUsability=()=>{throw new LaneError('ai-review-preflight returned no reconciled state for gemini')}
+  assert.throws(()=>assignNextReviewer({issue:2705,pr:2706,headSha:'b'.repeat(40)},io),/no reconciled state/)
+  assert.equal(io.refs.has(REVIEW_CURSOR_REF),false,'an unreadable preflight must not consume a sequence')
+})
+
+test('#2705 reviewer assignment refuses malformed reconciled state before durable mutation',()=>{
+  const io=reviewIo(),before=[...io.refs]
+  io.reviewerUsability=()=>({usable:true})
+  assert.throws(()=>assignNextReviewer({issue:2705,pr:2706,headSha:'c'.repeat(40)},io),/malformed reconciled/)
+  assert.deepEqual([...io.refs],before)
+})
 
 // Production `githubIo` always defines the atomic compare-and-swap ref writer,
 // and the exclusion RETURN path now refuses to run without it: retiring a
@@ -2566,12 +2589,15 @@ test('issue 1688 routes non-migration pull requests through the guarded merge la
   )
 })
 
-test('issue 1688 never leaves a durable ordinary-merge authorization before the merge lock', () => {
+test('issue 1688 permits success only after the appropriate merge lock is acquired', () => {
   const leaseWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/migration-author-lease.yml',import.meta.url)),'utf8')
   const mergeWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/guarded-migration-merge.yml',import.meta.url)),'utf8')
+  const documentsWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/documents-only-merge-authorization.yml',import.meta.url)),'utf8')
   const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
   assert.doesNotMatch(leaseWorkflow,/state=success[^\n]+Migration guarded merge authorization/)
   assert.match(mergeWorkflow,/--acquire-merge[\s\S]+state=success[^\n]+Migration guarded merge authorization/)
+  assert.match(documentsWorkflow,/check-documents-only-merge-authorization\.mjs[\s\S]+--authorize-repository-maintenance-status/)
+  assert.doesNotMatch(documentsWorkflow,/--acquire-(?:preview|merge|production)/)
   const acquire=productionWorkflow.indexOf('name: Acquire the exclusive production lane and freeze merges')
   const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')
   const release=productionWorkflow.indexOf('name: Release the exclusive production lane with ownership proof')
@@ -3204,6 +3230,12 @@ test('stranded reviewer queue and silence-release mutexes are recoverable',()=>{
 // acquire and release wedges every author lane with no sanctioned way out.
 test('stranded duplicate-claim-release mutex is recognized and safely recoverable',()=>{
   const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination duplicate-claim-release 1f0c3a2e-0000-4000-8000-000000000000',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('stranded repository-maintenance authorization mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:`db-coordination repository-maintenance-authorization pr=2715 head=${'a'.repeat(40)}`,committer:{date:'2026-08-14T19:55:00Z'}})
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
   assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
 })
@@ -5009,6 +5041,31 @@ function immutablePreviewReconciliationIo({sourcePr=1748,replacement='2026083001
     }),
   }
 }
+
+test('archived unnamed steps require an exact artifact receipt and never override contradictory named proof',()=>{
+  const input={issue:1769,pr:1809,versions:['20260828232207'],mergeCommitSha:'b'.repeat(40)}
+  const fixture=immutablePreviewApplyIo(), evidence=fixture.previewApplyRun()
+  evidence.artifacts.artifacts[0].id=456
+  evidence.logs=evidence.logs.replaceAll('Report the preview ledger delta','UNKNOWN STEP')
+  const io={...fixture,previewApplyRun:()=>evidence}
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+  let calls=0
+  io.verifyPreviewApplyArtifact=(request)=>{
+    calls++
+    assert.equal(request.verificationCommit,input.mergeCommitSha)
+    return {verified:true,runId:request.run.id,artifactId:456,artifactDigest:request.artifact.digest,versions:request.versions}
+  }
+  assert.deepEqual(validateOriginalPreviewApplyEvidence(input,io),{type:'preview-apply',run_id:'33308168016'})
+  assert.equal(calls,1)
+  const valid=io.verifyPreviewApplyArtifact
+  io.verifyPreviewApplyArtifact=(request)=>({...valid(request),artifactId:457})
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+  io.verifyPreviewApplyArtifact=()=>{throw new Error('digest mismatch')}
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+  evidence.logs+='\npreview\tReport the preview ledger delta\t- added: 20260101000000'
+  io.verifyPreviewApplyArtifact=()=>assert.fail('contradictory named proof must not use artifact fallback')
+  assert.throws(()=>validateOriginalPreviewApplyEvidence(input,io),/found 0/)
+})
 
 test('immutable original preview-apply evidence validates only the exact run',()=>{
   const input={issue:1769,pr:1809,versions:['20260828232207'],mergeCommitSha:'b'.repeat(40)}
@@ -7112,6 +7169,13 @@ test('#2694 releasing a slot 2 failure is refused when the lease at that ref nam
   // IS slot 1).
   io.refs.set(leaseRef,io.makeOwnerCommit(original.replace(/ slot=2(?=s|$)/,'')))
   assert.throws(()=>releaseFailedReviewer({issue:request.issue,pr:request.pr,headSha:request.headSha,failedSequence:second.sequence,slot:2,failureCode:'provider_unavailable',confirmNoVerdict:true,confirmNoArtifact:true},io),/active lease does not match the terminal failure evidence/)
+})
+
+test('#2705 replacement allocation also skips providers that reconciled preflight refuses',()=>{
+  const io=failedReviewIo(), allowed='qwen'
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.provider===allowed?'ready':'quarantined',usable:row.provider===allowed}]))
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(replacement.reviewer,'qwen-3.8-max')
 })
 
 // ISSUE #2697. `--reclaim-silent-reviewer` was added after

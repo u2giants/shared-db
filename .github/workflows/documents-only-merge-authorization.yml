@@ -1,0 +1,85 @@
+name: Documents-only merge authorization
+
+# A required legacy commit status must exist on every pull request, but prose-only
+# changes must not dispatch the database guarded-merge workflow (#2715). This
+# workflow runs only trusted code from the pull request base. It never checks out
+# or executes the pull request head.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review, edited]
+    branches: [main]
+
+permissions:
+  # The base-only manager creates and deletes the global coordination mutex ref.
+  contents: write
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: documents-only-merge-authorization-${{ github.event.pull_request.number }}
+  # Cancellation can strand the global coordination mutex after acquisition.
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Documents-only merge authorization
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Prove the protected base identity before checkout
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+          BASE_REPO: ${{ github.event.pull_request.base.repo.full_name }}
+        run: test "$BASE_REF" = main && test "$BASE_REPO" = "$GITHUB_REPOSITORY"
+
+      - name: Check out trusted base code only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove the shared classifier before using it
+        run: >-
+          node --test
+          scripts/lib/documents-only-change.test.mjs
+          scripts/check-documents-only-pull-request.test.mjs
+          scripts/check-documents-only-merge-authorization.test.mjs
+          scripts/repository-maintenance-authorization.test.mjs
+
+      - name: Classify the complete pull request file list
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if node scripts/check-documents-only-merge-authorization.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER"; then
+            echo 'documents_only=true' >> "$GITHUB_OUTPUT"
+          else
+            # This is the normal path for every non-document or unreadable change.
+            # Ordinary code stays with the guarded workflow. The exact comparison
+            # below writes only a separate diagnostic unless this SHA already has
+            # a lightweight success that must be revoked.
+            echo 'documents_only=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Re-prove and authorize under the repository-maintenance mutex
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_CHANGED: ${{ github.event.action == 'edited' && github.event.changes.base != null }}
+        run: |
+          set -euo pipefail
+          extra=()
+          [ "$BASE_CHANGED" = true ] && extra+=(--revoke-required-status)
+          node scripts/manage-migration-author-lanes.mjs \
+            --authorize-repository-maintenance-status \
+            --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" \
+            --description 'Prose-only head verified under the coordination/production-freeze mutex' \
+            --target-url "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}" \
+            "${extra[@]}"
