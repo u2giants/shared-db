@@ -1349,6 +1349,9 @@ export const githubIo = {
     try{graph=JSON.parse(graphText)?.data?.rateLimit}catch{return null}
     return rest&&graph?{remaining:Number(rest.remaining),limit:Number(rest.limit),reset:Number(rest.reset),graphRemaining:Number(graph.remaining),graphLimit:Number(graph.limit),graphReset:Math.floor(new Date(graph.resetAt).getTime()/1000)}:null
   },previewApplyRun(runId){return{run:ghJson(['api',`repos/${REPO}/actions/runs/${runId}`]),artifacts:ghJson(['api',`repos/${REPO}/actions/runs/${runId}/artifacts`]),logs:runGitHubCommand(['run','view',String(runId),'--repo',REPO,'--log'])}},
+  verifyPreviewApplyArtifact(request){
+    return JSON.parse(execFileSync('python',[path.join(path.dirname(fileURLToPath(import.meta.url)),'verify_preview_apply_artifact.py')],{input:JSON.stringify(request),encoding:'utf8',maxBuffer:1024*1024,stdio:['pipe','pipe','pipe']}))
+  },
   readActiveReviewLeases(){
     // Read every reviewer name the immutable catalog still understands, not
     // only today's drawable roster. Replacement can legitimately be finishing
@@ -6477,6 +6480,16 @@ export function validateOriginalPreviewApplyEvidence({issue,pr,versions,mergeCom
       if(fields.length<3||fields[1]!=='Report the preview ledger delta')return[]
       return [fields.slice(2).join('\t').replace(/^\d{4}-\d{2}-\d{2}T\S+Z\s*/, '')]
     })
+    // Archived gh display logs may lose every step name. Never relabel that
+    // text: require the original ZIP's immutable digest, binding, ledger files,
+    // and migration content instead. A present but invalid named step still
+    // refuses; the alternate reader cannot conceal contradictory named proof.
+    if(ledgerLines.length===0&&typeof io.verifyPreviewApplyArtifact==='function'){
+      const artifact=rows[0]
+      const proof=io.verifyPreviewApplyArtifact({run,artifact,binding,versions:expected,previewProjectRef:PROJECT_REFS.preview,verificationCommit:mergeCommitSha??appliedCommit})
+      if(proof?.verified===true&&proof.runId===run.id&&proof.artifactId===artifact.id&&proof.artifactDigest===artifact.digest&&JSON.stringify(proof.versions)===JSON.stringify(expected))matches.push({type:'preview-apply',run_id:String(runId)})
+      continue
+    }
     if(ledgerLines.filter((line)=>line==='### Preview ledger delta').length!==1)continue
     const ledgerAdded=ledgerLines.flatMap((line)=>{
       const match=/- added:\s+((?:\d{14})(?:,\s*\d{14})*)\s*$/.exec(line)
