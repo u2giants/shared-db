@@ -1337,7 +1337,10 @@ function requireClaimCloseReason(reason) {
 }
 
 export const githubIo = {
-  enableReviewerQueue:true,
+  // Owner ruling 2026-09-11 (marker #2758): no global FIFO for reviewer draws. Any PR
+  // draws any free usable provider immediately; the per-provider lease, engine
+  // exclusions, and exact-head binding in assignNextReviewerOperation still apply.
+  enableReviewerQueue:false,
   enableReviewerSilence:true,
   requiresExactReviewHeadSha: true,
   // The changed-file list a documents-only classification is made from (#2102).
@@ -4332,6 +4335,19 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
   }finally{finalizeReviewMutex(ownerSha,io)}
 }
 
+// The review mutex is shared with author acquisition and is held only for seconds.
+// "is occupied" is thrown by createRef before any write, so the whole draw is safe
+// to repeat; everything else propagates unchanged.
+export function assignWithMutexRetry(request,io=githubIo,{attempts=8,wait=(ms)=>Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,ms)}={}){
+  for(let attempt=1;;attempt++){
+    try{return assignNextReviewer(request,io)}
+    catch(error){
+      if(attempt>=attempts||error?.message!==`${MUTEX_REF} is occupied`)throw error
+      wait(Math.min(1000*attempt,5000)+Math.floor(Math.random()*500))
+    }
+  }
+}
+
 export function assignNextReviewer(request,io=githubIo){
   const normalized={...request,issue:Number(request.issue),pr:Number(request.pr),slot:Number(request.slot??1),headSha:String(request.headSha??'')}
   if(!io.enableReviewerQueue)return withReviewRequestBudget(()=>assignNextReviewerOperation(normalized,reviewOperationIo(io)))
@@ -6274,7 +6290,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.excludeReviewer){console.log(JSON.stringify(excludeReviewerForPr(o,io),null,2));return 0}
     if(o.reinstateReviewerExclusion){console.log(JSON.stringify(reinstateReviewerExclusion(o,io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
-    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);console.log(JSON.stringify(assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
+    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);console.log(JSON.stringify(assignWithMutexRetry({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
     if (o.acquireExclusive) { console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }

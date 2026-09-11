@@ -3,6 +3,7 @@ import test from 'node:test'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { REVIEW_VERDICT_REF_PREFIX } from './lib/review-verdict-artifact.mjs'
+import { assignWithMutexRetry } from './manage-migration-author-lanes.mjs'
 import { readyRecord } from './orchestrator-flow/reconcile.mjs'
 import { canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
@@ -2379,6 +2380,28 @@ test('an unreadable reviewer queue does not invent a FIFO refusal',()=>{
   io.enableReviewerQueue=true;io.getPr=()=>({number:304,state:'open',head:{sha:request.headSha}})
   const list=io.listRefs;io.listRefs=(prefix)=>{if(prefix===REVIEW_QUEUE_REF_PREFIX)throw new Error('unreadable queue');return list(prefix)}
   assert.ok(assignNextReviewer(request,io).reviewer)
+})
+
+test('live reviewer draws have no global FIFO: a later PR draws a free provider past an older ticket (marker #2758)',()=>{
+  assert.equal(githubIo.enableReviewerQueue,false)
+  const io=reviewIo(),heads=new Map([[311,'a'.repeat(40)],[312,'b'.repeat(40)]])
+  io.enableReviewerQueue=githubIo.enableReviewerQueue;io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr))}})
+  const olderSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=211 pr=311 slot=1 head=${'a'.repeat(40)} requested-at=${new Date(Date.now()-3600000).toISOString()}`)
+  io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/211-311-1`,olderSha)
+  const second=assignNextReviewer({issue:212,pr:312,headSha:'b'.repeat(40)},io)
+  const first=assignNextReviewer({issue:211,pr:311,headSha:'a'.repeat(40)},io)
+  assert.ok(second.reviewer&&first.reviewer);assert.notEqual(second.reviewer,first.reviewer)
+})
+
+test('a reviewer draw retries only a briefly occupied review mutex',()=>{
+  const io=reviewIo(),request={issue:213,pr:313,headSha:'c'.repeat(40)},waits=[]
+  io.enableReviewerQueue=false;io.getPr=()=>({number:313,state:'open',head:{sha:request.headSha}})
+  const create=io.createRef.bind(io);let blocked=2
+  io.createRef=(ref,sha)=>{if(ref===MUTEX_REF&&blocked>0){blocked--;return false}return create(ref,sha)}
+  assert.ok(assignWithMutexRetry(request,io,{wait:(ms)=>waits.push(ms)}).reviewer)
+  assert.equal(waits.length,2)
+  const io2=reviewIo();io2.enableReviewerQueue=false;io2.getPr=()=>({number:313,state:'open',head:{sha:request.headSha}});io2.createRef=(ref,sha)=>ref===MUTEX_REF?false:true
+  assert.throws(()=>assignWithMutexRetry(request,io2,{attempts:3,wait:()=>{}}),/is occupied/)
 })
 
 test('capacity report distinguishes an unreadable verdict from no verdict and keeps the other rows visible (issue #2157)',()=>{
