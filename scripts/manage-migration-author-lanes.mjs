@@ -1382,6 +1382,11 @@ export const githubIo = {
   // raises, and `assertReviewerDrawIsWarranted` catches it and draws as before:
   // "we could not tell" costs a review, it never grants an exemption.
   pullRequestFiles(pr){return ghPaginated(`repos/${REPO}/pulls/${Number(pr)}/files?per_page=100`)},
+  readReviewerOperationRoute(pr){
+    const query=`query($owner:String!,$name:String!,$pr:Int!){repository(owner:$owner,name:$name){pullRequest(number:$pr){state merged mergedAt headRefOid files(first:100){pageInfo{hasNextPage} nodes{path changeType}} closingIssuesReferences(first:2){pageInfo{hasNextPage} nodes{... on Issue{number state body createdAt}}}}}}`
+    const data=ghJson(['api','graphql','-f',`query=${query}`,'-F','owner=u2giants','-F','name=shared-db','-F',`pr=${Number(pr)}`])
+    return projectReviewerOperationRouteSnapshot(data)
+  },
   countLogicalReviewRequests:true,
   getRateLimit(){
     const rest=ghJson(['api','rate_limit'])?.resources?.core
@@ -4123,6 +4128,17 @@ export function projectReviewPr(pr){
   return {state:String(pr?.state??'').toLowerCase(),merged:pr?.merged===true,merge_commit_sha:pr?.mergeCommit?.oid??'',head:{sha:pr?.headRefOid}}
 }
 
+export function projectReviewerOperationRouteSnapshot(data){
+  if(data?.errors?.length||!data?.data?.repository?.pullRequest)throw new LaneError('reviewer operation routing snapshot returned GraphQL errors or no pull request')
+  const row=data.data.repository.pullRequest,files=row.files,linked=row.closingIssuesReferences
+  if(!Array.isArray(files?.nodes)||files.pageInfo?.hasNextPage!==false||!Array.isArray(linked?.nodes)||linked.pageInfo?.hasNextPage!==false)throw new LaneError('reviewer operation routing snapshot is incomplete or paginated')
+  return {
+    pr:{state:String(row.state??'').toLowerCase(),merged_at:row.merged===true?row.mergedAt:null,head:{sha:row.headRefOid}},
+    files:files.nodes.map((file)=>({filename:file?.path,status:String(file?.changeType??'').toLowerCase()})),
+    linkedIssues:linked.nodes.map((item)=>({number:item?.number,state:String(item?.state??'').toLowerCase(),body:item?.body,createdAt:item?.createdAt})),
+  }
+}
+
 // GitHub does not include repository association unless it is requested. The
 // verdict predicate refuses association-less prose, so omitting this field here
 // makes a genuine OWNER verdict invisible to normal reviewer-lease cleanup.
@@ -4282,7 +4298,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1,admissionOptions=n
   requireReviewWireCapacity(REVIEW_MUTEX_SECTION_RESERVE)
   acquireReviewMutex(ownerSha,io)
   try{
-    if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true})
+    if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true,reviewSnapshot:true})
     const exclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
     // Slot 1 keeps the original, unsuffixed ref namespace so every existing
     // caller and every already-recorded assignment/replacement is untouched.
@@ -4867,7 +4883,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       if(liveReplacement&&liveReplacement.sha!==priorReplacement&&!staleReplacement)throw new LaneError(`reviewer ${parsed.reviewer} has an unrelated live lease; idempotent replacement repair refused`)
       ownerSha=io.makeOwnerCommit(`db-coordination reviewer-replacement-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''}`)
       requireReviewWireCapacity(11);acquireReviewMutex(ownerSha,io);mutexAcquired=true
-      if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true})
+      if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true,reviewSnapshot:true})
       const freshStates=io.readReviewStates?.([parsed,...(staleReplacement?[staleReplacement.assignment]:[])])
       const freshExclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
       // Same deliberate refusal as the assignment paths: only --exclude-reviewer
@@ -5057,7 +5073,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     let failureCreated=false, cursorUpdated=false,failedLeaseReleased=false,replacementStaleReleased=false,replacementLeaseCreated=false
     requireReviewWireCapacity(12);acquireReviewMutex(ownerSha,io);mutexAcquired=true
     try{
-      if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true})
+      if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true,reviewSnapshot:true})
       const freshExclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
       if(freshExclusions.has(reviewer.name))throw new LaneError(`selected replacement reviewer ${reviewer.name} became excluded for this PR before mutex acquisition; retry to select from the fresh roster`)
       if(io.atomicReviewRefs){
@@ -5562,14 +5578,20 @@ const REPOSITORY_MAINTENANCE_CHANGE_TYPES = new Set(['documentation','ci','revie
 // repository code. Derive that boundary from the live PR while the operation's
 // mutex is held: a caller-provided bypass would turn a routing choice into an
 // authority grant. Any migration path, including the old side of a rename,
-// stays structural; unreadable inventory stays unknown and refuses.
-export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issue = null, allowMerged = false } = {}) {
+// stays structural; unreadable inventory stays unknown and refuses. This result
+// answers only whether DDL/object admission applies to review and guarded merge.
+// It is not NO_DATABASE_PREVIEW evidence: the separate Step 2A impact classifier
+// still decides whether executable code can affect database behavior, data, or
+// permissions and must enter preview. Repository maintenance keeps every natural
+// code gate here; it receives no structural claim or database-stage exemption.
+export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issue = null, allowMerged = false, snapshot = null } = {}) {
   if (!Number.isInteger(Number(pr)) || Number(pr) < 1) throw new LaneError('operation routing requires a pull request number')
-  const livePr=io.getPr(Number(pr))
+  if(snapshot!==null&&(!snapshot||typeof snapshot!=='object'||!Array.isArray(snapshot.files)||!Array.isArray(snapshot.linkedIssues)))throw new LaneError('operation routing snapshot is unreadable')
+  const livePr=snapshot?.pr??io.getPr(Number(pr))
   const prState=String(livePr?.state??'open').toLowerCase(),eligibleState=prState==='open'||(allowMerged&&prState==='closed'&&Boolean(livePr?.merged_at))
   if(!livePr||!eligibleState||!/^[0-9a-f]{40}$/i.test(String(livePr?.head?.sha??'')))throw new LaneError(`pull request #${pr} live head is unreadable or not eligible`)
   if(headSha!==null&&String(livePr.head.sha).toLowerCase()!==String(headSha).toLowerCase())throw new LaneError(`pull request #${pr} exact head changed before operation routing`)
-  const files=io.getPrFiles(Number(pr))
+  const files=snapshot?.files??io.getPrFiles(Number(pr))
   if(!Array.isArray(files)||!files.length)throw new LaneError(`pull request #${pr} complete file inventory is empty or unreadable`)
   const paths=[]
   for(const file of files){
@@ -5580,15 +5602,15 @@ export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issu
       paths.push(file.previous_filename)
     }
   }
-  const linked=io.closingIssuesForPr(Number(pr))
+  const linked=snapshot?.linkedIssues??io.closingIssuesForPr(Number(pr))
   if(!Array.isArray(linked)||linked.length!==1)throw new LaneError(`pull request must close exactly one work issue; found ${Array.isArray(linked)?linked.length:'an unreadable set'}`)
   const linkedNumber=Number(linked[0]?.number)
   if(!Number.isInteger(linkedNumber)||linkedNumber<1)throw new LaneError('pull request linked work issue identity is unreadable')
   if(issue!==null&&Number(issue)!==linkedNumber)throw new LaneError(`operation issue #${issue} does not match pull request #${pr} linked issue #${linkedNumber}`)
-  const structural=paths.some((value)=>MIGRATION_PATH.test(String(value).replace(/\\/g,'/')))
+  const structural=files.some((file)=>file.previous_filename!==undefined||String(file.status).toLowerCase()==='renamed')||paths.some((value)=>MIGRATION_PATH.test(String(value).replace(/\\/g,'/')))
   if(structural)return {route:'structural',issue:linkedNumber,pr:Number(pr),headSha:livePr.head.sha}
 
-  const work=io.getIssue(linkedNumber),scope=parseQueueScope(work?.body??'')
+  const work=snapshot?.linkedIssues?.[0]??io.getIssue(linkedNumber),scope=parseQueueScope(work?.body??'')
   if(String(work?.state??'open').toLowerCase()!=='open'||scope?.status!=='ready'||scope?.workType!=='repo-maintenance'||scope?.route!=='repo-maintenance'||scope?.writes?.length)throw new LaneError(`pull request #${pr} is not deterministic ready repository-maintenance work with no database objects`)
   let changeType=scope.changeType,legacy=false
   if(changeType===null){
@@ -5600,10 +5622,11 @@ export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issu
   return {route:'repo-maintenance',issue:linkedNumber,pr:Number(pr),headSha:livePr.head.sha,changeType,legacy}
 }
 
-function requirePrOperationRoute(options,io,{pr,headSha,issue,mutexOwner,allowMerged=false}){
+function requirePrOperationRoute(options,io,{pr,headSha,issue,mutexOwner,allowMerged=false,reviewSnapshot=false}){
   if(io.enforceAdmission!==true)return null
   if(mutexOwner)requireOwnedRef(MUTEX_REF,mutexOwner,io)
-  const route=derivePrOperationRoute(pr,io,{headSha,issue,allowMerged})
+  const snapshot=reviewSnapshot&&typeof io.readReviewerOperationRoute==='function'?io.readReviewerOperationRoute(pr):null
+  const route=derivePrOperationRoute(pr,io,{headSha,issue,allowMerged,snapshot})
   if(route.route==='repo-maintenance')return route
   if(!Number.isInteger(Number(options?.admitIssue))||Number(options.admitIssue)!==route.issue)throw new LaneError(`structural pull request #${pr} requires --admit-issue ${route.issue}`)
   requireAdmission(options,io,{pr,mutexOwner})
