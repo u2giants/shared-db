@@ -30,18 +30,24 @@ export function readPullRequestFiles(repo, pullRequest) {
   ))
 }
 
-export function classifyPullRequestFilesPayload(text) {
+export function parsePullRequestFilesPayload(text) {
   let rows
   try { rows = JSON.parse(String(text ?? '')) }
-  catch { return { documentsOnly: false, reason: 'the pull request file list was not readable JSON' } }
+  catch { return null }
   // `gh api --paginate --slurp` returns ONE ARRAY PER PAGE, so a pull request
   // with more than 100 files arrives as an array of arrays. Flatten exactly one
   // level, and only when every entry is an array: a mixed shape is unreadable
   // input, and unreadable input is never documents-only.
   if (Array.isArray(rows) && rows.length && rows.every((row) => Array.isArray(row))) rows = rows.flat()
+  return Array.isArray(rows) ? rows : null
+}
+
+export function classifyPullRequestFilesPayload(text, classifier = classifyChangedPaths) {
+  const rows = parsePullRequestFilesPayload(text)
+  if (!rows) return { documentsOnly: false, reason: 'the pull request file list was not readable JSON' }
   const paths = changedPathsFromPullRequestFiles(rows)
   if (!paths) return { documentsOnly: false, reason: 'the pull request file list was not an array' }
-  return classifyChangedPaths(paths)
+  return classifier(paths)
 }
 
 export function main(argv, deps = {}) {
