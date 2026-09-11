@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2700,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2697/1",
-  "contract_sha256": "ed85ae0e5a2bcdf5218773106d0dae0150342a221cf142998b8d29370229e491",
-  "head_sha": "6a5874d347e4bd519b38487238ba6c78cf92c988",
+  "contract_ref": "refs/db-contracts/2697/2",
+  "contract_sha256": "4319a4d6ccf0f1d13d01d2adf0a2bb42b476ceae8ae102990720703d0739db89",
+  "head_sha": "1c1577f7543ebddeaec270dfe1b880f539c0cf6d",
   "files_changed": [
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
@@ -19,37 +19,23 @@
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 489, suites 0, pass 489, fail 0, cancelled 0, skipped 0, todo 0, duration_ms 2175.5446. Includes the three new cases 'silent reviewer reclaim costs exactly its derived 28-request budget (issue #2697)', 'silent reviewer reclaim refuses before the mutex when its mutex section will not fit (issue #2697)' and 'an exhausted reviewer budget names the operation and its derived ceiling (issue #2697)'."
+      "evidence": "509 pass, 0 fail, 0 skipped; current keys measured28 and legacy parallel fallback30, pre/held15 each."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid."
+      "evidence": "Contract is valid; generation2 published and read back."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors; only CRLF advisory warnings. Exit code 0."
-    },
-    {
-      "command": "node scripts/agent-work-contract.mjs --publish-contract --contract-file .agent/contract.json",
-      "exit_code": 0,
-      "evidence": "{\"ref\":\"refs/db-contracts/2697/1\",\"sha\":\"17dad23980024ab5b2176f1626c60440efa1e4d0\",\"hash\":\"ed85ae0e5a2bcdf5218773106d0dae0150342a221cf142998b8d29370229e491\"} - created if absent and read back."
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "MEASURED, NOT WIDENED. The reclaim path was instrumented on a wire-attempt fixture that counts real runGitHubCommand attempts, exactly as the assignment and replacement figures were counted, and it costs 28 requests: 14 pre-mutex and a 14-request mutex-held section. The full labelled request-by-request trace is in docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md, cross-referenced from the 2026-08-28 derivation document.",
-    "THE REDUNDANCY THE MEASUREMENT FOUND WAS REMOVED, NOT PAID FOR. The post-mutex recheck read the same PR fresh twice in one statement: io.__freshGetPr(request.pr) and then activityFingerprintForLease(..., {freshPr:true}), which reads it fresh again and already records prState and currentHead in its facts. The check now uses those facts. 29 -> 28, with a regression assertion that the mutex-held section reads the PR fresh exactly once.",
-    "REVIEW_OPERATION_REQUEST_LIMIT IS UNCHANGED AT 25 and a regression assertion holds it there. The reclaim carries its own derived REVIEW_SILENT_RECLAIM_REQUEST_LIMIT = 28 and REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE = 14, with the derivation cited beside the constant in the same voice as the existing comment. The enforced ceiling equals the measured total exactly, with no undeclared headroom, and that equality is asserted.",
-    "THE PATH NOW HAS AN ENTRY GATE. It previously had none: requireReviewWireCapacity(REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE) runs before acquireReviewMutex, so a reclaim that cannot complete its mutex-held section refuses before the mutex exists. A fixture adds one pre-mutex request and proves no mutex ref was created and the lease is untouched.",
-    "THE REFUSAL NAMES ITS BUDGET (ask 3). It now reads: reviewer operation 'reclaim-silent-reviewer' exhausted its derived 28-request budget before request N, states how much is held back as the mutex-release reserve, says the ceiling is derived for that operation rather than a global default, and points at re-derivation rather than widening (issue #2075).",
-    "RED-FIRST PROVEN. With the derived budget unwired from reclaimSilentReviewer, all three new tests fail; verbatim: 'Error: reviewer operation cannot fit 14 remaining requests inside the 25-request budget; refused before mutex acquisition'. The fix was then restored and the suite is green at 489.",
-    "NO SAFETY PROPERTY WAS TRADED FOR BUDGET. The reclaim still re-proves, inside the mutex, the exact durable assignment, the exact active lease SHA, the PR state and head, the activity fingerprint against the immutable probe, and the durable verdict listing. Only a duplicate read of one PR was removed.",
-    "NO DATABASE OBJECT IS TOUCHED. Repo-maintenance work on the reviewer allocator and its verification record only, so db_reads and db_writes are empty, no migration is authored, and no claim, version or sidecar is involved.",
-    "NOTHING SHARED WAS MUTATED. The measurement is entirely in memory. No live reclaim, no lane-manager mutation, no reviewer assignment, no workflow dispatch, no preview or production apply, and no merge by this worker. The glm-5.3 lease on PR #2607 is untouched; reclaiming it is an operational step, now possible.",
-    "NO GUARD, WORKFLOW OR REQUIRED CHECK WAS WEAKENED, EDITED, SKIPPED OR DISABLED. One existing test's assertion on the refusal message text was updated to the new, more specific message; the assertion is stricter, not weaker.",
-    "The 'Cross-PR object collision' check is expected to fail on this PR: PRs #2640, #2695 and #2696 already edit scripts/manage-migration-author-lanes.mjs and precede it. That guard is strict FIFO and clearing it is not this worker's action.",
-    "The two .agent evidence files are the only files committed after the implementation head 6a5874d347e4bd519b38487238ba6c78cf92c988; no implementation file was edited to clear a check."
+    "Fresh main includes assignment-specific lease resolution. Removed duplicate selected-ref read using one snapshot per resolution; in-mutex proof remains fresh.",
+    "Measured current keys28 and legacy parallel fallback30; dedicated ceiling30/reserve15. Shared ceiling25 unchanged.",
+    "All main tests retained; old PR ancestry retained in merge commit."
   ],
   "stop_conditions_hit": []
 }
