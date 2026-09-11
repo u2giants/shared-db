@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/5",
-  "contract_sha256": "87b66e01924c614fc2a0fa2558cc65863fd3b0ac0f9f87c3fa11a94855634731",
-  "head_sha": "54ee6b1b2e3596bced8bc56fb9319c3a25f2ab8c",
+  "contract_ref": "refs/db-contracts/2727/6",
+  "contract_sha256": "79ff86b954b83e14dc2ab4bf74be4deb1bd9ea8a3c6a9cabcc6e41974673dc56",
+  "head_sha": "c2baef2778ba023bb9c9399d12b1281a34aa3919",
   "files_changed": [
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
@@ -28,20 +28,26 @@
       "evidence": "No whitespace errors after the reviewer repairs and current base check."
     },
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
+      "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "637 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 998 tests."
+      "evidence": "656 tests passed; zero failed, skipped, cancelled, or todo; the broader exact workflow command also passed all 1009 tests."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK with 275 semantically reviewed call sites."
+      "evidence": "truth audit OK with 276 semantically reviewed call sites."
+    },
+    {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "All GitHub calls in 215 scanned files use the governed transport."
     }
   ],
   "assumptions_resolved": [
     "No database or production operation was performed; the work is repository policy and manager code only.",
     "The sealed be971275 review REJECT is retained in PR evidence, and all three findings were repaired before this report.",
-    "Final integration and a new exact-head review wait for PR 2737 because it owns the colliding mutex-only manager changes."
+    "PR 2737 and its successful prose-only canary are integrated; its mutex-only command remains outside claims, reviewer assignment, shared stages, and lifecycle events.",
+    "PR 2736 remains correctly held until this resolver and admission interface reaches main."
   ],
   "stop_conditions_hit": []
 }

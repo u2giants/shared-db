@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "439beffc5970b60bc7e1c8e0445f892fae46f8a7",
+  "base_sha": "d530f85bc54d2b3c1f3ac52fcb9ee8d57c17fe3e",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
@@ -46,12 +46,13 @@
   ],
   "required_checks": [
     "git diff --check",
-    "node --test scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
-    "node scripts/check-throughput-truth-audit.mjs"
+    "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "node scripts/check-github-transport-conformance.mjs"
   ],
   "assumptions": [
     "This recovery contract records the already-authorized repository-maintenance scope after the initial implementation commit; it does not claim prospective dispatch.",
-    "PR 2737 lands before this branch because both change the manager and rulebook; PR 2736 rebases after this branch because it consumes the admission resolver.",
+    "PR 2737 merge 1b50c414 and canary main d530f85b are integrated while PR 2736 remains held until this branch lands because it consumes the admission resolver.",
     "Legacy structural work already in flight remains executable only when the proposed PR contains real schema DDL; new work requires the complete outcome fields."
   ],
   "stop_conditions": [
@@ -59,5 +60,5 @@
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 5
+  "generation": 6
 }
