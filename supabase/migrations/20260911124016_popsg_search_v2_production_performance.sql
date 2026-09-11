@@ -3,6 +3,13 @@
 -- Consolidate file facets and defer returned thumbnail payload to the selected page.
 -- Each active file belongs to exactly one tiny live-state index; only UUIDs are stored.
 -- No source label, URL, or unbounded error text becomes an index key.
+-- Ordinary transactional builds keep the governed atomic lane. Refuse lock
+-- contention promptly; each build has a bounded execution budget (production
+-- cold scans measured about 8-10 s each). A timeout aborts the whole
+-- transaction with nothing changed and is safe to retry. These migration-local
+-- limits do not alter the eight-second API role settings.
+set local lock_timeout='2s';
+set local statement_timeout='30s';
 create index idx_sgf_live_preview_ids on public.style_guide_files(id)
   where is_active and thumbnail_url is not null;
 create index idx_sgf_live_missing_clean_ids on public.style_guide_files(id)

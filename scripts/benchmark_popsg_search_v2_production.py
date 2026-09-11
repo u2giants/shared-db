@@ -50,13 +50,28 @@ def main():
         if acl_ok!='t':raise RuntimeError('Existing RPC execution permissions changed')
         if options.dirty_visibility:
             require("update public.style_guide_files set thumbnail_error=case when thumbnail_error is null then 'synthetic newly rendered error' else null end where substring(id::text,1,2) in ('01','35','67','99','cd');")
+        # Authorization boundary for both bodies: an authenticated caller without
+        # PopSG access, and an anonymous caller, must be refused with 42501.
+        for suffix in ['_baseline','']:
+            for role,uid,access in [('authenticated',"'25060000-0000-4000-8000-000000000002'::uuid",'false'),('anon','null::uuid','true')]:
+                denied=sql("create or replace function auth.role() returns text language sql as $$select '"+role+"'::text$$;create or replace function auth.uid() returns uuid language sql as $$select "+uid+"$$;create or replace function public.has_app_access(uuid,public.app_name) returns boolean language sql as $$select "+access+"$$;select public.search_style_guide_library_v2"+suffix+"(p_result_mode=>'files',p_limit=>1);")
+                if denied.returncode==0 or 'PopSG access required' not in denied.stderr:raise RuntimeError('authorization boundary not enforced: '+role+suffix)
+            allowed=require("create or replace function auth.role() returns text language sql as $$select 'authenticated'::text$$;create or replace function auth.uid() returns uuid language sql as $$select '25060000-0000-4000-8000-000000000001'::uuid$$;create or replace function public.has_app_access(uuid,public.app_name) returns boolean language sql as $$select true$$;select (public.search_style_guide_library_v2"+suffix+"(p_result_mode=>'files',p_limit=>1)) is not null;")
+            if allowed!='t':raise RuntimeError('authorized authenticated caller refused: '+suffix)
+        require("create or replace function auth.role() returns text language sql as $$select 'service_role'::text$$;create or replace function auth.uid() returns uuid language sql as $$select null::uuid$$;create or replace function public.has_app_access(uuid,public.app_name) returns boolean language sql as $$select true$$;")
+        print('PASS: authorization boundary identical for baseline and forward (deny authenticated-without-access, deny anon, allow authorized).',flush=True)
         for mode in ([] if options.parity_only else ['files','guides']):
+            hashes={}
             for label,suffix in [('baseline','_baseline'),('forward','')]:
                 start=time.monotonic()
                 result=sql("set work_mem='5MB';set statement_timeout='8000ms';select md5(value::text),value->>'total' from(select public.search_style_guide_library_v2"+suffix+"(p_result_mode=>'"+mode+"',p_sort=>'modified_desc',p_limit=>50) as value) q;")
                 elapsed=round((time.monotonic()-start)*1000)
                 print(json.dumps(dict(mode=mode,variant=label,elapsed_ms=elapsed,outcome='timeout' if result.returncode and 'statement timeout' in result.stderr else 'pass' if not result.returncode else 'error',summary=result.stdout.strip())),flush=True)
                 if result.returncode and (label=='forward' or 'statement timeout' not in result.stderr):raise RuntimeError(result.stderr)
+                if not result.returncode:hashes[label]=result.stdout.strip()
+            # Full-width equality is enforced whenever the baseline finished inside its budget.
+            if 'baseline' in hashes and hashes['baseline']!=hashes['forward']:raise RuntimeError('full-width result mismatch in '+mode+' mode: '+hashes['baseline']+' != '+hashes['forward'])
+            print(json.dumps(dict(mode=mode,full_width_hash_equal=('baseline' in hashes) or None)),flush=True)
         require(EDGE)
         # Null activity, empty (but non-null) thumbnail values, and all live queue states.
         require("update public.style_guide_files set is_active=null where id=md5('3')::uuid; update public.style_guide_files set thumbnail_url='' where id=md5('4')::uuid; update public.style_guide_files set thumbnail_url=null,thumbnail_error='' where id=md5('5')::uuid;")
