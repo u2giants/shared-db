@@ -1,23 +1,23 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "outcome": "blocked",
-  "pr": null,
+  "outcome": "ready-for-merge",
+  "pr": 2726,
   "migration_versions": [
-    "20260911044557"
+    "20260911051552"
   ],
-  "contract_ref": "refs/db-contracts/2506/14",
-  "contract_sha256": "14062343cef9874d7f4af061cf5ba16c1cff8ab253ca5b1c046e8b9d6f7360d2",
-  "head_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
+  "contract_ref": "refs/db-contracts/2506/15",
+  "contract_sha256": "39381e937a19ac438ecdd0a76de9ae7f7e5f33ee1d7926168679d1b5196ad6ec",
+  "head_sha": "7678cdbf41483b10a8a20710e4f6f76f4c3a8efd",
   "files_changed": [
-    ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911044557_popsg_search_v2_production_performance.sql",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911044557.json",
-    "scripts/production_catalog_verification.py",
+    "scripts/production-verification-sidecars/20260911051552.json",
     "scripts/production_business_risk_gate.py",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json"
+    "scripts/production_catalog_verification.py",
+    "supabase/migrations/20260911051552_popsg_search_v2_production_performance.sql"
   ],
   "db_reads": [
     "table public.style_guide_files",
@@ -43,15 +43,16 @@
     },
     {
       "command": "bash scripts/check-sql.sh",
-      "exit_code": 1,
-      "evidence": "Expected unapplied-version ordering refusal; supported supersession pending preparatory PR."
+      "exit_code": 0,
+      "evidence": "Static SQL guards passed against main39ee46b2 after supported supersession. Live-ledger guard not configured; parent owns shared target acceptance."
     }
   ],
   "assumptions_resolved": [
     "Full production-width synthetic benchmark217193 docs and11660 queue rows: files6469\u21923315ms; guides4520\u21923292ms, identical complete-result hashes. Eight-second timeout unchanged.",
-    "No shared database writes performed."
+    "No shared database writes performed.",
+    "Main39ee46b2 merged without SQL changes.188 verifier tests and complete sidecar inventory pass on this integration.",
+    "Existing160 exact JSON parity cases, production-width benchmark and dirty visibility-map proof retained; no unchanged benchmark rerun.",
+    "One governed external review, required CI, parent preview and actual production runtime acceptance remain separate delivery gates."
   ],
-  "stop_conditions_hit": [
-    "Final supported version reservation, refreshed evidence, CI and independent review remain pending."
-  ]
+  "stop_conditions_hit": []
 }

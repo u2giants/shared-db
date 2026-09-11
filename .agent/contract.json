@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 14,
+  "generation": 15,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
+  "base_sha": "39ee46b2def37e1b1e14217bd145537aa57ef265",
   "dispatcher": "Codex orchestrator marker2714",
   "worker": "Codex issue2506 production-performance worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -13,9 +13,9 @@
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911044557_popsg_search_v2_production_performance.sql",
+    "supabase/migrations/20260911051552_popsg_search_v2_production_performance.sql",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911044557.json",
+    "scripts/production-verification-sidecars/20260911051552.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     "docs/verification/throughput-guard-truth-baseline-20260828.json"
@@ -23,9 +23,9 @@
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911044557_popsg_search_v2_production_performance.sql",
+    "supabase/migrations/20260911051552_popsg_search_v2_production_performance.sql",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911044557.json",
+    "scripts/production-verification-sidecars/20260911051552.json",
     "scripts/production_catalog_verification.py",
     "scripts/production_business_risk_gate.py",
     "docs/verification/throughput-guard-truth-baseline-20260828.json"
@@ -54,7 +54,8 @@
   "assumptions": [
     "Fresh supported claim2722 covers exactly the function and three indexes.",
     "Local diagnostic candidate predates this fresh contract; no false claim of publication before diagnostic authorship.",
-    "All fixture rows are synthetic. Production acceptance remains a separate parent-owned gate."
+    "All fixture rows are synthetic. Production acceptance remains a separate parent-owned gate.",
+    "Supported unapplied-version supersession reserved20260911051552; main39ee46b2 integrated without SQL changes. Existing benchmark evidence remains applicable; no unchanged benchmark rerun."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
