@@ -100,6 +100,18 @@ begin
   end loop;
   if seen<>7 then raise exception '#2706 pagination lost source rows'; end if;
 
+  -- A non-namespaced 20th Century identity retains its independent source group.
+  insert into plm.twentieth_century_dcp_property(source_system,source_id,display_name)
+  values('twentieth_century_dcpvault','bare-'||k,k||' independent twentieth');
+  page := api.db_data_admin_scraped_properties(k||' independent twentieth',null,100);
+  if jsonb_array_length(page->'rows')<>1 then raise exception '#2706 independent twentieth fixture missing'; end if;
+  row_value := page->'rows'->0;
+  if row_value->>'presentation_licensor_key' is distinct from '20th-century'
+    or row_value->>'presentation_licensor_name' is distinct from '20th Century - Creative (DCP Vault)'
+    or row_value->>'source_status' is not null then
+    raise exception '#2706 changed independent twentieth source presentation';
+  end if;
+
   insert into plm.dcp_opa_property_resolution(source_system,source_table,source_property_id,
     decision_version,approval_status,creative_decision_state,evidence_reference,evidence_sha256,
     decision_reason,approved_at,approved_by)
@@ -137,6 +149,16 @@ begin
   insert into plm.dcp_opa_property_resolution_member(resolution_id,licensed_property_id,
     member_ordinal,submission_source_system,submission_source_table,submission_source_id)
   values(mapped_id,a,1,'disney_opa','plm.opa_property',a::text);
+  -- A newer member-equivalent mapped copy without a contract must not erase
+  -- the existing signed studio assertion belonging to this stable identity.
+  insert into plm.dcp_opa_property_resolution(source_system,source_table,source_property_id,
+    decision_version,approval_status,evidence_reference,evidence_sha256,decision_reason,approved_at,approved_by)
+  values('lucasfilm_dcpvault','plm.lucasfilm_dcp_property',k||'-studio',2,'approved',
+    'synthetic-2706-studio-copy',repeat('c',64),'synthetic member-equivalent copy',now(),'contract')
+  returning resolution_id into conflict_id;
+  insert into plm.dcp_opa_property_resolution_member(resolution_id,licensed_property_id,
+    member_ordinal,submission_source_system,submission_source_table,submission_source_id)
+  values(conflict_id,a,1,'disney_opa','plm.opa_property',a::text);
   page := api.db_data_admin_scraped_properties(k||'-studio',null,100);
   if jsonb_array_length(page->'rows')<>2 then raise exception '#2706 signed studio fixture missing'; end if;
   for row_value in select value from jsonb_array_elements(page->'rows') loop
@@ -144,6 +166,28 @@ begin
       or row_value->>'presentation_licensor_key' is distinct from 'marvel'
       or row_value->>'review_reason' is not null then
       raise exception '#2706 signed studio placement differs between retained copies';
+    end if;
+  end loop;
+
+  -- Conflicting signed studio assertions fail closed even when member sets agree.
+  insert into plm.dcp_opa_property_resolution(source_system,source_table,source_property_id,
+    decision_version,supersedes_resolution_id,approval_status,evidence_reference,evidence_sha256,decision_reason,
+    contract_asserted_studio_code,contract_evidence_reference,contract_evidence_sha256,approved_at,approved_by)
+  values('lucasfilm_dcpvault','plm.lucasfilm_dcp_property',k||'-studio',3,conflict_id,'approved',
+    'synthetic-2706-studio-conflict',repeat('d',64),'synthetic conflicting signed studio',
+    'lucasfilm','synthetic-contract-conflict',repeat('e',64),now(),'contract')
+  returning resolution_id into conflict_id;
+  insert into plm.dcp_opa_property_resolution_member(resolution_id,licensed_property_id,
+    member_ordinal,submission_source_system,submission_source_table,submission_source_id)
+  values(conflict_id,a,1,'disney_opa','plm.opa_property',a::text);
+  page := api.db_data_admin_scraped_properties(k||'-studio',null,100);
+  if jsonb_array_length(page->'rows')<>2 then raise exception '#2706 studio conflict hid source rows'; end if;
+  for row_value in select value from jsonb_array_elements(page->'rows') loop
+    if row_value->>'source_status' is distinct from 'authority_conflict'
+      or row_value->>'presentation_licensor_key' is distinct from 'dcp-authority-conflict'
+      or row_value->>'mapping_state' is distinct from 'mapped'
+      or row_value->>'review_reason' is null or row_value->>'review_guidance' is null then
+      raise exception '#2706 conflicting studio assertions did not fail closed independently of agreed mapping';
     end if;
   end loop;
 end $$;

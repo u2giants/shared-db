@@ -89,6 +89,8 @@ begin
       where m.resolution_id = r.resolution_id
     ) mf
     where r.approval_status in ('approved','rejected')
+      and (r.source_property_id like 'dcpvault:%'
+        or r.source_table in ('plm.dcp_property','plm.lucasfilm_dcp_property'))
     order by r.source_system,r.source_table,r.source_property_id,
       r.decision_version desc,r.approved_at desc nulls last,r.resolution_id desc
   ), dcp_identity_authority as materialized (
@@ -96,6 +98,8 @@ begin
       count(distinct member_fingerprint) filter (where copy_state='mapped') > 1
         or count(distinct contract_asserted_studio_code)
           filter (where copy_state='mapped') > 1 as authority_conflict,
+      min(contract_asserted_studio_code) filter (where copy_state='mapped')
+        as contract_asserted_studio_code,
       (array_agg(resolution_id order by (copy_state='mapped') desc,
         decision_version desc,approved_at desc nulls last,resolution_id desc))[1]
         as resolution_id
@@ -103,7 +107,7 @@ begin
     group by identity_key
   ), dcp_current_resolution as materialized (
     select r.resolution_id,r.source_system,r.source_table,r.source_property_id,
-      r.contract_asserted_studio_code,
+      a.contract_asserted_studio_code,
       case when a.authority_conflict then 'conflict' else r.copy_state end
         as decision_state
     from dcp_identity_authority a
@@ -111,6 +115,7 @@ begin
   ), dcp_member_count as materialized (
     select rm.resolution_id, count(*) as member_count
     from plm.dcp_opa_property_resolution_member rm
+    join dcp_current_resolution r on r.resolution_id = rm.resolution_id
     group by rm.resolution_id
   ), dcp_scope_latest as materialized (
     select distinct on (
@@ -119,6 +124,7 @@ begin
     )
       rm.resolution_id, sm.branch_code
     from plm.dcp_opa_property_resolution_member rm
+    join dcp_current_resolution r on r.resolution_id = rm.resolution_id
     join plm.opa_property_scope_membership sm
       on sm.licensed_property_id = rm.licensed_property_id
      and sm.approval_status = 'approved'
@@ -374,7 +380,8 @@ begin
 
     union all
     select
-      case when x.authority_status = 'direct_disney' then 'disney'
+      case when p.source_id not like 'dcpvault:%' then '20th-century'
+        when x.authority_status = 'direct_disney' then 'disney'
         when x.authority_status = 'direct_marvel' then 'marvel'
         when x.authority_status = 'direct_lucasfilm' then 'lucasfilm-star-wars'
         when x.authority_status = 'direct_pixar' then 'pixar'
@@ -382,7 +389,8 @@ begin
         when x.authority_status = 'contract_opa_conflict' then 'dcp-contract-opa-conflict'
         when x.authority_status = 'opa_scope_conflict' then 'dcp-opa-scope-conflict'
         else 'dcp-authority-unresolved' end,
-      case when x.authority_status = 'direct_disney' then 'Disney - Creative (DCP Vault)'
+      case when p.source_id not like 'dcpvault:%' then '20th Century - Creative (DCP Vault)'
+        when x.authority_status = 'direct_disney' then 'Disney - Creative (DCP Vault)'
         when x.authority_status = 'direct_marvel' then 'DCP Vault - Creative (authoritative Marvel scope)'
         when x.authority_status = 'direct_lucasfilm' then 'Lucasfilm / Star Wars - Creative (DCP Vault)'
         when x.authority_status = 'direct_pixar' then 'Pixar - Creative (DCP Vault)'
@@ -391,8 +399,10 @@ begin
         when x.authority_status = 'opa_scope_conflict' then 'DCP Creative - mapped OPA scope conflict'
         else 'DCP Creative - unresolved authority' end,
       p.source_system, 'plm.twentieth_century_dcp_property', p.source_id, p.display_name,
-      coalesce(x.authority_status, 'unresolved'),
-      'explicit_dcp_to_opa_property_id_with_independent_contract_and_opa_authority', null::timestamptz,
+      case when p.source_id like 'dcpvault:%' then coalesce(x.authority_status, 'unresolved') end,
+      case when p.source_id like 'dcpvault:%'
+        then 'explicit_dcp_to_opa_property_id_with_independent_contract_and_opa_authority'
+        else 'metadata_properties_array' end, null::timestamptz,
       p.last_seen_metadata_run_id::text
     from plm.twentieth_century_dcp_property p
     left join dcp_current_resolution r
