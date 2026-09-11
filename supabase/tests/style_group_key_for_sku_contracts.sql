@@ -15,8 +15,15 @@ BEGIN
       LATERAL pg_catalog.aclexplode(COALESCE(p.proacl,pg_catalog.acldefault('f',p.proowner))) a
     WHERE p.oid='public.style_group_key_for_sku(text)'::regprocedure AND a.grantee=0
   ) THEN RAISE EXCEPTION 'SKU helper exposed to PUBLIC'; END IF;
-  IF NOT pg_catalog.has_function_privilege('service_role','public.style_group_key_for_sku(text)','EXECUTE') THEN
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='service_role')
+    AND NOT pg_catalog.has_function_privilege('service_role','public.style_group_key_for_sku(text)','EXECUTE') THEN
     RAISE EXCEPTION 'Service-role helper execution missing'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='anon')
+    AND pg_catalog.has_function_privilege('anon','public.style_group_key_for_sku(text)','EXECUTE') THEN
+    RAISE EXCEPTION 'SKU helper exposed to anon'; END IF;
+  IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname='authenticated')
+    AND pg_catalog.has_function_privilege('authenticated','public.style_group_key_for_sku(text)','EXECUTE') THEN
+    RAISE EXCEPTION 'SKU helper exposed to authenticated'; END IF;
   FOR row IN SELECT * FROM (VALUES
     (NULL::text,NULL::text), ('',NULL), ('ABC1234',NULL),
     ('folder/ABC1234/image.png','ABC1234'), ('ABC1234/','ABC1234'),

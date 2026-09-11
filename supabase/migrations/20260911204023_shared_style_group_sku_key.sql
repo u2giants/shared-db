@@ -19,13 +19,25 @@ AS $$
   WHERE seg ~ '^[A-Za-z0-9]+$'
     AND seg ~ '[A-Za-z]'
     AND seg ~ '[0-9]'
-    AND length(seg) >= 7
-    AND ord < array_length(string_to_array(p_relative_path, '/'), 1)
+    AND pg_catalog.length(seg) >= 7
+    AND ord < pg_catalog.array_length(pg_catalog.string_to_array(p_relative_path, '/'), 1)
   ORDER BY ord
   LIMIT 1
 $$;
 
 REVOKE ALL ON FUNCTION public.style_group_key_for_sku(text) FROM PUBLIC;
+DO $revoke_api_roles$
+DECLARE v_role text;
+BEGIN
+  -- Hosted Supabase grants anon and authenticated EXECUTE at CREATE FUNCTION time;
+  -- revoking PUBLIC alone leaves those named grants behind.
+  FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
+    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = v_role) THEN
+      EXECUTE pg_catalog.format('REVOKE ALL ON FUNCTION public.style_group_key_for_sku(text) FROM %I', v_role);
+    END IF;
+  END LOOP;
+END
+$revoke_api_roles$;
 GRANT EXECUTE ON FUNCTION public.style_group_key_for_sku(text) TO postgres, service_role;
 
 CREATE OR REPLACE FUNCTION public.rebuild_style_groups_batch(

@@ -197,8 +197,8 @@ declare
     'seg ~ ''^[A-Za-z0-9]+$''',
     'seg ~ ''[A-Za-z]''',
     'seg ~ ''[0-9]''',
-    'length(seg) >= 7',
-    'ord < array_length(string_to_array('
+    'pg_catalog.length(seg) >= 7',
+    'ord < pg_catalog.array_length(pg_catalog.string_to_array('
   ];
 begin
   select pg_get_functiondef(p.oid) into v_recon
