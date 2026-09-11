@@ -79,21 +79,24 @@ export function transitionNotification(previousSnapshot, nextSnapshot) {
   requireObject(previousSnapshot, 'previous snapshot')
   requireObject(nextSnapshot, 'next snapshot')
   if (previousSnapshot.snapshot_id === nextSnapshot.snapshot_id) return null
-  return {
+  const notification = {
     event_type: 'orchestrator_state_changed',
     previous_snapshot_id: previousSnapshot.snapshot_id,
     snapshot_id: nextSnapshot.snapshot_id,
   }
+  return {...notification,event_id:sha256(canonicalJson(notification))}
 }
 
 export function publishSnapshotTransition(input, { previousSnapshot = null, capturedAt, publish } = {}) {
   const snapshot = buildOrchestratorSnapshot(input, { capturedAt })
-  const notification = previousSnapshot ? transitionNotification(previousSnapshot, snapshot) : {
+  let notification = previousSnapshot ? transitionNotification(previousSnapshot, snapshot) : {
     event_type: 'orchestrator_snapshot_created', snapshot_id: snapshot.snapshot_id,
   }
+  if(notification&&!notification.event_id)notification={...notification,event_id:sha256(canonicalJson(notification))}
   if (notification) {
     if (typeof publish !== 'function') throw new OrchestratorSnapshotError('changed snapshot requires a publisher')
-    publish({ snapshot, notification })
+    const acknowledgement=publish({ snapshot, notification })
+    if(!acknowledgement||acknowledgement.event_id!==notification.event_id||!['created','existing'].includes(acknowledgement.status))throw new OrchestratorSnapshotError('snapshot event lacks exact compare-and-create acknowledgement')
   }
   return { snapshot, notification }
 }
@@ -104,7 +107,16 @@ export function agentCheckInNotification({ status, issue, evidence_id: evidenceI
   if (!Number.isInteger(issue) || issue <= 0 || typeof evidenceId !== 'string' || !evidenceId.trim()) {
     throw new OrchestratorSnapshotError('terminal agent check-in requires issue and durable evidence')
   }
-  return { event_type: status === 'completed' ? 'agent_completed' : 'agent_blocked', work_issue: issue, evidence_id: evidenceId }
+  const event={event_type:status==='completed'?'agent_completed':'agent_blocked',work_issue:issue,evidence_id:evidenceId}
+  return {...event,event_id:sha256(canonicalJson(event))}
+}
+
+export function publishAgentCheckIn(input,{publish}={}){
+  const event=agentCheckInNotification(input);if(!event)return null
+  if(typeof publish!=='function')throw new OrchestratorSnapshotError('terminal agent check-in requires a publisher')
+  const acknowledgement=publish(event)
+  if(!acknowledgement||acknowledgement.event_id!==event.event_id||!['created','existing'].includes(acknowledgement.status))throw new OrchestratorSnapshotError('agent check-in lacks exact compare-and-create acknowledgement')
+  return {event,acknowledgement}
 }
 
 export function main(argv) {

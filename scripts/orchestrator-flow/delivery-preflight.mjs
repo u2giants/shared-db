@@ -51,8 +51,16 @@ export function runDeliveryPreflight(input) {
   }
 }
 
+export function validateDeliveryPreflight(record) {
+  if(!record||record.schema_version!==DELIVERY_PREFLIGHT_SCHEMA_VERSION||record.status!=='PASS')throw new DeliveryPreflightError('passing preflight record is unreadable')
+  const normalized=deliveryPreflightInputs(record.input)
+  const digest=sha256(canonicalJson(normalized))
+  if(record.preflight_id!==digest||record.input_digest!==digest)throw new DeliveryPreflightError('preflight seal does not match its canonical input')
+  return record
+}
+
 export function reuseDeliveryPreflight(record, currentInput) {
-  if (!record || record.schema_version !== DELIVERY_PREFLIGHT_SCHEMA_VERSION || record.status !== 'PASS') return null
+  try{validateDeliveryPreflight(record)}catch{return null}
   const normalized = deliveryPreflightInputs(currentInput)
   const currentDigest = sha256(canonicalJson(normalized))
   if (record.preflight_id !== record.input_digest || record.input_digest !== currentDigest) return null
@@ -72,7 +80,7 @@ export function composeDeliveryPreflight({ issue, pr, head_sha }, adapters) {
 
 export function registerDeliveryPreflight(evidenceBundle, preflight) {
   try{validateEvidenceBundle(evidenceBundle)}catch(error){throw new DeliveryPreflightError(`evidence bundle is unreadable: ${error.message}`)}
-  if(!preflight||preflight.status!=='PASS'||preflight.preflight_id!==preflight.input_digest)throw new DeliveryPreflightError('only a sealed passing preflight can be registered')
+  validateDeliveryPreflight(preflight)
   if(Number(evidenceBundle.metadata?.issue)!==preflight.input.issue||Number(evidenceBundle.metadata?.pr)!==preflight.input.pr||String(evidenceBundle.metadata?.integration_sha).toLowerCase()!==preflight.input.head_sha)throw new DeliveryPreflightError('preflight does not bind the evidence bundle issue, PR, and exact head')
   const registered={...evidenceBundle,metadata:{...evidenceBundle.metadata,delivery_preflight:{preflight_id:preflight.preflight_id,input_digest:preflight.input_digest}}}
   try{validateEvidenceBundle(registered)}catch(error){throw new DeliveryPreflightError(`preflight registration is invalid: ${error.message}`)}

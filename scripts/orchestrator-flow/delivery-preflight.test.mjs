@@ -8,6 +8,7 @@ import {
   runDeliveryPreflight,
   composeDeliveryPreflight,
   registerDeliveryPreflight,
+  validateDeliveryPreflight,
 } from './delivery-preflight.mjs'
 
 const input = () => ({
@@ -64,6 +65,16 @@ test('changed head, evidence, or status invalidates reuse', () => {
   const blocked = input()
   blocked.checks.runner_capacity.status = 'BLOCKED'
   assert.equal(reuseDeliveryPreflight(result, blocked), null)
+})
+
+test('matching outer ids cannot conceal tampered preflight input',()=>{
+  const result=runDeliveryPreflight(input()),tampered=structuredClone(result)
+  tampered.input.pr=999
+  assert.throws(()=>validateDeliveryPreflight(tampered),/canonical input/)
+  assert.equal(reuseDeliveryPreflight(tampered,tampered.input),null)
+  const identity={policy_version:1,migrations:[],focused_files:[],verification_files:[],claims:{writes:[],reads:[]},global_invalidators:[],migration_order_digest:'0'.repeat(64)}
+  const bundle={schema_version:1,bundle_id:sha256(canonicalJson(identity)),identity,metadata:{issue:2728,pr:999,claim:1,base_main_sha:'b'.repeat(40),integration_sha:'a'.repeat(40),review:null,ci:null}}
+  assert.throws(()=>registerDeliveryPreflight(bundle,tampered),/canonical input/)
 })
 
 test('unknown checks and evidence-free success fail closed', () => {

@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { canonicalJson } from './evidence-bundle.mjs'
 import {
   OrchestratorSnapshotError,
   buildOrchestratorSnapshot,
@@ -7,6 +8,7 @@ import {
   verifyOrchestratorSnapshot,
   publishSnapshotTransition,
   agentCheckInNotification,
+  publishAgentCheckIn,
 } from './orchestrator-snapshot.mjs'
 
 const input = () => ({
@@ -21,17 +23,30 @@ const input = () => ({
 
 test('publishing is edge-triggered and unchanged state emits no check-in',()=>{
   const first=buildOrchestratorSnapshot(input()),published=[]
-  const same=publishSnapshotTransition(input(),{previousSnapshot:first,publish:(row)=>published.push(row)})
+  const writer=(row)=>{published.push(row);return{status:'created',event_id:row.notification.event_id}}
+  const same=publishSnapshotTransition(input(),{previousSnapshot:first,publish:writer})
   assert.equal(same.notification,null);assert.equal(published.length,0)
   const changed=input();changed.eligible_queue.push({issue:32,priority:1})
-  publishSnapshotTransition(changed,{previousSnapshot:first,publish:(row)=>published.push(row)})
+  publishSnapshotTransition(changed,{previousSnapshot:first,publish:writer})
   assert.equal(published.length,1);assert.equal(published[0].notification.event_type,'orchestrator_state_changed')
 })
 
 test('agents suppress progress chatter and report one terminal fact',()=>{
   for(const status of ['intermediate','unchanged','working','waiting'])assert.equal(agentCheckInNotification({status}),null)
-  assert.deepEqual(agentCheckInNotification({status:'completed',issue:7,evidence_id:'artifact:7'}),{event_type:'agent_completed',work_issue:7,evidence_id:'artifact:7'})
+  const completed=agentCheckInNotification({status:'completed',issue:7,evidence_id:'artifact:7'})
+  assert.equal(completed.event_type,'agent_completed');assert.match(completed.event_id,/^[0-9a-f]{64}$/)
   assert.throws(()=>agentCheckInNotification({status:'blocked',issue:7,evidence_id:''}),/durable evidence/)
+})
+
+test('snapshot and terminal check-in retries converge to one immutable event',()=>{
+  const stored=new Map(),compareCreate=(event)=>{const value=event.notification??event,key=value.event_id,prior=stored.get(key);if(prior&&canonicalJson(prior)!==canonicalJson(value))throw new Error('collision');if(prior)return{status:'existing',event_id:key};stored.set(key,value);return{status:'created',event_id:key}}
+  const first=buildOrchestratorSnapshot(input()),changed=input();changed.claims.push({issue:99,writes:['core.z']})
+  const one=publishSnapshotTransition(changed,{previousSnapshot:first,publish:compareCreate}),two=publishSnapshotTransition(changed,{previousSnapshot:first,publish:compareCreate})
+  assert.equal(one.notification.event_id,two.notification.event_id);assert.equal(stored.size,1)
+  const check={status:'blocked',issue:99,evidence_id:'artifact:block-99'}
+  publishAgentCheckIn(check,{publish:compareCreate});publishAgentCheckIn(check,{publish:compareCreate})
+  assert.equal(stored.size,2)
+  assert.throws(()=>publishAgentCheckIn(check,{publish:()=>({status:'created',event_id:'wrong'})}),/acknowledgement/)
 })
 
 test('snapshot is deterministic despite collection order and capture time', () => {
@@ -70,11 +85,11 @@ test('unchanged state produces no notification and a transition wakes once', () 
   const changed = input()
   changed.eligible_queue.push({ issue: 31, priority: 4 })
   const next = buildOrchestratorSnapshot(changed)
-  assert.deepEqual(transitionNotification(first, next), {
-    event_type: 'orchestrator_state_changed',
-    previous_snapshot_id: first.snapshot_id,
-    snapshot_id: next.snapshot_id,
-  })
+  const notification=transitionNotification(first,next)
+  assert.equal(notification.event_type,'orchestrator_state_changed')
+  assert.equal(notification.previous_snapshot_id,first.snapshot_id)
+  assert.equal(notification.snapshot_id,next.snapshot_id)
+  assert.match(notification.event_id,/^[0-9a-f]{64}$/)
 })
 
 test('unroutable marker and unreadable collections fail closed', () => {
