@@ -174,6 +174,9 @@ end $$;
 create trigger opa_compliance_capture_guard before insert or update or delete
   on plm.opa_property_compliance_capture for each row
   execute function plm.guard_opa_property_compliance_capture();
+create trigger opa_compliance_capture_truncate_guard before truncate
+  on plm.opa_property_compliance_capture for each statement
+  execute function plm.guard_opa_property_compliance_capture();
 
 create function plm.finalize_opa_property_compliance_capture(p_capture_id uuid,p_approved_by text)
 returns uuid language plpgsql security definer set search_path=pg_catalog,pg_temp as $$

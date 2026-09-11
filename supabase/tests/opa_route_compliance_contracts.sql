@@ -58,6 +58,10 @@ begin
   if plm.finalize_opa_property_compliance_capture(c,'synthetic-reviewer')<>c then
     raise exception '#2703 exact completed finalize not idempotent'; end if;
   begin
+    truncate plm.opa_property_compliance_capture cascade;
+    raise exception '#2703 truncated retained compliance evidence';
+  exception when object_not_in_prerequisite_state then null; end;
+  begin
     update plm.opa_property_compliance_capture set evidence_reference='changed' where compliance_capture_id=c;
     raise exception '#2703 changed sealed source evidence';
   exception when object_not_in_prerequisite_state then null; end;
