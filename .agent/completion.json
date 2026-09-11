@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2707/2",
   "contract_sha256": "68d80ed503743d8ae7f787d545f7a650bcfc8ea57162899d4b0e9f0bb1edbd24",
-  "head_sha": "6bf838b26c17e48582086b5f4409028995343b61",
+  "head_sha": "209716bb12ba392219b65b1cc8c2528c76311d3a",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -30,7 +30,7 @@
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "277 call sites match; three new local source/caller diagnostics reviewed as non-database claims."
+      "evidence": "278 call sites match; three new local source/caller diagnostics reviewed as non-database claims."
     }
   ],
   "assumptions_resolved": [
