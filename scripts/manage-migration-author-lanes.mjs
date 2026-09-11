@@ -451,6 +451,37 @@ export function reviewersForOrchestrator(engine, reviewers=ACTIVE_REVIEWERS){
   return reviewers.filter((row)=>String(row.orchestratorEngine??'').toLowerCase()!==normalized)
 }
 
+// Allocation uses the reconciled machine answer before taking any durable slot.
+// Execution still runs its independent wrapper doctor immediately before review.
+export function reviewerUsability(wrapper,run=execFileSync,resolve=resolveCommandPath,platform=process.platform){
+  const provider=({'ai-grok-review':'grok','ai-glm':'glm','ai-kimi':'kimi','ai-qwen':'qwen','ai-muse':'muse','ai-gemini':'gemini','ai-codex-review':'codex','ai-deepseek-agent':'deepseek'})[wrapper]
+  const resolved=resolve('ai-review-preflight')
+  if(!provider||!resolved)return {usable:false,reason:'reconciled preflight unavailable'}
+  const shim=platform==='win32'&&/\.(cmd|bat)$/i.test(resolved)
+  const file=shim?(process.env.ComSpec||'cmd.exe'):resolved
+  const args=shim?['/d','/s','/c',resolved,'usable',provider]:['usable',provider]
+  try{
+    const output=run(file,args,{encoding:'utf8',stdio:['ignore','pipe','pipe'],timeout:15000})
+    const result=JSON.parse(output)
+    return result.provider===provider&&result.usable===true?{usable:true}:{usable:false,reason:result.failure_class||result.status||'unusable preflight response'}
+  }catch(error){return {usable:false,reason:`reconciled preflight refused (${error.code??error.status??'invalid response'})`}}
+}
+
+export function allocatableReviewers(io){
+  const independent=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  if(typeof io.reviewerUsability!=='function')throw new LaneError('reviewer allocation has no reconciled usability probe; no sequence or slot was consumed')
+  const unavailable=[]
+  const eligible=independent.filter((row)=>{
+    let result
+    try{result=io.reviewerUsability(row.wrapper)}catch{result={usable:false,reason:'probe failed'}}
+    if(result?.usable===true)return true
+    unavailable.push(`${row.name}: ${result?.reason??'unusable'}`)
+    return false
+  })
+  if(!eligible.length)throw new LaneError(`no allocatable reviewer passed reconciled preflight; no sequence or slot was consumed (${unavailable.join('; ')})`)
+  return eligible
+}
+
 // ---------------------------------------------------------------------------
 // Reading the orchestrator marker resolver (issue #2127)
 //
@@ -1730,6 +1761,7 @@ export const githubIo = {
   localHead(worktree){return execFileSync('git',['-C',worktree,'rev-parse','HEAD'],{encoding:'utf8'}).trim()},
   localClean(worktree){return execFileSync('git',['-C',worktree,'status','--porcelain'],{encoding:'utf8'}).split(/\r?\n/).filter(Boolean).every((line)=>line.slice(3).replaceAll('\\','/').startsWith('.ai/')) },
   currentMaxVersion:currentMainMaxVersion,
+  reviewerUsability,
   commandAvailable(command){return Boolean(resolveCommandPath(command))},
   // Ask the wrapper's own `doctor` whether it can actually work RIGHT NOW.
   // Every wrapper prints one `PASS <check>` / `FAIL <check>` line per check, so
@@ -3778,7 +3810,7 @@ export function describeMovedAssignmentHead(request,recorded){
 // must NOT be reused for a draw without that branch and those filters.
 export function pickReviewer(sequence,io){
   const busy=findBusyReviewers(io)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  const eligible=allocatableReviewers(io)
   if(!eligible.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
   const eligibleNames=new Set(eligible.map((row)=>row.name)),start=(sequence-1)%ACTIVE_REVIEWERS.length
   const ordered=Array.from({length:ACTIVE_REVIEWERS.length},(_,offset)=>ACTIVE_REVIEWERS[(start+offset)%ACTIVE_REVIEWERS.length]).filter((row)=>eligibleNames.has(row.name))
@@ -4011,7 +4043,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
   io=reviewOperationIo(io)
   const request={issue:Number(issue),pr:Number(pr),headSha:String(headSha),slot:Number(slot)}
   const concurrentLeases=Boolean(io.requiresExactReviewHeadSha)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  const eligible=allocatableReviewers(io)
   if(!eligible.length)throw new LaneError('no reviewer is independent from the live orchestrator engine')
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   // Slot >=2 needs a name to exclude BEFORE the mutex is taken: cheap, and it
@@ -4547,7 +4579,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     :validateTerminalReviewerFailure({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot},'reviewer replacement')
   if(silenceReplacement&&(!Number.isInteger(request.issue)||!Number.isInteger(request.pr)||!/^[0-9a-f]{40}$/i.test(request.headSha)||!Number.isInteger(request.failedSequence)||!Number.isInteger(request.slot)||request.slot<1||!confirmNoVerdict||!confirmNoArtifact||String(failingCheck??'').trim()))throw new LaneError('silent reviewer replacement requires exact issue, PR, 40-character head SHA, failed sequence, review slot, no failing check, and explicit confirmation of no verdict and no artifact')
   const concurrentLeases=Boolean(io.requiresExactReviewHeadSha)
-  const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
+  const eligible=allocatableReviewers(io)
   const eligibleNames=new Set(eligible.map((row)=>row.name))
   // A LOCAL fault is not the reviewer's fault. Replacing on one spends a
   // rotation slot and records permanent evidence against a provider that was

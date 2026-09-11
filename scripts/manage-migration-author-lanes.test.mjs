@@ -1,3 +1,4 @@
+import { reviewerUsability } from './manage-migration-author-lanes.mjs'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { spawn, spawnSync } from 'node:child_process'
@@ -542,6 +543,7 @@ function giveVerdict(io,{issue,pr,headSha,slot=1,replacementSequence=null}){
 function reviewIo(){
   const io=memoryIo(), commits=new Map();let seq=0
   io.resolveOrchestratorEngine=()=> 'claude'
+  io.reviewerUsability=()=>({usable:true})
   io.refs.set(REVIEW_ACTIVE_CUTOVER_REF,'cutover-complete')
   io.makeOwnerCommit=(message)=>{const sha=(++seq).toString(16).padStart(40,'0');commits.set(sha,{message});return sha}
   io.getCommit=(sha)=>commits.get(sha)
@@ -7112,4 +7114,45 @@ test('#2694 releasing a slot 2 failure is refused when the lease at that ref nam
   // IS slot 1).
   io.refs.set(leaseRef,io.makeOwnerCommit(original.replace(/ slot=2(?=s|$)/,'')))
   assert.throws(()=>releaseFailedReviewer({issue:request.issue,pr:request.pr,headSha:request.headSha,failedSequence:second.sequence,slot:2,failureCode:'provider_unavailable',confirmNoVerdict:true,confirmNoArtifact:true},io),/active lease does not match the terminal failure evidence/)
+})
+
+
+test('allocation skips quarantined and exhausted providers without consuming extra sequence',()=>{
+  const io=reviewIo(),probes=[]
+  io.reviewerUsability=(wrapper)=>{probes.push(wrapper);return {usable:!['ai-grok-review','ai-kimi','ai-gemini'].includes(wrapper),reason:'quarantined or out of credits'}}
+  const result=assignNextReviewer({issue:9,pr:109,headSha:'abcdef9'},io)
+  assert.equal(result.reviewer,'glm-5.3')
+  assert.equal(result.sequence,1)
+  assert.ok(probes.includes('ai-gemini'))
+})
+test('unavailable or absent usability evidence refuses before any durable mutation',()=>{
+  for(const probe of [undefined,()=>({usable:false}),()=>({usable:'true'}),()=>{throw Error('offline')}]){
+    const io=reviewIo(),before=[...io.refs]
+    io.reviewerUsability=probe
+    assert.throws(()=>assignNextReviewer({issue:9,pr:109,headSha:'abcdef9'},io),/usability|preflight/)
+    assert.deepEqual([...io.refs],before)
+  }
+})
+test('reconciled usability requires exit zero and matching affirmative JSON',()=>{
+  const resolve=()=>'/bin/ai-review-preflight'
+  for(const output of ['garbage','{}','{"provider":"kimi","usable":true}','{"provider":"grok","usable":false}'])assert.equal(reviewerUsability('ai-grok-review',()=>output,resolve,'linux').usable,false)
+  assert.equal(reviewerUsability('ai-grok-review',()=>{throw Object.assign(Error('credits'),{status:3})},resolve,'linux').usable,false)
+  assert.equal(reviewerUsability('ai-grok-review',(_file,args)=>{assert.deepEqual(args,['usable','grok']);return '{"provider":"grok","usable":true}'},resolve,'linux').usable,true)
+})
+
+test('replacement skips newly quarantined providers and preserves failure when none usable',()=>{
+  const io=failedReviewIo()
+  io.reviewerUsability=(wrapper)=>({usable:wrapper==='ai-qwen'})
+  assert.equal(replaceFailedReviewer(replacementRequest,io).reviewer,'qwen-3.8-max')
+  const blocked=failedReviewIo(),before=[...blocked.refs]
+  blocked.reviewerUsability=()=>({usable:false,reason:'out of credits'})
+  assert.throws(()=>replaceFailedReviewer(replacementRequest,blocked),/no allocatable reviewer/)
+  assert.deepEqual([...blocked.refs],before)
+})
+test('Windows preflight resolves the command shim and preserves provider arguments',()=>{
+  assert.equal(reviewerUsability('ai-gemini',(file,args)=>{
+    assert.match(file,/cmd.exe$/i)
+    assert.deepEqual(args,['/d','/s','/c','C:/Tools/ai-review-preflight.cmd','usable','gemini'])
+    return '{"provider":"gemini","usable":true}'
+  },()=> 'C:/Tools/ai-review-preflight.cmd','win32').usable,true)
 })
