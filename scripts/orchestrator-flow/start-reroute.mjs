@@ -42,12 +42,16 @@ function reserveAndDispatch(kind,original,decision,replacement,io){
   const originalId=token(original.id,`${kind} original id`),replacementId=token(replacement.id,`${kind} replacement id`)
   const record={schema_version:1,kind,original_id:originalId,replacement_id:replacementId,head_sha:String(original.head_sha).toLowerCase(),...(kind==='runner'?{workflow:token(original.workflow,'workflow'),lane:token(decision.lane,'lane'),required_assertions:assertions(original.required_assertions)}:{provider:token(replacement.provider,'replacement provider')})}
   const rerouteId=sha256(canonicalJson(record)),sealed={...record,reroute_id:rerouteId},ref=`${REROUTE_REF_PREFIX}/${kind}/${originalId}`
-  if(typeof io?.createReroute!=='function'||typeof io?.readReroute!=='function'||typeof io?.createReplacement!=='function')throw new StartRerouteError('atomic reroute store and dispatcher are required')
-  if(!io.createReroute(ref,rerouteId,sealed)){
-    const prior=io.readReroute(ref)
-    if(prior?.digest!==rerouteId||canonicalJson(prior.record)!==canonicalJson(sealed))throw new StartRerouteError(`a different ${kind} replacement already owns this original attempt`)
+  if(typeof io?.compareCreateRerouteAndReplacement!=='function')throw new StartRerouteError('atomic lifecycle-fenced reroute store and dispatcher are required')
+  const validateLive=(live)=>{
+    if(!live||typeof live!=='object')throw new StartRerouteError(`${kind} lifecycle could not be re-read inside the reservation fence`)
+    const fresh=kind==='reviewer'
+      ? reviewerStartDecision(original,{now:live.now,provider_state:live.provider_state,lifecycle:live.lifecycle??[]})
+      : runnerStartDecision(original,{now:live.now,lifecycle:live.lifecycle??[],qualified_lanes:live.qualified_lanes??[]})
+    if(fresh.action!==expectedAction||(kind==='runner'&&fresh.lane!==decision.lane))throw new StartRerouteError(`${kind} started or changed while its replacement was being reserved`)
+    return true
   }
-  const acknowledgement=io.createReplacement(rerouteId,sealed)
+  const acknowledgement=io.compareCreateRerouteAndReplacement({ref,digest:rerouteId,record:sealed,validateLive})
   if(!acknowledgement||acknowledgement.reroute_id!==rerouteId||acknowledgement.replacement_id!==replacementId||!['created','existing'].includes(acknowledgement.status))throw new StartRerouteError(`${kind} replacement lacks exact compare-and-create acknowledgement`)
   return {ref,reroute_id:rerouteId,replacement_id:replacementId,status:acknowledgement.status}
 }
