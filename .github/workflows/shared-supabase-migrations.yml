@@ -203,7 +203,8 @@ jobs:
             scripts/test_production_catalog_verification.py \
             scripts/test_check_production_verification_sidecars.py \
             scripts/test_post_batch_app_verification.py \
-            scripts/test_production_apply_review_evidence.py
+            scripts/test_production_apply_review_evidence.py \
+            scripts/test_production_review_source_pr_preflight.py
           do
             if [ ! -f "$f" ]; then
               echo "::error::Expected Python test file is missing: $f" >&2
@@ -1146,6 +1147,20 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
+      # BEFORE ANY CREDENTIAL IS USED. With the automatic risk policy active, the
+      # business-risk gate cannot run without the merged source PR. Run 34615626046
+      # was dispatched without it and died much later on a bare `test -n` that named
+      # nothing (#2789). The later checks stay; this only refuses earlier, by name.
+      - name: Refuse a missing automatic-policy source PR before credentials
+        env:
+          SOURCE_PR: ${{ inputs.source_pr }}
+        run: |
+          set -euo pipefail
+          active="$(jq -r 'if .active == true then "true" elif .active == false then "false" else error("activation must be boolean") end' config/production-risk-policy-activation.json)"
+          if [ "$active" = true ] && ! [[ "$SOURCE_PR" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::REFUSED: the automatic production risk policy is active, so this dispatch needs input source_pr = the merged PR number that authored the allowlisted migrations (got '${SOURCE_PR}'). NO MIGRATION WAS APPLIED."
+            exit 1
+          fi
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0

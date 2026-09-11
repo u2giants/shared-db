@@ -1959,9 +1959,16 @@
       "line_sha256": "a506dd54ce0a675ce62b60933700254ff523561f16a7abdd7e91a1615f095238",
       "disposition": "enriched",
       "reason": "A missing required production-proof artifact file refuses outcome completion, so absent evidence cannot be read as successful application."
+    },
+    {
+      "site": ".github/workflows/shared-supabase-migrations.yml:1154",
+      "semantic_key": ".github/workflows/shared-supabase-migrations.yml:5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4:1",
+      "line_sha256": "5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4",
+      "disposition": "excluded",
+      "reason": "Issue 2789 early refusal: with the automatic risk policy active, a production apply review dispatched without a numeric source_pr is refused by name before any credential is used. It adds a refusal and changes no existing check."
     }
   ],
-  "call_site_count": 278,
-  "call_site_sha256": "a3faf91b5348c7e38f41e9b77fff8a5726f92177c01905aa1f86660a7059ed2f",
+  "call_site_count": 279,
+  "call_site_sha256": "0323851a44f2cd711d72aadc5a378c0d9354b585e1f331f1243b1406a21fb16c",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
