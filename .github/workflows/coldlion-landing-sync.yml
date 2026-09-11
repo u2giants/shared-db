@@ -25,7 +25,7 @@ on:
         required: false
         default: '3'
       dry_run:
-        description: 'Report outstanding work without fetching or writing'
+        description: 'Fetch and validate current source data without writing'
         type: boolean
         required: false
         default: false

@@ -4,7 +4,7 @@
 
 import { randomUUID } from "node:crypto";
 import { readColdlionApiKey } from "../coldlion-sync-common.mjs";
-import { proveTarget, runSql } from "./lib/db.mjs";
+import { proveTarget, recordMasterFailure, runSql } from "./lib/db.mjs";
 import { fetchMasterSpec } from "./lib/master-http.mjs";
 import { ITEM_SPECS, MASTER_SPECS } from "./lib/master-specs.mjs";
 import { projectCurrentRows, projectItemSlots } from "./lib/project-masters.mjs";
@@ -85,9 +85,16 @@ export async function main(argv=process.argv.slice(2), dependencies={}) {
   const execute=dependencies.runSql ?? runSql;
   const readKey=dependencies.readApiKey ?? readColdlionApiKey;
   const collect=dependencies.collectMasters ?? collectMasters;
+  const recordFailure=dependencies.recordMasterFailure ?? recordMasterFailure;
   const target=prove();
   console.log(`target ${target.database} at ${target.host}`);
-  const result=await collect({companyCode:args.company,apiKey:readKey()});
+  let result;
+  try {
+    result=await collect({companyCode:args.company,apiKey:readKey()});
+  } catch (error) {
+    if (!args.dryRun) recordFailure({endpoint:error.endpoint ?? "/masters",companyCode:args.company,requestedBy:"coldlion-landing sync-masters",error});
+    throw error;
+  }
   for (const load of result.loads) console.log(`${load.run.endpoint}: fetched ${load.run.rowsFetched}, landing ${load.rows.length}, excluded ${load.excluded}`);
   console.log(`item merchandise-group slots: ${result.itemSlots.length}`);
   if (!args.dryRun) execute(buildMasterLoadSql(result));

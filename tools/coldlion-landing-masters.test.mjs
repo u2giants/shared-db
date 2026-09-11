@@ -6,6 +6,7 @@ import { ITEM_SPECS, MASTER_SPECS, knownApiFields } from "./coldlion-landing/lib
 import { assertKnownShape, projectCurrentRows, projectItemSlots } from "./coldlion-landing/lib/project-masters.mjs";
 import { buildMasterLoadSql } from "./coldlion-landing/lib/load-masters.mjs";
 import { main, parseArgs } from "./coldlion-landing/sync-masters.mjs";
+import { masterFailureSql } from "./coldlion-landing/lib/db.mjs";
 
 const RUN="11111111-1111-4111-8111-111111111111";
 const NOW="2026-09-09T00:00:00.000Z";
@@ -106,10 +107,34 @@ test("generated SQL is a re-runnable upsert, reconciles cleared slots, and never
   assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
 });
 
+test("an empty item snapshot still generates valid reconciliation SQL",()=>{
+  const sql=buildMasterLoadSql({loads:[],itemSlots:[],affectedItemGrains:[]});
+  assert.doesNotMatch(sql,/insert into _affected_item_grains values\s*;/i);
+  assert.match(sql,/create temp table _affected_item_grains/i);
+});
+
+test("terminal master failures produce a failed run and alert without payload data",()=>{
+  const error=Object.assign(new Error("synthetic failure"),{httpStatus:503,bodyStatus:91});
+  const sql=masterFailureSql({endpoint:"/customers",companyCode:"SYNCO",requestedBy:"test",error});
+  assert.match(sql,/coldlion\.sync_run/i); assert.match(sql,/'failed'/); assert.match(sql,/503, 91/); assert.match(sql,/pg_notify\('coldlion_sync_alert'/i);
+});
+
 test("CLI proves target before collection and write",async()=>{
   const calls=[];
   await main(["--dry-run"],{proveTarget:()=>{calls.push("prove");return{database:"synthetic",host:"local"}},readApiKey:()=>"hidden",collectMasters:async()=>{calls.push("collect");return{loads:[],itemSlots:[],affectedItemGrains:[]}},runSql:()=>calls.push("write")});
   assert.deepEqual(calls,["prove","collect"]);
+});
+
+test("CLI records a non-dry-run collection failure after proving target",async()=>{
+  const calls=[]; const failure=Object.assign(new Error("synthetic failure"),{endpoint:"/vendors"});
+  await assert.rejects(main([],{proveTarget:()=>{calls.push("prove");return{database:"synthetic",host:"local"}},readApiKey:()=>"hidden",collectMasters:async()=>{calls.push("collect");throw failure},recordMasterFailure:({endpoint})=>calls.push(`failure:${endpoint}`)}),/synthetic failure/);
+  assert.deepEqual(calls,["prove","collect","failure:/vendors"]);
+});
+
+test("CLI dry-run failures do not write failure evidence",async()=>{
+  const calls=[];
+  await assert.rejects(main(["--dry-run"],{proveTarget:()=>({database:"synthetic",host:"local"}),readApiKey:()=>"hidden",collectMasters:async()=>{throw new Error("synthetic failure")},recordMasterFailure:()=>calls.push("failure")}),/synthetic failure/);
+  assert.deepEqual(calls,[]);
 });
 
 test("CLI arguments do not expose history controls",()=>{
@@ -120,4 +145,5 @@ test("workflow is the sole live path and runs masters before history",()=>{
   const yaml=readFileSync(".github/workflows/coldlion-landing-sync.yml","utf8");
   assert.match(yaml,/SUPABASE_DB_URL_PRODUCTION/); assert.match(yaml,/COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai/); assert.match(yaml,/COLDLION_API_KEY/); assert.doesNotMatch(yaml,/pull_request:|push:/);
   assert.ok(yaml.indexOf("sync-masters.mjs")<yaml.indexOf("sync-history.mjs")); assert.match(yaml,/coldlion-landing-masters\.test\.mjs/);
+  assert.match(yaml,/Fetch and validate current source data without writing/);
 });

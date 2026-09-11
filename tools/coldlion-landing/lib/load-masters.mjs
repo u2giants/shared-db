@@ -60,10 +60,10 @@ function slotStageSql(rows) {
 
 function itemSlotSql(rows, affected) {
   const affectedValues = affected.map((r) => `  (${sqlText(r.company_code)}, ${sqlText(r.division_code)}, ${sqlText(r.item_no)}, ${sqlText(r.item_pkey)})`).join(",\n");
+  const affectedInsert = affected.length === 0 ? "" : `insert into _affected_item_grains values\n${affectedValues};`;
   return `${slotStageSql(rows)}
 create temp table _affected_item_grains (company_code text, division_code text, item_no text, item_pkey text) on commit drop;
-insert into _affected_item_grains values
-${affectedValues};
+${affectedInsert}
 
 delete from coldlion.item_merch_group t
  using _affected_item_grains a

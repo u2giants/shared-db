@@ -20,7 +20,8 @@ export function assertKnownShape(spec, rows) {
 }
 
 export function projectCurrentRows(spec, sourceRows, { runId, fetchedAt, excludeDivision = "EP001" } = {}) {
-  assertKnownShape(spec, sourceRows);
+  try { assertKnownShape(spec, sourceRows); }
+  catch (error) { error.endpoint ??= spec.endpoint; throw error; }
   const byKey = new Map();
   let excluded = 0;
   for (const source of sourceRows) {
@@ -31,9 +32,9 @@ export function projectCurrentRows(spec, sourceRows, { runId, fetchedAt, exclude
     row.run_id = runId;
     row.fetched_at = fetchedAt;
     const key = spec.key.map((column) => row[column] ?? "").join("\u001f");
-    if (spec.key.some((column) => row[column] === null)) throw new Error(`${spec.endpoint} returned a blank natural key`);
+    if (spec.key.some((column) => row[column] === null)) { const error=new Error(`${spec.endpoint} returned a blank natural key`); error.endpoint=spec.endpoint; throw error; }
     const prior = byKey.get(key);
-    if (prior && prior.source_hash !== row.source_hash) throw new Error(`${spec.endpoint} returned conflicting rows for one natural key`);
+    if (prior && prior.source_hash !== row.source_hash) { const error=new Error(`${spec.endpoint} returned conflicting rows for one natural key`); error.endpoint=spec.endpoint; throw error; }
     byKey.set(key, row);
   }
   return { rows: [...byKey.values()], excluded };

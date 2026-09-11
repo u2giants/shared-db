@@ -41,6 +41,8 @@ export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = f
       const payload = JSON.parse(await response.text());
       if (!response.ok) {
         const error = new Error(`${endpoint} returned wire HTTP ${response.status}`);
+        error.httpStatus = response.status;
+        if (Number.isInteger(payload?.status)) error.bodyStatus = payload.status;
         error.permanent = response.status >= 400 && response.status < 500 && ![408,429].includes(response.status);
         throw error;
       }
@@ -56,7 +58,12 @@ export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = f
 }
 
 export async function fetchMasterSpec(spec, params, apiKey, options = {}) {
-  return spec.paged
-    ? fetchPagedMaster(spec.endpoint, params, apiKey, options)
-    : fetchArrayMaster(spec.endpoint, params, apiKey, options);
+  try {
+    return spec.paged
+      ? await fetchPagedMaster(spec.endpoint, params, apiKey, options)
+      : await fetchArrayMaster(spec.endpoint, params, apiKey, options);
+  } catch (error) {
+    error.endpoint ??= spec.endpoint;
+    throw error;
+  }
 }

@@ -159,6 +159,28 @@ commit;`;
   return true;
 }
 
+/** Record and alert a terminal current-state master failure. Dry runs never call this. */
+export function masterFailureSql({ endpoint, companyCode, requestedBy, error }) {
+  if (isClientSpawnFault(error)) return false;
+  const message = String(error?.message ?? error).slice(0, 4000);
+  return `begin;
+insert into coldlion.sync_run
+  (endpoint, company_code, request_params, status, requested_by, started_at, finished_at,
+   http_status, body_status, error_message)
+values
+  (${literal(endpoint)}, ${literal(companyCode)}, jsonb_build_object('companyCode', ${literal(companyCode)}, 'fullSnapshot', true),
+   'failed', ${literal(requestedBy)}, now(), now(), ${error?.httpStatus ?? "null"}, ${error?.bodyStatus ?? "null"}, ${literal(message)});
+select pg_notify('coldlion_sync_alert', ${literal(`${endpoint} master snapshot failed: ${message}`.slice(0, 7000))});
+commit;`;
+}
+
+export function recordMasterFailure({ endpoint, companyCode, requestedBy, error, options = {} }) {
+  const sql = masterFailureSql({ endpoint, companyCode, requestedBy, error });
+  if (sql === false) return false;
+  runSql(sql, options);
+  return true;
+}
+
 function literal(value) {
   if (value === null || value === undefined) return "null";
   return `'${String(value).replace(/'/g, "''")}'`;
