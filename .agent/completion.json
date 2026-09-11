@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/17",
-  "contract_sha256": "a9ecd0df253388eeec3800dcd3d966800c0e52ec8981bad6dbd50c13d91619b3",
-  "head_sha": "b3f994564827078af8ae1b6411cde81bee679d45",
+  "contract_ref": "refs/db-contracts/2727/18",
+  "contract_sha256": "32d44d884d2298e74dc84e1595d3a8719d7121db76ba4c25772e7af40b843a23",
+  "head_sha": "081c2c76dc5d65e361d7beb713a38397da9d1e4f",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -34,7 +34,7 @@
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "699 tests passed; zero failed, skipped, cancelled, or todo (including lost dispatch response readback and lost-mutex claim preservation); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
+      "evidence": "700 tests passed; zero failed, skipped, cancelled, or todo (including exhausted delayed-visibility ambiguity preserving the claim); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
