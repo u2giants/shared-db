@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/43",
-  "contract_sha256": "3bddfe70660994c131f99c29ff67d7e37a23a303233b6a5c34b253582e8b836c",
-  "head_sha": "bb31988d70d47f151b1b08dad3cba7c7aeb17ca1",
+  "contract_ref": "refs/db-contracts/2727/44",
+  "contract_sha256": "38aceccb7dc370f65eb8d995fc67108ddf36f1499637051211e9d8e321edc6cc",
+  "head_sha": "f76cba00ca789f1f1449add6cac9f56286037a41",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -36,37 +36,37 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 9ea5c664 bb31988d reports no whitespace errors."
+      "evidence": "git diff --check 9ea5c664 f76cba00 reports no whitespace errors."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at bb31988d."
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at f76cba00."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "727 tests, 727 pass, 0 fail, 0 skipped at bb31988d."
+      "evidence": "727 tests, 727 pass, 0 fail, 0 skipped at f76cba00."
     },
     {
       "command": "python -m unittest scripts.test_production_owner_decision_evidence",
       "exit_code": 0,
-      "evidence": "9 tests passed at bb31988d, including effective production job permission coverage."
+      "evidence": "9 tests passed at f76cba00, including effective production job permission coverage."
     },
     {
       "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "242 tests passed at bb31988d, including effective job-level permission regression and the negative top-level-write/job-level-read fixture."
+      "evidence": "242 tests passed at f76cba00, including effective job-level permission regression and the negative top-level-write/job-level-read fixture."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=279 at bb31988d."
+      "evidence": "truth audit OK: call_sites=279 at f76cba00."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "221 files scanned at bb31988d; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "221 files scanned at f76cba00; every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
@@ -87,7 +87,8 @@
     "Current main 3ff51ae8 is integrated; only the sealed evidence pair conflicted, and the implementation repair remained unchanged.",
     "Preview and production-apply now have effective job-level issues write permission, while production-apply-review remains read-only; the permission regression test is part of allowed paths, file writes, and changed-file evidence.",
     "Current main 9ea5c664 is integrated; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
-    "The existing production owner decision regression now parses inline permission comments and requires effective issues write for production-apply while retaining issues read for production-apply-review."
+    "The existing production owner decision regression now parses inline permission comments and requires effective issues write for production-apply while retaining issues read for production-apply-review.",
+    "The shared workflow defaults to issues read; only preview and production-apply override to issues write, while validate, production-dry-run, and production-apply-review remain effectively read-only for issues."
   ],
   "stop_conditions_hit": []
 }

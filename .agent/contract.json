@@ -91,12 +91,13 @@
     "Generation 40 refreshes the completed repair onto current main 3ff51ae8; only the evidence pair conflicted, and all admission, permission, unlimited-lane, disabled-reviewer-queue, and no-Step-7 guarantees remain intact.",
     "Generation 41 repairs effective job permissions at 66b9ca83 and seals the effective-scope regression at 590eb037: preview and production-apply explicitly retain issues write despite job-level overrides, and the Python permission regression is included in the sealed work scope.",
     "Generation 42 refreshes the completed repair onto current main 9ea5c664; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
-    "Generation 43 aligns the existing production-owner permission regression with the required effective production-apply issues write scope while preserving production-apply-review as read-only."
+    "Generation 43 aligns the existing production-owner permission regression with the required effective production-apply issues write scope while preserving production-apply-review as read-only.",
+    "Generation 44 restores shared-supabase default issues read and limits job-level issues write to preview and production-apply, with effective-permission coverage for validate, production-dry-run, and production-apply-review."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 43
+  "generation": 44
 }
