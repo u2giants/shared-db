@@ -110,6 +110,53 @@ class PreviewRequiredClassifierTests(unittest.TestCase):
         self.assertHighRisk(
             "create table reporting.item (id bigint); create index i on core.item (id)", "index build")
 
+    def test_hidden_defaults_are_rewrites(self):
+        # #2771 review: serial implies NOT NULL DEFAULT nextval(); a domain can carry a default.
+        for column in ("serial", "bigserial", "smallserial", "serial8", "d",
+                       "core.money_with_default", '"MyDomain"', "int not null", "text collate \"C\" default 'x'"):
+            self.assertHighRisk(f"alter table core.item add column x {column}", "rewrite")
+        self.assertHighRisk(
+            "create domain d as int default random(); alter table core.item add column x d", "rewrite")
+        for column in ("text", "bigint", "numeric(12, 2)", "varchar(40)", "timestamp with time zone",
+                       "jsonb", "text[]", 'text collate "C"', "uuid null"):
+            self.assertLowRisk(f"alter table core.item add column x {column}")
+
+    def test_table_identity_follows_postgres_quoting(self):
+        # "Item" and item are different tables; "core.item" is one quoted name, not core.item.
+        self.assertHighRisk(
+            'create table core."Item" (id bigint); alter table core.item add column a int not null default 0',
+            "rewrite")
+        self.assertHighRisk(
+            'create table "core.item" (id bigint); create index i on core.item (id)', "index build")
+        self.assertHighRisk(
+            'create table "core.item" (id bigint); alter table core.item alter column id type text', "rewrite")
+        self.assertLowRisk(
+            'create table core."Item" (id bigint); create index i on core."Item" (id)')
+        self.assertLowRisk(
+            "create table core.fresh (id bigint); alter table CORE.Fresh add column a int not null default 0")
+
+    def test_unqualified_new_table_not_excused_after_search_path_change(self):
+        self.assertHighRisk(
+            "create table item (id bigint); set search_path = core; create index i on item (id)", "index build")
+        self.assertLowRisk("create table item (id bigint); create index i on item (id)")
+
+    def test_recreate_drop_is_bound_to_the_same_table(self):
+        self.assertHighRisk(
+            "create policy p on reporting.item for select using (true); drop policy if exists p on core.item",
+            "destructive drop")
+        self.assertHighRisk(
+            "create trigger t before insert on reporting.item for each row execute function f();"
+            " drop trigger if exists t on core.item", "destructive drop")
+        self.assertHighRisk(
+            'create policy "P" on core.item for select using (true); drop policy if exists p on core.item',
+            "destructive drop")
+        self.assertLowRisk(
+            "drop policy if exists p on core.item; create policy p on core.item for select using (true)")
+        self.assertLowRisk(
+            "drop trigger if exists t on core.item;"
+            " create or replace trigger t after insert or update of sku on core.item"
+            " for each row execute function core.f()")
+
     def test_tokeniser_neutralises_literals(self):
         self.assertEqual(
             sql_top_level_statements("select 'a;b'; select $x$ ; $x$; -- ; \n select 1"),

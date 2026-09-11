@@ -1881,12 +1881,50 @@ def sql_top_level_statements(raw: str) -> list[str] | None:
         current.append(ch)
         i += 1
     out.append("".join(current))
-    normalised = [re.sub(r"\s+", " ", s).strip().lower() for s in out]
+    normalised = [_normalise_outside_identifiers(s) for s in out]
     return [s for s in normalised if s]
 
 
-def _plain_name(name: str) -> str:
-    return name.replace('"', "")
+def _normalise_outside_identifiers(statement: str) -> str:
+    """Lower-case and collapse whitespace, leaving "quoted identifiers" byte-exact.
+
+    PostgreSQL folds unquoted names to lower case but keeps a quoted name's
+    case (and any dot inside it) as part of the name, so "Item" and item are
+    different tables; lower-casing the quoted form would merge them (#2771).
+    """
+    parts = re.split(r'("[^"]*")', statement)
+    folded = "".join(part if index % 2 else re.sub(r"\s+", " ", part.lower())
+                     for index, part in enumerate(parts))
+    return folded.strip()
+
+
+def _canonical_name(name: str) -> tuple[str, ...]:
+    """PostgreSQL identity of a (possibly schema-qualified) name.
+
+    Unquoted parts are already folded to lower case; quoted parts keep their
+    exact text, so "core.item" is ONE part and never equals core.item.
+    """
+    return tuple(m.group(1) if m.group(1) is not None else m.group(2)
+                 for m in re.finditer(r'"([^"]*)"|([^."]+)', name))
+
+
+# Column types whose ADD COLUMN (nullable, no default) is catalog-only. A type
+# outside this list may be a domain carrying a DEFAULT or NOT NULL, or a
+# serial pseudo-type that implies NOT NULL DEFAULT nextval(), which rewrites or
+# scans the table, so it is refused (#2771).
+_BUILTIN_COLUMN_TYPE = (
+    r"(?:text|citext|uuid|jsonb?|bytea|boolean|bool|date|interval|inet|cidr|macaddr|money|xml|tsvector"
+    r"|smallint|integer|int|int2|int4|int8|bigint|real|float4|float8|double precision"
+    r"|(?:numeric|decimal)(?: ?\( ?\d+ ?(?:, ?\d+ ?)?\))?"
+    r"|(?:varchar|character varying|char|character|bit|bit varying|varbit)(?: ?\( ?\d+ ?\))?"
+    r"|(?:timestamp|time)(?: ?\( ?\d ?\))?(?: with(?:out)? time zone)?|timestamptz|timetz)"
+    r"(?: ?\[ ?\])*"
+)
+
+
+def _binds_on(statement: str, pattern: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    m = re.match(pattern, statement)
+    return (_canonical_name(m.group(1)), _canonical_name(m.group(2))) if m else None
 
 
 def _split_top_level_commas(text: str) -> list[str]:
@@ -1918,12 +1956,12 @@ def _alter_table_action_is_low_risk(action: str) -> bool:
             r"\b(?:unique|primary key|exclude)\b", action)
     column = re.fullmatch(rf"add (?:column )?(?:if not exists )?{_IDENT} (.+)", action)
     if column and not action.startswith("add constraint"):
-        # A nullable column with no default is a catalog-only change. A default,
-        # NOT NULL, generated/identity, or any inline constraint can rewrite or
-        # scan the table, or fail on existing rows.
-        return not re.search(
-            r"\b(?:default|not null|generated|identity|primary key|unique|references|check)\b",
-            column.group(1))
+        # Only a nullable column of a built-in type with no default is a
+        # catalog-only change. A default, NOT NULL, generated/identity, inline
+        # constraint, serial pseudo-type, or domain/user type (which can carry
+        # a hidden default or NOT NULL) can rewrite or scan the table.
+        return bool(re.fullmatch(
+            rf"{_BUILTIN_COLUMN_TYPE}(?: collate {_NAME})?(?: null)?", column.group(1)))
     return False
 
 
@@ -1957,17 +1995,23 @@ def preview_required_reasons(repo_root: Path, allowlist: list[str]) -> list[str]
         if not statements:
             reasons.append(f"{version}: empty migration")
             continue
+        # A search_path change makes an unqualified name resolve differently
+        # from one statement to the next, so only qualified names are excused.
+        path_changes = any(re.match(r"^(?:set|reset)\b", s) and "search_path" in s
+                           or "set_config" in s for s in statements)
         new_tables = {
-            _plain_name(m.group(1)) for s in statements
+            name for s in statements
             if (m := re.match(rf"^create (?:unlogged )?table ({_NAME}) ?\(", s))
+            and (len(name := _canonical_name(m.group(1))) == 2 or not path_changes)
         }
+        # Recreate drops are excused only for the SAME (name, table) pair.
         created_triggers = {
-            _plain_name(m.group(1)) for s in statements
-            if (m := re.match(rf"^create (?:or replace )?(?:constraint )?trigger ({_IDENT})\b", s))
+            pair for s in statements
+            if (pair := _binds_on(s, rf"^create (?:or replace )?(?:constraint )?trigger ({_IDENT}) .*? on ({_NAME})(?: |$)"))
         }
         created_policies = {
-            _plain_name(m.group(1)) for s in statements
-            if (m := re.match(rf"^create policy ({_IDENT})\b", s))
+            pair for s in statements
+            if (pair := _binds_on(s, rf"^create policy ({_IDENT}) on ({_NAME})(?: |$)"))
         }
         for statement in statements:
             risk = _statement_preview_risk(statement, new_tables, created_triggers, created_policies)
@@ -1977,13 +2021,13 @@ def preview_required_reasons(repo_root: Path, allowlist: list[str]) -> list[str]
 
 
 def _statement_preview_risk(
-    s: str, new_tables: set[str], created_triggers: set[str], created_policies: set[str]
+    s: str, new_tables: set, created_triggers: set, created_policies: set
 ) -> str | None:
     if re.match(r"^(?:insert|update|delete|truncate|copy|merge|with)\b", s):
         return "data backfill or rewrite"
     if re.match(r"^drop\b", s):
-        recreate = re.fullmatch(rf"drop (trigger|policy) if exists ({_IDENT}) on {_NAME}", s)
-        if recreate and _plain_name(recreate.group(2)) in (
+        recreate = re.fullmatch(rf"drop (trigger|policy) if exists ({_IDENT}) on ({_NAME})", s)
+        if recreate and (_canonical_name(recreate.group(2)), _canonical_name(recreate.group(3))) in (
                 created_triggers if recreate.group(1) == "trigger" else created_policies):
             return None
         return "destructive drop"
@@ -1992,9 +2036,9 @@ def _statement_preview_risk(
     if re.match(r"^create materialized view\b", s) or re.match(
             rf"^create (?:temp |temporary |unlogged )?table (?:if not exists )?{_NAME} as\b", s):
         return "data backfill"
-    index = re.match(rf"^create (?:unique )?index (concurrently )?(?:if not exists )?(?:{_IDENT} )?on (?:only )?({_NAME})\b", s)
+    index = re.match(rf"^create (?:unique )?index (concurrently )?(?:if not exists )?(?:{_IDENT} )?on (?:only )?({_NAME})(?=[ (]|$)", s)
     if index:
-        if index.group(1) or _plain_name(index.group(2)) in new_tables:
+        if index.group(1) or _canonical_name(index.group(2)) in new_tables:
             return None
         return "index build locks an existing table"
     if re.match(r"^create (?:unique )?index\b", s):
@@ -2003,7 +2047,7 @@ def _statement_preview_risk(
         return None
     alter = re.fullmatch(rf"alter table (?:if exists )?(?:only )?({_NAME}) (.+)", s)
     if alter:
-        if _plain_name(alter.group(1)) in new_tables:
+        if _canonical_name(alter.group(1)) in new_tables:
             return None
         if all(_alter_table_action_is_low_risk(a) for a in _split_top_level_commas(alter.group(2))):
             return None
