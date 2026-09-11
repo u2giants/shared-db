@@ -1,86 +1,60 @@
 {
   "allowed_paths": [
-    "config/db-data-admin-property-source-coverage.json",
-    "supabase/migrations/20260911210844_retire_erp_items_to_archive.sql",
-    "supabase/tests/erp_items_retirement_contracts.sql",
-    "supabase/tests/plm_item_import_phase2_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
-    "supabase/tests/popdam_item_bridge_additive_cutover_contract.sql",
-    "supabase/tests/popdam_item_state_contracts.sql",
+    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
+    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "assumptions": [
-    "api.plm_item_list keeps its exact 21-column contract, and its row count and id|source_id|division_code hash stay identical (production proof: 19,362 rows, md5 7f214c4a3178143a41d2741c8cad677a).",
-    "Legacy ERP item UUIDs still carried by the view ids, 13,700 bridge erp_item_id values and prediction erp_item_id values keep resolving through a frozen plm.legacy_erp_item_identity crosswalk copied from public.erp_items_current.",
-    "The rewritten plm.refresh_style_tracker_item_bridge and public.resolve_product_category_prediction_item_identity bodies are the current production bodies with only the table reference changed.",
-    "Only the bridge FK constraint is dropped; the erp_item_id column and its values are kept.",
-    "Neither legacy table is dropped: both move to a new archive schema with anon/authenticated access revoked, so retirement is reversible."
+    "api.db_data_admin_scraped_properties stays byte-for-byte unchanged and remains the Property Matching contract for its current dependents.",
+    "The licensor authority derivation reused by the Property arm is the exact derivation api.db_data_admin_scraped_properties already applies, so the two functions cannot disagree about who a row belongs to.",
+    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are non-authoritative inferred evidence and are therefore excluded from a source-declared inventory.",
+    "Every capture-backed family reads exactly one latest complete capture, the same contract the existing RPC uses, so nothing here touches issue #2744's performance repair.",
+    "app.require_licensing_manager_access() is the existing Licensing Manager gate and is unchanged."
   ],
-  "base_sha": "9ea5c664443f5c3fcdf43c5c40ca355450d0d394",
-  "branch": "claude/issue-2482-retire-erp-items",
+  "base_sha": "5ec8aef002471e8520f45aef290101e0424e69d7",
+  "branch": "claude/issue-2797-scraped-source-inventory",
   "db_reads": [
-    "table public.erp_items_current",
-    "table public.erp_items_raw",
-    "view api.plm_item_list",
-    "table plm.item",
-    "table plm.style_tracker_item_bridge",
-    "table public.product_category_predictions"
+    "function api.db_data_admin_scraped_properties",
+    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
+    "character and style-guide source landing tables in the same approved captures"
   ],
   "db_writes": [
-    "schema archive",
-    "table plm.legacy_erp_item_identity",
-    "policy legacy_erp_item_identity_admin_read on plm.legacy_erp_item_identity",
-    "view api.plm_item_list",
-    "table api.plm_item_list",
-    "function plm.refresh_style_tracker_item_bridge",
-    "function public.resolve_product_category_prediction_item_identity",
-    "table plm.style_tracker_item_bridge",
-    "table public.erp_items_current",
-    "table public.erp_items_raw",
-    "table archive.erp_items_current",
-    "table archive.erp_items_raw"
+    "function api.db_data_admin_scraped_source_inventory"
   ],
-  "dispatcher": "claude shared-db orchestrator route local_ceb221ac-1746-4836-9306-6839c18dbced",
+  "dispatcher": "claude shared-db orchestrator marker issue 2758",
   "file_writes": [
-    "config/db-data-admin-property-source-coverage.json",
-    "supabase/migrations/20260911210844_retire_erp_items_to_archive.sql",
-    "supabase/tests/erp_items_retirement_contracts.sql",
-    "supabase/tests/plm_item_import_phase2_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
-    "supabase/tests/popdam_item_bridge_additive_cutover_contract.sql",
-    "supabase/tests/popdam_item_state_contracts.sql",
+    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
+    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 14,
-  "goal": "Retire the frozen DesignFlow item feed (public.erp_items_current and public.erp_items_raw) recoverably: repoint every live reader to a frozen identity crosswalk, drop only the bridge legacy FK, and move both tables to a revoked archive schema.",
+  "generation": 1,
+  "goal": "Add one read-only, Licensing-manager-gated, paged inventory RPC api.db_data_admin_scraped_source_inventory over the raw scraped source vocabularies for Properties, Characters and Style Guides, leaving api.db_data_admin_scraped_properties unchanged.",
   "prohibited_actions": [
-    "No DROP of public.erp_items_current or public.erp_items_raw or their data",
-    "No drop of plm.style_tracker_item_bridge.erp_item_id or its values",
-    "No change to the api.plm_item_list column list, types, row count or key hash",
+    "No change of any kind to api.db_data_admin_scraped_properties",
+    "No matching controls, review reasons, evidence basis, review guidance, contract status or authority-derived presentation buckets in the payload",
+    "No deduplication across scrape routes and no identity inferred from names",
+    "No inferred candidate table presented as a source-declared fact",
     "No direct production DDL; production only through the governed workflow",
-    "No object or path outside claim 2778 and this contract"
+    "No object or path outside claim 2807 and this contract"
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
     "node scripts/check-production-verification-sidecars.mjs --base origin/main",
     "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check",
-    "supabase/tests/erp_items_retirement_contracts.sql on a disposable database",
-    "Database Contract Tests CI from empty"
+    "git diff --check"
   ],
   "route": "shared-db-orchestrator",
   "schema_version": 1,
   "stop_conditions": [
-    "Claim 2778, reserved version 20260911210844, or coordinator route changes",
-    "A competing change touches any claimed object or contracted path",
-    "Any other view, function, FK or policy is found still reading the legacy tables",
-    "The api.plm_item_list row count or key hash would change",
-    "Implementation requires an object or path outside claim 2778 or this contract"
+    "Claim 2807, reserved version 20260911221304, or the coordinator route changes",
+    "A competing change touches api.db_data_admin_scraped_properties or any claimed object or contracted path",
+    "Issue #2744's performance repair would be weakened or its live claim collided with",
+    "Implementation requires an object or path outside claim 2807 or this contract"
   ],
-  "work_issue": 2482,
+  "work_issue": 2797,
   "work_type": "structural",
-  "worker": "claude issue2482-author holding claim 2778",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2482-retire-erp-items"
+  "worker": "claude issue2797-author holding claim 2807",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/agent-aa4966ba29d9ccc16"
 }
