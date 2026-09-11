@@ -210,6 +210,15 @@ test('outcome lifecycle refuses every skip and merge is not live completion', ()
   assert.equal(outcomeHistory(eventComments('live_verified')).complete,true)
 })
 
+test('admission and dispatch can share the command clock without invalidating claim history',()=>{
+  const comments=[],timestamp='2026-09-11T00:00:00.000Z'
+  const io={getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body})}
+  admitIssue(41,io,{timestamp})
+  comments.push({body:formatEventComment(outcomeEvent({issue:41,state:'dispatched',actor:'test',timestamp}))})
+  const history=outcomeHistory(comments,41)
+  assert.equal(history.valid,true);assert.equal(history.state,'dispatched')
+})
+
 test('completion refuses lifecycle events belonging to another issue',()=>{
   const {io}=completionFixture()
   io.issueComments=()=>eventComments('production_applied',42)

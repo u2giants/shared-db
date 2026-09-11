@@ -5358,7 +5358,7 @@ function activateReviewCutoverOperation(io) {
 
 export function activateReviewCutover(io=githubIo){return withReviewRequestBudget(()=>activateReviewCutoverOperation(reviewOperationIo(io)))}
 
-export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-migration-author-lanes', allowLegacy = false } = {}) {
+export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-migration-author-lanes', allowLegacy = false, timestamp } = {}) {
   let issue = io.getIssue(Number(number))
   let livePr=null
   let scope=null
@@ -5391,12 +5391,12 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       admitted={...admitted,actual_objects:inspection.objects,migrations:inspection.migrations}
     }
     if(!admitted.legacy&&io.issueComments&&io.commentIssue){
-      let history=outcomeHistory(io.issueComments(Number(number)))
+      let history=outcomeHistory(io.issueComments(Number(number)),number)
       if(!history.valid)throw new OutcomeError(`outcome history is invalid: ${history.problems.join('; ')}`)
       for(const state of ['entered','classified']){
         if((history.state?OUTCOME_STATES.indexOf(history.state):-1)>=OUTCOME_STATES.indexOf(state))continue
-        advanceOutcome({issue:Number(number),state,actor},io)
-        history=outcomeHistory(io.issueComments(Number(number)))
+        advanceOutcome({issue:Number(number),state,actor,...(timestamp?{timestamp:new Date(timestamp).toISOString()}:{})},io)
+        history=outcomeHistory(io.issueComments(Number(number)),number)
       }
     }
     return admitted
@@ -5431,7 +5431,7 @@ export function resolveAdmittedIssueForPr(pr, io = githubIo) {
   return { issue:Number(linked[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
 }
 
-function requireAdmission(options, io, { pr = null } = {}) {
+function requireAdmission(options, io, { pr = null, timestamp } = {}) {
   if (io.enforceAdmission !== true) return null
   if (!Number.isInteger(Number(options.admitIssue)) || Number(options.admitIssue) <= 0) {
     throw new LaneError('--admit-issue <work issue> is required before claim, reviewer assignment, or shared-stage acquisition')
@@ -5440,7 +5440,7 @@ function requireAdmission(options, io, { pr = null } = {}) {
     throw new LaneError(`--admit-issue #${options.admitIssue} does not match --issue #${options.issue}`)
   }
   if(pr===null&&options.acquireExclusive)throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
-  const admitted=admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null })
+  const admitted=admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null, timestamp })
   if(options.claim){
     const requested=validateClaimObjects(options.objects??[]).sort()
     const authorized=[...(admitted.writes??[])].sort()
@@ -6444,7 +6444,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       if(!o.evidence)throw new LaneError('--complete-outcome requires --evidence <durable comment URL>')
       console.log(JSON.stringify(completeOutcome({issue:o.completeOutcome,evidenceRef:o.evidence,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString()}, {...io,parseScope:parseQueueScope}),null,2));return 0
     }
-    if(o.claim)requireAdmission(o,io)
+    if(o.claim)requireAdmission(o,io,{timestamp:now})
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
     if(o.reconcileFlow){
       if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('reconcile runtime adapter is unavailable')
