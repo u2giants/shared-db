@@ -1,78 +1,101 @@
 {
   "schema_version": 1,
-  "work_issue": 2785,
+  "work_issue": 2741,
   "outcome": "ready-for-merge",
-  "pr": 2786,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2785/4",
-  "contract_sha256": "6a0b917ab5090675eac198904e26eacacc293505b192ba09a119c9bb303372c5",
-  "head_sha": "58c8cab9a1b577b1d4be2439e67311aa73be548f",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/business-rule-library.yml",
-    ".github/workflows/documents-only-merge-authorization.yml",
-    ".github/workflows/guarded-migration-merge.yml",
-    ".github/workflows/migration-author-lease.yml",
-    ".github/workflows/orchestrator-marker-guard.yml",
-    ".github/workflows/pr-object-collision.yml",
-    ".github/workflows/shared-supabase-migrations.yml",
-    ".github/workflows/task-gates.yml",
-    "AGENTS.md",
-    "config/orchestrator-global-invalidators-v1.json",
-    "scripts/check-actions-quota.mjs",
-    "scripts/check-actions-quota.test.mjs",
-    "scripts/check-dispatch-collision.test.mjs",
-    "scripts/check-pr-object-collisions.mjs",
-    "scripts/check-pr-source-collisions.mjs",
-    "scripts/lib/github-transport.mjs",
-    "scripts/lib/github-transport.test.mjs",
-    "scripts/lib/open-pr-files.mjs",
-    "scripts/lib/open-pr-files.test.mjs",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_business_risk_gate.py"
+  "pr": 2743,
+  "migration_versions": [
+    "20260911152203"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2741/14",
+  "contract_sha256": "33aee64be50a1f193cb60d324111a0409929d43d437f63db11cb470779940879",
+  "head_sha": "c8755e1aa5a514b821fc0f8425db100443a67c38",
+  "files_changed": [
+    "supabase/migrations/20260911152203_character_alias_provenance_forward_repair.sql",
+    "supabase/tests/character_alias_forward_repair_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py",
+    "scripts/test_post_batch_app_verification.py"
+  ],
+  "db_reads": [
+    "table core.licensor",
+    "table core.property",
+    "table core.franchise"
+  ],
+  "db_writes": [
+    "column core.character_alias.licensor_id",
+    "column core.character_alias.normalized_alias",
+    "column core.character_alias.source_id",
+    "column core.character_alias.source_system",
+    "column core.taxonomy_source_ref.first_seen_at",
+    "column core.taxonomy_source_ref.is_current",
+    "column core.taxonomy_source_ref.last_seen_at",
+    "column core.taxonomy_source_ref.missing_since",
+    "column core.taxonomy_source_ref.source_licensor_id",
+    "function core.guard_character_alias_licensor",
+    "function core.guard_taxonomy_source_ref_identity",
+    "index core.character_alias_character_idx",
+    "index core.character_alias_licensor_idx",
+    "index core.character_alias_licensor_norm_key",
+    "index core.character_alias_licensor_source_key",
+    "index core.taxonomy_source_ref_current_idx",
+    "index core.taxonomy_source_ref_entity_idx",
+    "index core.taxonomy_source_ref_source_licensor_idx",
+    "policy shared_read on core.character_alias",
+    "table core.character_alias",
+    "table core.taxonomy_source_ref",
+    "trigger a_taxonomy_source_ref_identity_guard on core.taxonomy_source_ref",
+    "trigger character_alias_licensor_guard on core.character_alias",
+    "trigger set_updated_at on core.character_alias",
+    "function core.bump_taxonomy_source_ref_last_seen",
+    "trigger b_taxonomy_source_ref_last_seen on core.taxonomy_source_ref",
+    "table core.character",
+    "index core.character_id_licensor_id_key"
+  ],
   "checks": [
     {
-      "command": "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "663 tests, 663 pass, 0 fail, 0 skipped after merging main 25c4ca3b. Includes: with no opt-in a rate-limit 403 fails after one call with no wait or probe; an opted-in read waits 301 s then succeeds; other 403s fail after one call; every open PR gets the changed_files proof and a short truncated list is refused; the quota preflight never waits with the cap unset, 0, or shorter than the reset."
-    },
-    {
-      "command": "python -m unittest scripts.test_production_business_risk_gate",
-      "exit_code": 0,
-      "evidence": "Ran 141 tests, OK, after merging main 25c4ca3b."
+      "evidence": "Static SQL guards pass on implementation c8755e1a (main 11d0e2b4, re-reserved 20260911152203)."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors in the diff from main 25c4ca3b to the head."
+      "evidence": "No whitespace errors on origin/main..97f9b20a."
     },
     {
-      "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
+      "command": "python -m unittest discover -s scripts -p test_*.py -q",
       "exit_code": 0,
-      "evidence": "12 tests, 12 pass, 0 fail."
+      "evidence": "939 tests pass, eight existing skips, on implementation 97f9b20a."
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "command": "Database Contract Tests run34573081462",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=276 (main 25c4ca3b added one site in #2789)."
+      "evidence": "Source0dd175a4:170 pass, zero nonquarantined failures, existing1quarantinedpass/12quarantinedfail. Historical, repeat-final and pre2355productionshape paths all pass catalog/row parity and original2355/C10. Subsequent SQL change only documents derived-from:none after that standalone proof; final-head CI remains mandatory."
     },
     {
-      "command": "node scripts/check-github-transport-conformance.mjs",
+      "command": "python .ai-test-guard.py",
       "exit_code": 0,
-      "evidence": "216 files scanned; every GitHub call goes through the governed transport."
+      "evidence": "Four disposable-DB safety scenarios passed; unexpected columns and consumers refused."
     }
   ],
   "assumptions_resolved": [
-    "Only primary quota exhaustion (403/429 with remaining 0) can wait, at most 15 minutes, only for reads, and only when the step opted in with GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS; secondary limits and other 403s still fail immediately.",
-    "The wait is opt-in, so every lock-holding step (merge lane, author mutex, production lane, including unedited steps) fails fast exactly as on main.",
-    "The dispatch collision check proves changed_files for every open PR, unchanged from main.",
-    "The shared open-PR snapshot keeps every completeness proof and is bound to repo, PR number and schema; a mismatch fails closed.",
-    "No database reads or writes.",
-    "The lanes script change (list issues once) was moved to follow-up #2787 to clear the protected-source collision; the lanes script is unchanged here."
+    "Pinned old preview content manifest differs from final reviewed2355 migration; oldproof cannotauthorizefinalbytes.",
+    "Read-only preview catalog found exact derived expression, only internalgenerateddependency and no columnACL; DROP RESTRICT preserves unknownconsumers byrefusing.",
+    "Both historical upgrade and repeat finalschema application preserve all provenance rows and match reviewed function/constraint/index/policy/grant catalog; C10 parentcascade and ColdLion breakers pass.",
+    "Oldversion20260906222338 unchanged. Parent owns preview/production and finalindependentreview after2501 priority.",
+    "Existing retirement policy hard-blocks oldversion while preserving file/ledger; standaloneforward works withoutoldbase and is genuinely-pending ratherthanbase-absent.",
+    "No paidindependentreview or sharedpreview/production has run for2743. Parent ownsfinalheadreview andpromotion.",
+    "Generation6 refreshes both evidence files after actual implementationdc2ece0b; no SQL, policy, test or claim change. New-head CI and independent review remain required.",
+    "Generation7 rebinds both evidence files after merging origin/main 5eaebe7c (implementation cf1a3c6f); no SQL, policy, test or claim change. New-head CI and independent review remain required.",
+    "Generation8 rebinds both evidence files after merging origin/main dae160a0 (implementation 2a43f89f); no SQL, policy, test or claim change.",
+    "Generation9 rebinds both evidence files after merging origin/main b68a1900 (implementation 7080421c); no SQL, policy, test or claim change.",
+    "Generation10 rebinds both evidence files after merging origin/main 9da98ede (implementation a663cf83); no SQL, policy, test or claim change.",
+    "Generation11 follows governed claim-version supersession 20260911063554 -> 20260911152203 (implementation 97f9b20a); SQL body unchanged, file name, test and guard-message references renamed only.",
+    "Generation12 rebinds both evidence files after merging origin/main 9b02ad48 (implementation b3593908); no SQL, policy, test or claim change.",
+    "Generation13 rebinds both evidence files after merging origin/main 5761bc5e (implementation 75d9680d); no SQL, policy, test or claim change.",
+    "Generation14 rebinds both evidence files after merging origin/main 11d0e2b4 (implementation c8755e1a); no SQL, policy, test or claim change."
   ],
   "stop_conditions_hit": []
 }
