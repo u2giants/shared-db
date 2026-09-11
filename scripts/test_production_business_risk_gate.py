@@ -749,6 +749,41 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                          "head": {"sha": head}}, {"check_runs": []}), root,
             )
 
+    def test_production_rechecks_the_latest_guarded_merge_authorization(self):
+        head = "1" * 40
+        temp, root, main, merge_sha = self.historical_repo()
+        checks = {"check_runs": [
+            {"name": name, "conclusion": "success"} for name in REQUIRED_CHECKS
+        ]}
+        pr = {"merged": True, "merge_commit_sha": merge_sha, "head": {"sha": head}}
+
+        def api_with(state):
+            def api(endpoint):
+                if "check-runs" in endpoint:
+                    return checks
+                if endpoint.endswith("/status"):
+                    statuses = [] if state is None else [{
+                        "context": "Migration guarded merge authorization", "state": state,
+                    }]
+                    return {"statuses": statuses}
+                return pr
+            return api
+
+        with temp:
+            self.assertEqual(
+                prove_pr_and_checks(
+                    1, main, ["20260814000000"], api_with("success"), root,
+                ),
+                (head, merge_sha),
+            )
+            for state in (None, "failure", "pending"):
+                with self.subTest(state=state), self.assertRaisesRegex(
+                    RiskGateError, "latest Migration guarded merge authorization"
+                ):
+                    prove_pr_and_checks(
+                        1, main, ["20260814000000"], api_with(state), root,
+                    )
+
     # ------------------------------------------------------------------
     # Issue #1218: a well-formed GitHub response of an unexpected SHAPE must
     # produce a NAMED ::error:: refusal, not a raw traceback.

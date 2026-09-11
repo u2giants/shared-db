@@ -1843,6 +1843,20 @@ def prove_pr_and_checks(
         missing = [name for name in missing if name != "Migration author lease"]
     if missing:
         raise RiskGateError(f"required exact-head checks are not successful: {', '.join(missing)}")
+    status_endpoint = f"repos/{REPOSITORY}/commits/{head}/status"
+    statuses = api_sublist(api_object(api, status_endpoint), "statuses", status_endpoint)
+    guarded = next(
+        (
+            row for row in statuses
+            if isinstance(row, dict)
+            and row.get("context") == "Migration guarded merge authorization"
+        ),
+        None,
+    )
+    if not isinstance(guarded, dict) or guarded.get("state") != "success":
+        raise RiskGateError(
+            "the latest Migration guarded merge authorization is not successful at the exact PR head"
+        )
     return head, str(merge_commit_sha)
 
 
@@ -2353,6 +2367,18 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         review = json.loads(review_path.read_text(encoding="utf-8"))
     if review.get("verdict") != "APPROVE":
         return {"automaticPromotionAllowed": False, "ownerDecisionReasons": [RISK_TEXT["unresolved_material_objection"]]}
+    if review.get("schema_version") == "shared-db-production-apply-review/v2":
+        if review.get("source_pr") != args.pr or review.get("source_pr_head") != pr_head:
+            raise RiskGateError(
+                "automatic review evidence is not bound to the promoted source PR and exact head"
+            )
+        if review.get("work_issue") != args.work_issue:
+            raise RiskGateError("automatic review evidence names a different admitted structural work issue")
+        if not ephemeral_text:
+            if review.get("preview_run_id") != int(preview_run_text):
+                raise RiskGateError("automatic review evidence names a different preview run")
+            if review.get("preview_artifact_digest") != preview_digest:
+                raise RiskGateError("automatic review evidence names a different preview artifact digest")
     ephemeral_evidence = None
     if ephemeral_text:
         high_risk = preview_required_reasons(repo_root, allowlist)
@@ -2418,6 +2444,7 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         "disclosedRisks": decision["ownerDecisionReasons"],
         "governedEvidence": {
             "mainSha": args.main_sha, "sourcePr": args.pr, "sourcePrHead": pr_head,
+            "workIssue": args.work_issue,
             "reviewRun": args.review_run_id,
             "promotionRoute": "ephemeral-ci" if ephemeral_evidence else "preview",
             "previewRun": None if ephemeral_evidence else int(preview_run_text),
@@ -2436,6 +2463,7 @@ def main() -> int:
     parser.add_argument("--main-sha", required=True)
     parser.add_argument("--allowlist", required=True)
     parser.add_argument("--pr", type=int, required=True)
+    parser.add_argument("--work-issue", type=int, required=True)
     parser.add_argument("--review-run-id", type=int, required=True)
     parser.add_argument("--review-digest", required=True)
     # EXACTLY ONE ROUTE (#2758): preview evidence (--preview-run-id, --preview-digest,
