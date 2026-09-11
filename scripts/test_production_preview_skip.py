@@ -11,7 +11,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
 
 from production_business_risk_gate import (  # noqa: E402
-    EPHEMERAL_ARTIFACT, EPHEMERAL_CHECK_NAME, EPHEMERAL_WORKFLOW, REPOSITORY,
+    EPHEMERAL_ARTIFACT, EPHEMERAL_CHECK_NAME, EPHEMERAL_PRODUCER_PATHS, EPHEMERAL_WORKFLOW, REPOSITORY,
     RiskGateError, assess, git_blob_sha, preview_required_reasons,
     prove_ephemeral_ci_evidence, sql_top_level_statements,
 )
@@ -140,6 +140,24 @@ class PreviewRequiredClassifierTests(unittest.TestCase):
             "create table item (id bigint); set search_path = core; create index i on item (id)", "index build")
         self.assertLowRisk("create table item (id bigint); create index i on item (id)")
 
+    def test_builtin_type_spelling_not_trusted_after_search_path_change(self):
+        # #2771 review: a domain named text shadows pg_catalog.text once pg_catalog is later in the path.
+        for path in ("set search_path = public, pg_catalog", "set local search_path to public, pg_catalog",
+                     "select set_config('search_path', 'public, pg_catalog', true)"):
+            self.assertHighRisk(
+                f"create domain public.text as int not null default 0; {path};"
+                " alter table core.item add column x text", "rewrite")
+        self.assertLowRisk("alter table core.item add column x text")
+
+    def test_create_table_if_not_exists_does_not_excuse_later_changes(self):
+        # The table may already exist with rows, so it is not a new table.
+        self.assertLowRisk("create table if not exists core.item (id bigint)")
+        self.assertHighRisk(
+            "create table if not exists core.item (id bigint); create index i on core.item (id)", "index build")
+        self.assertHighRisk(
+            "create table if not exists core.item (id bigint);"
+            " alter table core.item add column a int not null default 0", "rewrite")
+
     def test_recreate_drop_is_bound_to_the_same_table(self):
         self.assertHighRisk(
             "create policy p on reporting.item for select using (true); drop policy if exists p on core.item",
@@ -187,6 +205,12 @@ class EphemeralEvidenceTests(unittest.TestCase):
         self.artifact = {"id": ARTIFACT_ID, "name": EPHEMERAL_ARTIFACT, "expired": False,
                          "workflow_run": {"id": RUN_ID}}
         self.head_blob = git_blob_sha(self.repo.path)
+        self.producer_blobs = {}
+        for path in EPHEMERAL_PRODUCER_PATHS:
+            on_main = self.repo.root / path
+            on_main.parent.mkdir(parents=True, exist_ok=True)
+            on_main.write_bytes(f"honest {path}\n".encode("utf-8"))
+            self.producer_blobs[path] = git_blob_sha(on_main)
 
     def api(self, endpoint):
         if endpoint == f"repos/{REPOSITORY}/actions/jobs/{JOB_ID}":
@@ -198,7 +222,8 @@ class EphemeralEvidenceTests(unittest.TestCase):
             return {"artifacts": [{**self.artifact, "digest": self.artifact.get("digest", digest)}]}
         if endpoint == f"repos/{REPOSITORY}/git/trees/{HEAD}?recursive=1":
             return {"truncated": False, "tree": [
-                {"path": f"supabase/migrations/{self.base}", "type": "blob", "sha": self.head_blob}]}
+                {"path": f"supabase/migrations/{self.base}", "type": "blob", "sha": self.head_blob},
+                *({"path": path, "type": "blob", "sha": sha} for path, sha in self.producer_blobs.items())]}
         raise AssertionError(f"unexpected endpoint {endpoint}")
 
     def downloader(self, artifact_id, destination):
@@ -268,6 +293,26 @@ class EphemeralEvidenceTests(unittest.TestCase):
     def test_main_bytes_differing_from_tested_head_are_refused(self):
         self.head_blob = "c" * 40
         self.assertRefused("differs")
+
+    def test_doctored_producer_on_tested_head_is_refused(self):
+        # #2771 review: a pull_request run executes the PR's own workflow, which
+        # could write every basename into the applied record without applying.
+        for path in EPHEMERAL_PRODUCER_PATHS:
+            with self.subTest(path=path):
+                honest = self.producer_blobs[path]
+                self.producer_blobs[path] = "d" * 40
+                self.assertRefused(f"producer {path}")
+                self.producer_blobs[path] = honest
+
+    def test_producer_missing_from_tested_head_is_refused(self):
+        del self.producer_blobs[EPHEMERAL_WORKFLOW]
+        self.assertRefused("absent")
+
+    def test_producer_list_names_the_record_writers(self):
+        self.assertIn(EPHEMERAL_WORKFLOW, EPHEMERAL_PRODUCER_PATHS)
+        workflow = (Path(__file__).parent.parent / EPHEMERAL_WORKFLOW).read_text(encoding="utf-8")
+        for path in EPHEMERAL_PRODUCER_PATHS[1:]:
+            self.assertIn(path, workflow)
 
 
 class RouteSelectionTests(unittest.TestCase):

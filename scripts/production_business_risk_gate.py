@@ -1801,6 +1801,13 @@ EPHEMERAL_WORKFLOW = ".github/workflows/database-contract-tests.yml"
 EPHEMERAL_ARTIFACT = "supabase-contract-test-logs"
 EPHEMERAL_APPLIED_RECORD = "applied-migrations.txt"
 EPHEMERAL_FAILED_RECORD = "failed-migrations-pass2.txt"
+# The machinery that writes the applied/failed records. A pull_request run
+# executes the SOURCE PR's copy of these, so a PR could keep the job title and
+# write every basename by hand; each must be byte-identical to exact main.
+EPHEMERAL_PRODUCER_PATHS = (
+    EPHEMERAL_WORKFLOW,
+    "scripts/check_pass2_routine_supersession.py",
+)
 
 _IDENT = r'(?:"[^"]+"|[a-z_][a-z0-9_$]*)'
 _NAME = rf"{_IDENT}(?:\.{_IDENT})?"
@@ -1941,8 +1948,13 @@ def _split_top_level_commas(text: str) -> list[str]:
     return parts
 
 
-def _alter_table_action_is_low_risk(action: str) -> bool:
-    """One ALTER TABLE action on an EXISTING table, metadata-only or refused."""
+def _alter_table_action_is_low_risk(action: str, types_trusted: bool = True) -> bool:
+    """One ALTER TABLE action on an EXISTING table, metadata-only or refused.
+
+    ``types_trusted`` is False after a search_path change: ``set search_path =
+    public, pg_catalog`` lets a user domain named ``text`` shadow the built-in,
+    so an unqualified type spelling no longer proves there is no hidden default.
+    """
     if re.fullmatch(r"(?:enable|force) row level security", action):
         return True
     if re.fullmatch(rf"owner to {_IDENT}", action):
@@ -1960,7 +1972,7 @@ def _alter_table_action_is_low_risk(action: str) -> bool:
         # catalog-only change. A default, NOT NULL, generated/identity, inline
         # constraint, serial pseudo-type, or domain/user type (which can carry
         # a hidden default or NOT NULL) can rewrite or scan the table.
-        return bool(re.fullmatch(
+        return types_trusted and bool(re.fullmatch(
             rf"{_BUILTIN_COLUMN_TYPE}(?: collate {_NAME})?(?: null)?", column.group(1)))
     return False
 
@@ -2014,14 +2026,16 @@ def preview_required_reasons(repo_root: Path, allowlist: list[str]) -> list[str]
             if (pair := _binds_on(s, rf"^create policy ({_IDENT}) on ({_NAME})(?: |$)"))
         }
         for statement in statements:
-            risk = _statement_preview_risk(statement, new_tables, created_triggers, created_policies)
+            risk = _statement_preview_risk(
+                statement, new_tables, created_triggers, created_policies, path_changes)
             if risk:
                 reasons.append(f"{version}: {risk}: {statement[:80]}")
     return reasons
 
 
 def _statement_preview_risk(
-    s: str, new_tables: set, created_triggers: set, created_policies: set
+    s: str, new_tables: set, created_triggers: set, created_policies: set,
+    path_changes: bool = False,
 ) -> str | None:
     if re.match(r"^(?:insert|update|delete|truncate|copy|merge|with)\b", s):
         return "data backfill or rewrite"
@@ -2049,7 +2063,8 @@ def _statement_preview_risk(
     if alter:
         if _canonical_name(alter.group(1)) in new_tables:
             return None
-        if all(_alter_table_action_is_low_risk(a) for a in _split_top_level_commas(alter.group(2))):
+        if all(_alter_table_action_is_low_risk(a, types_trusted=not path_changes)
+               for a in _split_top_level_commas(alter.group(2))):
             return None
         return "table rewrite or long lock on an existing table"
     if re.match(r"^(?:do|select|call|perform|execute)\b", s):
@@ -2130,6 +2145,19 @@ def prove_ephemeral_ci_evidence(
     if failed is None:
         raise RiskGateError(f"ephemeral CI artifact has no {EPHEMERAL_FAILED_RECORD}")
     head_tree = tracked_tree_at(pr_head, api)
+    # PIN THE PRODUCER. repo_root is the exact-main checkout; the tested head
+    # must carry the same bytes for every file that writes the records above,
+    # or the records prove only what a doctored workflow chose to write.
+    for path in EPHEMERAL_PRODUCER_PATHS:
+        on_main = repo_root / path
+        entry = head_tree.get(path)
+        if not on_main.is_file() or not isinstance(entry, dict) or entry.get("type") != "blob":
+            raise RiskGateError(
+                f"ephemeral CI producer {path} is absent from exact main or the source PR head {pr_head}")
+        if entry.get("sha") != git_blob_sha(on_main):
+            raise RiskGateError(
+                f"ephemeral CI producer {path} at {pr_head} differs from exact main, so its "
+                "applied record is not evidence")
     bound: dict[str, str] = {}
     for version in allowlist:
         matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
