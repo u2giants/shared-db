@@ -4,12 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2780,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2781/1",
-  "contract_sha256": "25f7ee9cd3e123850b02ee9d160200465ec7b97c8a67c5ee686c6b9f1cfc452f",
-  "head_sha": "a7806965f3135f5e716da5a2b7b063e19ea1b045",
+  "contract_ref": "refs/db-contracts/2781/2",
+  "contract_sha256": "a381012f02f8dc7ec349e54d9cf9701e288a48e463128e16a1744652f563d2f7",
+  "head_sha": "7f32485bd319dc8d63b45315fffdb58e4755dfc8",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/migration-author-lease.yml",
     "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
     "scripts/check-exact-head-approval.mjs",
     "scripts/check-exact-head-approval.test.mjs",
     "scripts/check-main-tip-freshness.mjs",
@@ -27,22 +30,27 @@
     {
       "command": "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 29, pass 29, fail 0, skipped 0 at a7806965: merge-only refresh ok, migration edit refused, .agent-only change ok, independent main move ok, overlapping file, version collision and conflict refused."
+      "evidence": "tests 29, pass 29, fail 0, skipped 0 at a7806965 (7f32485b adds only an inventory entry): merge-only refresh ok, migration edit refused, .agent-only change ok, independent main move ok, overlapping file, version collision and conflict refused."
     },
     {
       "command": "node --test scripts/check-exact-head-approval.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 50, pass 50, fail 0, skipped 0 at a7806965, including approval carried across an equivalent refresh and refused when the diff changed."
+      "evidence": "tests 50, pass 50, fail 0, skipped 0 at a7806965 (7f32485b adds only an inventory entry), including approval carried across an equivalent refresh and refused when the diff changed."
     },
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 517, pass 517, fail 0, skipped 0 at a7806965, including durable approval carried to an equivalent later head and refused otherwise."
+      "evidence": "tests 517, pass 517, fail 0, skipped 0 at a7806965 (7f32485b adds only an inventory entry), including durable approval carried to an equivalent later head and refused otherwise."
     },
     {
       "command": "python -m pytest scripts/test_production_business_risk_gate.py",
       "exit_code": 1,
       "evidence": "135 passed, 3 failed; the same 3 tests (1722 reconciliation, 2509 restoration, governed reconciliation identity) fail identically on untouched origin/main 9da98ede. The new unrelated-sidecar test passes. Not a required check."
+    },
+    {
+      "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 6, pass 6, fail 0, skipped 0 at 7f32485b; the invalidator inventory now covers the manager import closure including scripts/lib/pr-content-equivalence.mjs."
     }
   ],
   "assumptions_resolved": [
