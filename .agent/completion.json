@@ -1,42 +1,59 @@
 {
   "schema_version": 1,
-  "work_issue": 2723,
+  "work_issue": 2501,
   "outcome": "ready-for-merge",
-  "pr": 2725,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2723/2",
-  "contract_sha256": "ceb50dd6bbdfb70e359c05ae2b8446461cde49f99033e3e7c452357eda63d936",
-  "head_sha": "3386ff8869180e39f2d92ee9889a045f8d256894",
-  "files_changed": [
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/verify_preview_apply_artifact.py",
-    "scripts/test_verify_preview_apply_artifact.py",
-    ".agent/contract.json",
-    ".agent/completion.json"
+  "pr": 2734,
+  "migration_versions": [
+    "20260911052640"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2501/8",
+  "contract_sha256": "108c7636eb86071f6fc4b24c864224a6bb373d8f0300821024da25e9ef2de5df",
+  "head_sha": "b4d151e7a01eac41c845da1d222e07dc9cf0edd5",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
+    "supabase/tests/popdam_effective_count_performance_contracts.sql",
+    "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
+  ],
+  "db_reads": [
+    "table public.asset_effective_tags",
+    "table public.style_groups",
+    "table public.admin_config"
+  ],
+  "db_writes": [
+    "function public.filter_effective_assets",
+    "function public.get_effective_filter_counts_unchecked_1703",
+    "index public.idx_assets_tag_visible_facets",
+    "index public.idx_assets_tag_pending_facets",
+    "table public.assets",
+    "index public.idx_assets_tag_rls_visible_ids"
+  ],
   "checks": [
-    {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
-      "exit_code": 0,
-      "evidence": "514 passed, 0 failed, 0 skipped; combined manager and governed-review suite also passed 563 tests."
-    },
-    {
-      "command": "python scripts/test_verify_preview_apply_artifact.py",
-      "exit_code": 0,
-      "evidence": "4 test groups pass, including altered digest, run, preview target, ledger additions/removals, duplicate ZIP names, historical recovery rejection and changed migration bytes."
-    },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
+    },
+    {
+      "command": "synthetic PostgreSQL parity and index-only plan test",
+      "exit_code": 0,
+      "evidence": "Owned PostgreSQL18 fixture on localhost55486:40000 wide assets,327680000-byte heap,3964928-byte three-index footprint.16 scenarios preserved exact counts,IDs,legacy and own-facet maps. Actual production SELECT policies reproduced under authenticated role; prepared force_generic_plan tagcount33.502ms with narrow indexes. New rollback eligibility test and catalog guards passed. This is diagnostic mechanism proof, not production acceptance."
+    },
+    {
+      "command": "hosted ephemeral migration regression suite",
+      "exit_code": 0,
+      "evidence": "Database Contract Tests run34567517090 completed success at exact implementation76dbba1ed2f4c9c0b18da85fa017b718ca1cdd6e; every migration and every supabase/tests SQL test passed, including authenticated prepared tag access and non-DAM denial."
     }
   ],
   "assumptions_resolved": [
-    "Read-only real2466 proof passed: original run34388774773 artifact10118828990 SHA2561cb18ecb1b7f91ab1d318bcc2434b6345c5166bdfcd3f762a39c212846f0937e; exact ledger addition20260909132734 and migration content checked at ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05.",
-    "One independent review, CI and parent merge remain required."
+    "Production qsllyeztdwjgirsysgai target verified read-only; underlying blue count timed out at8s and showed primary-key heap lookups into2.12GBassets. Existing tag RLS requires visible asset existence; policy bytes remain unchanged.",
+    "Simple tag/facet-only requests have guarded narrow generic-plan arms; other filters retain complete original fallback. Existing API eight-second configurations remain unchanged.",
+    "Ordinary atomic index builds use lock_timeout2s and statement_timeout30s per build. Three full heap passes may hold write-blocking locks for roughly90s; preview must measure actual build duration. No concurrent/ad-hoc production DDL.",
+    "Applied migration bytes preserved. Parent owns final-main integration,one independent exact-head review,guarded merge,preview,production and real authenticated acceptance.",
+    "Currentmain208ba30d merged without anySQL/test change; finalheadCIandoneindependentreview stillrequired."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Implementation is tested. Final-main reviewer approval and real shared-target performance acceptance remain pending, not asserted by this completion record."
 }
