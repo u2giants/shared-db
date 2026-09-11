@@ -8,6 +8,8 @@
   "contract_sha256": "d7df20ffbe5d7d5eeea2dfb3183fb1f0619596b8ab9782698e2c4082e88fdf21",
   "head_sha": "68e3d69960ab30f8a20d974b0eb362db797ae72f",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "docs/agents/section-4-anti-collision-rules.md",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs"
