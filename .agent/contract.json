@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 9,
+  "generation": 10,
   "work_issue": 2741,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -80,7 +80,8 @@
     "Generation6 repairs evidence-pair binding only after implementationdc2ece0b; all SQL, policies, tests, claims and source behavior are unchanged.",
     "Generation7 rebinds evidence after merging origin/main 5eaebe7c as implementation cf1a3c6f; migration SQL, tests, guards and claims unchanged.",
     "Generation8 rebinds evidence after merging origin/main dae160a0 (#2760) as implementation 2a43f89f; migration SQL, tests, guards and claims unchanged.",
-    "Generation9 rebinds evidence after merging origin/main b68a1900 (#2740) as implementation 7080421c; migration SQL, tests, guards and claims unchanged."
+    "Generation9 rebinds evidence after merging origin/main b68a1900 (#2740) as implementation 7080421c; migration SQL, tests, guards and claims unchanged.",
+    "Generation10 rebinds evidence after merging origin/main 9da98ede (#2748) as implementation a663cf83; migration SQL, tests, guards and claims unchanged."
   ],
   "stop_conditions": [
     "Unexpected legacy column definition or dependent consumer.",
