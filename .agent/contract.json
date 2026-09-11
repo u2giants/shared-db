@@ -1,86 +1,64 @@
 {
+  "schema_version": 1,
+  "work_issue": 2724,
+  "generation": 3,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Make plm.\"FactoryTime\" a named, described, tagged lead-time template and add plm.product_type_factory_time so DesignFlow Production Tracking can assign one template per product type (mgCategory, MG01, MG02), matching the object names the consuming app already uses.",
+  "base_sha": "5ec8aef002471e8520f45aef290101e0424e69d7",
+  "dispatcher": "claude shared-db orchestrator marker #2758",
+  "worker": "claude issue-2724 migration author lane (claim #2803)",
+  "branch": "claude/issue-2724-factory-time",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
-    "config/db-data-admin-property-source-coverage.json",
-    "supabase/migrations/20260911210844_retire_erp_items_to_archive.sql",
-    "supabase/tests/erp_items_retirement_contracts.sql",
-    "supabase/tests/plm_item_import_phase2_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
-    "supabase/tests/popdam_item_bridge_additive_cutover_contract.sql",
-    "supabase/tests/popdam_item_state_contracts.sql",
+    ".agent/completion.json",
     ".agent/contract.json",
-    ".agent/completion.json"
+    "config/db-data-admin-property-source-coverage.json",
+    "supabase/migrations/20260911214438_plm_factory_time_templates.sql",
+    "supabase/tests/plm_factory_time_template_contracts.sql"
   ],
-  "assumptions": [
-    "api.plm_item_list keeps its exact 21-column contract, and its row count and id|source_id|division_code hash stay identical (production proof: 19,362 rows, md5 7f214c4a3178143a41d2741c8cad677a).",
-    "Legacy ERP item UUIDs still carried by the view ids, 13,700 bridge erp_item_id values and prediction erp_item_id values keep resolving through a frozen plm.legacy_erp_item_identity crosswalk copied from public.erp_items_current.",
-    "The rewritten plm.refresh_style_tracker_item_bridge and public.resolve_product_category_prediction_item_identity bodies are the current production bodies with only the table reference changed.",
-    "Only the bridge FK constraint is dropped; the erp_item_id column and its values are kept.",
-    "Neither legacy table is dropped: both move to a new archive schema with anon/authenticated access revoked, so retirement is reversible."
-  ],
-  "base_sha": "9ea5c664443f5c3fcdf43c5c40ca355450d0d394",
-  "branch": "claude/issue-2482-retire-erp-items",
-  "db_reads": [
-    "table public.erp_items_current",
-    "table public.erp_items_raw",
-    "view api.plm_item_list",
-    "table plm.item",
-    "table plm.style_tracker_item_bridge",
-    "table public.product_category_predictions"
-  ],
-  "db_writes": [
-    "schema archive",
-    "table plm.legacy_erp_item_identity",
-    "policy legacy_erp_item_identity_admin_read on plm.legacy_erp_item_identity",
-    "view api.plm_item_list",
-    "table api.plm_item_list",
-    "function plm.refresh_style_tracker_item_bridge",
-    "function public.resolve_product_category_prediction_item_identity",
-    "table plm.style_tracker_item_bridge",
-    "table public.erp_items_current",
-    "table public.erp_items_raw",
-    "table archive.erp_items_current",
-    "table archive.erp_items_raw"
-  ],
-  "dispatcher": "claude shared-db orchestrator route local_ceb221ac-1746-4836-9306-6839c18dbced",
   "file_writes": [
-    "config/db-data-admin-property-source-coverage.json",
-    "supabase/migrations/20260911210844_retire_erp_items_to_archive.sql",
-    "supabase/tests/erp_items_retirement_contracts.sql",
-    "supabase/tests/plm_item_import_phase2_contracts.sql",
-    "supabase/tests/plm_item_list_repoint_contracts.sql",
-    "supabase/tests/popdam_item_bridge_additive_cutover_contract.sql",
-    "supabase/tests/popdam_item_state_contracts.sql",
+    ".agent/completion.json",
     ".agent/contract.json",
-    ".agent/completion.json"
+    "config/db-data-admin-property-source-coverage.json",
+    "supabase/migrations/20260911214438_plm_factory_time_templates.sql",
+    "supabase/tests/plm_factory_time_template_contracts.sql"
   ],
-  "generation": 14,
-  "goal": "Retire the frozen DesignFlow item feed (public.erp_items_current and public.erp_items_raw) recoverably: repoint every live reader to a frozen identity crosswalk, drop only the bridge legacy FK, and move both tables to a revoked archive schema.",
+  "db_reads": [],
+  "db_writes": [
+    "table plm.\"FactoryTime\"",
+    "column plm.\"FactoryTime\".name",
+    "column plm.\"FactoryTime\".description",
+    "column plm.\"FactoryTime\".tags",
+    "column plm.\"FactoryTime\".updated_by",
+    "column plm.\"FactoryTime\".product_subtype",
+    "index plm.factory_time_name_ci_key",
+    "table plm.product_type_factory_time",
+    "column plm.product_type_factory_time.previous_factory_time_id",
+    "index plm.product_type_factory_time_factory_time_id_idx"
+  ],
   "prohibited_actions": [
-    "No DROP of public.erp_items_current or public.erp_items_raw or their data",
-    "No drop of plm.style_tracker_item_bridge.erp_item_id or its values",
-    "No change to the api.plm_item_list column list, types, row count or key hash",
-    "No direct production DDL; production only through the governed workflow",
-    "No object or path outside claim 2778 and this contract"
+    "Do not rename any object the consuming app already uses, including previous_factory_time_id.",
+    "Do not write or migrate application rows; plm.\"FactoryTime\" and plm.product_type_factory_time rows belong to designflow-tracking.",
+    "Do not touch the dflow or dflow_prod copies of FactoryTime.",
+    "Do not run DDL directly against preview or production; apply only through the governed workflows.",
+    "Do not widen an existing Property-source coverage family selector; add the one new family entry only.",
+    "Do not quarantine supabase/tests/plm_factory_time_template_contracts.sql to make CI green."
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check",
-    "supabase/tests/erp_items_retirement_contracts.sql on a disposable database",
-    "Database Contract Tests CI from empty"
+    "node scripts/check-db-data-admin-property-source-coverage.mjs",
+    "python -m unittest scripts/test_migration_derivation.py"
   ],
-  "route": "shared-db-orchestrator",
-  "schema_version": 1,
+  "assumptions": [
+    "plm.\"FactoryTime\" holds zero rows in production, so name NOT NULL can be added without inventing names; the migration raises rather than guessing if that has changed.",
+    "Version 20260911214438 is the version reserved by author claim #2803.",
+    "popcre/designflow-tracking#55 and popcre/designflow-frontend#182 are already aligned to these exact names.",
+    "Generation 3 changes no scope; it rebases the same three implementation commits onto main 5ec8aef0 after the #2482 lane landed. The only rebase conflicts were the two .agent evidence files, which every lane overwrites and which this generation rewrites."
+  ],
   "stop_conditions": [
-    "Claim 2778, reserved version 20260911210844, or coordinator route changes",
-    "A competing change touches any claimed object or contracted path",
-    "Any other view, function, FK or policy is found still reading the legacy tables",
-    "The api.plm_item_list row count or key hash would change",
-    "Implementation requires an object or path outside claim 2778 or this contract"
-  ],
-  "work_issue": 2482,
-  "work_type": "structural",
-  "worker": "claude issue2482-author holding claim 2778",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2482-retire-erp-items"
+    "Stop if plm.\"FactoryTime\" is found to hold rows in preview or production.",
+    "Stop if any object would have to be renamed away from what the consuming app expects.",
+    "Stop if a guard refusal could only be cleared by weakening the guard."
+  ]
 }
