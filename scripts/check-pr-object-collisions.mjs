@@ -746,7 +746,7 @@ export function extractOperations(sql) {
     }
   }
 
-  const multiDrop = new RegExp(String.raw`\bdrop\s+(materialized\s+view|function|procedure|view|index)\s+(?:concurrently\s+)?(?:if\s+exists\s+)?([^;]+)`, 'gi')
+  const multiDrop = new RegExp(String.raw`\bdrop\s+(materialized\s+view|function|procedure|view|index|type|domain|schema|sequence)\s+(?:concurrently\s+)?(?:if\s+exists\s+)?([^;]+)`, 'gi')
   const splitTargets = (value) => {
     const targets=[];let start=0,depth=0,quoted=false
     for(let index=0;index<value.length;index++){
@@ -762,7 +762,7 @@ export function extractOperations(sql) {
   while((multiMatch=multiDrop.exec(text))!==null){
     const parts=splitTargets(multiMatch[2].replace(/\s+(?:cascade|restrict)\s*$/i,''))
     if(parts.length<2)continue
-    const kind=multiMatch[1].toLowerCase().replace(/\s+/g,' ')
+    const rawKind=multiMatch[1].toLowerCase().replace(/\s+/g,' '),kind=rawKind==='domain'?'type':rawKind
     for(const part of parts){
       const target=new RegExp(String.raw`^\s*(${QUALIFIED})`,'i').exec(part)
       if(target)add({action:'drop',kind,target:canonical(target[1])},multiMatch.index)

@@ -191,9 +191,9 @@ test('a refused merged PR leaves its closed issue closed',()=>{
 })
 
 test('multi-target DDL binds every structural object',()=>{
-  for(const [ddl,kind] of [['table','table'],['view','view'],['materialized view','materialized view'],['function','function'],['procedure','procedure'],['index','index']]){
-    const result=inspectPrStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:`drop ${ddl} core.example, core.other;`}])
-    assert.deepEqual(result.objects,[`${kind} core.example`,`${kind} core.other`],ddl)
+  for(const [ddl,kind,targets,expected] of [['table','table','core.example, core.other',['table core.example','table core.other']],['view','view','core.example, core.other',['view core.example','view core.other']],['materialized view','materialized view','core.example, core.other',['materialized view core.example','materialized view core.other']],['function','function','core.example, core.other',['function core.example','function core.other']],['procedure','procedure','core.example, core.other',['procedure core.example','procedure core.other']],['index','index','core.example, core.other',['index core.example','index core.other']],['type','type','core.example, core.other',['type core.example','type core.other']],['schema','schema','core, other',['schema core','schema other']],['sequence','sequence','core.example, core.other',['sequence core.example','sequence core.other']]]){
+    const result=inspectPrStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:`drop ${ddl} ${targets};`}])
+    assert.deepEqual(result.objects,expected,ddl)
   }
 })
 
