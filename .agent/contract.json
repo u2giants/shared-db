@@ -1,34 +1,38 @@
 {
   "schema_version": 1,
-  "work_issue": 2766,
+  "work_issue": 2775,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Remove the global FIFO reviewer draw queue, retry a briefly occupied review mutex, and raise the author lane cap to 24.",
-  "base_sha": "dae160a00c9e1f07ecb3e3bde674bb0794d4b996",
+  "goal": "Remove the migration author lane cap entirely: no capacity refusal anywhere, with exact object collision locks and version reservations unchanged.",
+  "base_sha": "b729dd3b36a9ea91ca962f6b450550cc4dd57193",
   "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
-  "worker": "Claude process-unblocking sub-agent of marker 2758",
-  "branch": "claude/reviewer-draw-no-fifo",
-  "worktree": "C:/repos/shared-db-worktrees/unblock-2758",
+  "worker": "Claude sub-agent of marker 2758 (no lane cap)",
+  "branch": "claude/author-lanes-no-cap-2775",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "AGENTS.md",
     "docs/agents/section-4-anti-collision-rules.md",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/orchestrator-flow/capacity-state.test.mjs"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "AGENTS.md",
     "docs/agents/section-4-anti-collision-rules.md",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/orchestrator-flow/capacity-state.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
     "Do not modify a migration or any database state.",
-    "Do not change per-provider leases, engine exclusions, exact-head binding, or verdict recording.",
-    "Do not change exact object claims, version reservations, or serial stage refs."
+    "Do not weaken exact object claims, version reservations, the acquisition mutex, or serial stage refs.",
+    "Do not change reviewer leases, exclusions, exact-head binding, or verdict recording."
   ],
   "required_checks": [
     "git diff --check",
@@ -37,10 +41,10 @@
     "node scripts/check-github-transport-conformance.mjs"
   ],
   "assumptions": [
-    "Owner instructions relayed on marker 2758 authorize removing the reviewer FIFO and raising the author cap."
+    "Owner ruling relayed on marker 2758: there must be no limit on migration author lanes, at all, ever."
   ],
   "stop_conditions": [
     "Stop if implementation requires a database or production write."
   ],
-  "generation": 4
+  "generation": 1
 }
