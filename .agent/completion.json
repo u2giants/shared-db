@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2695,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2694/4",
-  "contract_sha256": "e650622a8cb8971adcadb34f4e90895ebcc7e816c9621a5d40df5fe0da9dc55a",
-  "head_sha": "a65014230b4307ad5a8b213e1f767f500e756499",
+  "contract_ref": "refs/db-contracts/2694/5",
+  "contract_sha256": "3274438055249c72764a25dba17ac304f74d71a3df7e79596b0e717cc0bd6b50",
+  "head_sha": "984d5417f071f4e6e7cb2e516d2d836ef1958f7e",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -22,22 +22,22 @@
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 503, pass 503, fail 0, skipped 0, todo 0. The new #2710 round-3 test, 'a release retry does not mistake a live sibling job for the outstanding lease of this job (#2694)', was proved to be a real regression test: with the already-released branch of releaseFailedReviewer reverted to the round-1 predicate `io.readRef(failedLeaseRef)!==null`, the suite runs tests 503, pass 502, fail 1 and that test alone fails on 'the sibling lease must not be read as the outstanding lease of this job'. Its positive control -- the ref holding THIS job's own lease again -- still raises 'reconciliation requires manual audit', so the check is not simply disabled."
+      "evidence": "tests 504, pass 504, fail 0, skipped 0, todo 0, suites 0 at commit 984d5417f071f4e6e7cb2e516d2d836ef1958f7e. The new test '#2694 releasing a slot 2 failure is refused when the lease at that ref names slot 1' asserts the SLOT in the inline lease-match check inside releaseFailedReviewer. It was proved to be a real regression test: with that check reverted to the slot-blind five-field predicate, `node --test --test-name-pattern \"lease at that ref names slot 1\"` runs tests 1, pass 0, fail 1; with the fix in place it passes. Both inline checks now delegate to leaseMatchesAssignment, which already compared the slot, so neither depends on the single global sequence cursor keeping sequences unique across slots."
     },
     {
       "command": "node --test scripts/record-review-verdict.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 18, pass 18, fail 0, skipped 0, todo 0. The io fixture now carries a working deleteRef, matching githubIo, so the lease release actually happens and the idempotency assertion is no longer vacuous. Against the pre-fix script (git stash of scripts/manage-migration-author-lanes.mjs) the same fixture runs pass 16, fail 2: 'recording is create-only, bound to the assignment parent, and idempotent' and 'an existing artifact is validated against its own findings comment, not this round's (#2464)' both fail with 'reviewer does not hold the exact active lease; late or conflicting verdict refused' -- issue #2710 exactly."
+      "evidence": "tests 18, pass 18, fail 0, skipped 0, todo 0, suites 0 at commit 984d5417f071f4e6e7cb2e516d2d836ef1958f7e. Unchanged by this round: the slot fix touches only the two inline lease-match predicates in the lane manager's release and replacement paths, and the verdict recorder's own lease handling is untouched."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Contract is valid."
+      "evidence": "Contract is valid. Generation 5, published and read back as refs/db-contracts/2694/5 sha 72a37b2a8640b3c3b28dff62719e8fafa5513cad, content hash 3274438055249c72764a25dba17ac304f74d71a3df7e79596b0e717cc0bd6b50."
     },
     {
       "command": "node scripts/agent-work-contract.mjs --validate-completion --report-file .agent/completion.json --contract-file .agent/contract.json",
       "exit_code": 0,
-      "evidence": "Completion report satisfies the contract."
+      "evidence": "Completion report satisfies the contract. Also validated with --expected-pr 2695 and --expected-head-sha naming this round's final head."
     },
     {
       "command": "git diff --check",
@@ -52,7 +52,9 @@
     "The capacity report and cutover activation read the assignment-keyed view, so one provider holding two live jobs is two rows and two backfilled leases rather than one.",
     "No database access or mutation occurred.",
     "#2710. The standing verdict artifact is read before the exact-lease gate, so recording stays idempotent after the verdict has handed its own lease back. The artifact's assignment_sha binding is still enforced by validateVerdictArtifact, so a late or conflicting verdict is refused unchanged, and a request with no standing artifact still meets the lease gate.",
-    "The lease a recorded verdict hands back no longer falls back to the provider-keyed legacy ref when neither name holds it, so the release cannot aim at a ref a live sibling job for the same provider is holding."
+    "The lease a recorded verdict hands back no longer falls back to the provider-keyed legacy ref when neither name holds it, so the release cannot aim at a ref a live sibling job for the same provider is holding.",
+    "#2695 review REVISE round. Both inline lease-match checks -- in releaseFailedReviewer and in the replacement path -- now state the review slot by reusing leaseMatchesAssignment, so a lease belonging to another slot can no longer satisfy them. The dead failedLeaseRef binding in releaseFailedReviewer was removed so a later edit cannot aim a compare-and-delete at the wrong ref name, and a duplicated three-line comment paragraph was deleted.",
+    "pickReviewer keeps its serial behaviour and gains a comment instead of a concurrent-mode branch. It has no production caller in this tree, its tests pin the serial-lease rule, and the live draw path applies failed-name, exclusion and excluded-provider filtering that this helper does not have -- so a bolted-on concurrent branch would produce a half-correct helper that LOOKS safe to reuse for a draw. Documenting it as the pre-concurrency serial helper that must not be reused without that branch and those filters is the safer of the two options offered."
   ],
   "stop_conditions_hit": []
 }

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 4,
+  "generation": 5,
   "work_issue": 2694,
   "work_type": "repo-maintenance",
   "route": "repository-maintenance",
