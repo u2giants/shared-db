@@ -1,50 +1,42 @@
 {
   "schema_version": 1,
+  "work_issue": 2789,
   "generation": 2,
-  "work_issue": 2769,
-  "work_type": "structural",
+  "work_type": "tooling",
   "route": "shared-db-orchestrator",
-  "goal": "Restrict EXECUTE on public.queue_nightly_rebuild_style_groups() so PUBLIC, anon and authenticated cannot run the #2440 rebuild-queue function; keep service_role and postgres (the cron caller).",
-  "base_sha": "b68a1900a6c287bd16adcbdacc8a3e4a8db543b1",
-  "dispatcher": "Claude orchestrator #2758",
-  "worker": "claude-2758-2769",
-  "branch": "claude/issue-2769-rebuild-queue-grants",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2769",
+  "goal": "Make the production apply review refuse a missing or non-numeric source_pr by name, before any production credential is used, whenever the automatic risk policy is active, without relaxing, removing or reordering any existing guard.",
+  "base_sha": "5761bc5e8763817c6deb722cac627f8924b5baaf",
+  "dispatcher": "Albert Hazan (owner request in chat)",
+  "worker": "Claude production-review source-pr worker",
+  "branch": "claude/production-review-source-pr",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/jovial-moore-5fd4c8",
   "allowed_paths": [
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "scripts/test_production_review_source_pr_preflight.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "file_writes": [
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "scripts/test_production_review_source_pr_preflight.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
-  ],
+  "db_writes": [],
   "prohibited_actions": [
-    "No direct production DDL; production changes only through the governed promotion workflow.",
-    "No fabricated reviews or verdicts; no deleting locks, audit rows or history.",
-    "Do not touch #2705, #2709, #2290, #2678 or the #2543 residual."
+    "No shared database reads or writes, no production or preview apply or workflow dispatch, no migration files, no removal or weakening of any existing guard or check, no fabricated reviews."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "git diff --check"
+    "python -m unittest scripts/test_production_review_source_pr_preflight.py"
   ],
   "assumptions": [
-    "The only runtime caller is the nightly cron job running as postgres; no app (including popdam3) calls the function as anon or authenticated.",
-    "Revoking authenticated does not change the function body or its signature."
+    "source_pr is required whenever the automatic policy is active; preview inputs may become conditional (open PR #2771), so only source_pr is checked early."
   ],
   "stop_conditions": [
-    "An application caller that runs as anon or authenticated is found.",
-    "Exact object collision with another active claim."
+    "Any required check fails.",
+    "The fix would need to remove, weaken or reorder an existing guard."
   ]
 }
