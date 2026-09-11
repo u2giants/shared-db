@@ -1,49 +1,50 @@
 {
   "schema_version": 1,
-  "work_issue": 2772,
-  "generation": 13,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Let a merged low-risk migration promote to production on exact-head ephemeral database CI evidence instead of a shared-preview apply, keeping preview mandatory for high-risk SQL.",
-  "base_sha": "9a62bd23342d66fb1697e9f6965221b8dca27103",
-  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
-  "worker": "Claude process-unblocking sub-agent of marker 2758",
-  "branch": "claude/production-without-preview",
-  "worktree": "C:/repos/shared-db-worktrees/preview-skip",
+  "generation": 3,
+  "work_issue": 2769,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Restrict EXECUTE on public.queue_nightly_rebuild_style_groups() so PUBLIC, anon and authenticated cannot run the #2440 rebuild-queue function; keep service_role and postgres (the cron caller).",
+  "base_sha": "b68a1900a6c287bd16adcbdacc8a3e4a8db543b1",
+  "dispatcher": "Claude orchestrator #2758",
+  "worker": "claude-2758-2769",
+  "branch": "claude/issue-2769-rebuild-queue-grants",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2769",
   "allowed_paths": [
+    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    ".github/workflows/database-contract-tests.yml",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_preview_skip.py"
+    ".agent/completion.json"
   ],
   "file_writes": [
+    "supabase/migrations/20260911203057_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    ".github/workflows/database-contract-tests.yml",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_preview_skip.py"
+    ".agent/completion.json"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function public.queue_nightly_rebuild_style_groups"
+  ],
   "prohibited_actions": [
-    "Do not apply any migration or run any production or preview database write.",
-    "Do not relax exact target proof, the production lane lock, review evidence, or post-apply verification.",
-    "Do not let the ephemeral route promote SQL the classifier cannot positively recognise as low-risk."
+    "No direct production DDL; production changes only through the governed promotion workflow.",
+    "No fabricated reviews or verdicts; no deleting locks, audit rows or history.",
+    "Do not touch #2705, #2709, #2290, #2678 or the #2543 residual."
   ],
   "required_checks": [
-    "git diff --check",
-    "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py"
+    "bash scripts/check-sql.sh",
+    "git diff --check"
   ],
   "assumptions": [
-    "The required ephemeral database contract-test job applies every migration and records which applied, so its exact-head success is evidence the merged bytes apply cleanly."
+    "The only runtime caller is the nightly cron job running as postgres; no app (including popdam3) calls the function as anon or authenticated.",
+    "Revoking authenticated does not change the function body or its signature."
   ],
   "stop_conditions": [
-    "Stop if the change requires a database write.",
-    "Stop if skipping preview would require weakening any production guard other than the preview-evidence input."
+    "An application caller that runs as anon or authenticated is found.",
+    "Exact object collision with another active claim."
   ]
 }
