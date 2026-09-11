@@ -1,54 +1,51 @@
 {
   "schema_version": 1,
-  "work_issue": 2744,
+  "work_issue": 2301,
   "outcome": "ready-for-merge",
-  "pr": 2793,
-  "migration_versions": [
-    "20260911170526"
-  ],
-  "contract_ref": "refs/db-contracts/2744/6",
-  "contract_sha256": "af4910f98daa536a790080e6ba2603abc17586745ce4f7059b08907873583148",
-  "head_sha": "8cd2e015bb4fa3fc96c175df965daf2a427184d8",
+  "pr": 2640,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2301/3",
+  "contract_sha256": "c116551d0a1b126e51e3e017a581410a48a446b2936767c9a34f30cb01b96ded",
+  "head_sha": "86ff7f45133a873653123d28c75b8281e75d1eb6",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
-    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
+    "plan_author_lane_abandonment_lifecycle.md",
+    "scripts/coordination-scenarios.test.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/orchestrator-flow/capacity-state.test.mjs"
   ],
-  "db_reads": [
-    "function api.db_data_admin_scraped_properties",
-    "table plm.dcp_asset",
-    "table plm.lucasfilm_dcp_asset",
-    "table plm.dcp_style_guide",
-    "table plm.lucasfilm_dcp_style_guide",
-    "table plm.dcp_asset_property_observation",
-    "table plm.lucasfilm_dcp_asset_property_observation"
-  ],
-  "db_writes": [
-    "function api.db_data_admin_scraped_properties"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
+    {
+      "command": "node --test scripts/orchestrator-flow/capacity-state.test.mjs scripts/orchestrator-flow/reconcile.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/check-migration-pr-lease.test.mjs",
+      "exit_code": 0,
+      "evidence": "Re-run at implementation head 86ff7f45133a873653123d28c75b8281e75d1eb6 (main 5eaebe7c merged): tests 562, pass 562, fail 0, cancelled 0, skipped 0, todo 0."
+    },
+    {
+      "command": "node --test scripts/lib/exclusive-lease.test.mjs scripts/coordination-scenarios.test.mjs",
+      "exit_code": 0,
+      "evidence": "Re-run at implementation head 86ff7f45133a873653123d28c75b8281e75d1eb6: tests 57, pass 57, fail 0, cancelled 0, skipped 0, todo 0."
+    },
+    {
+      "command": "python scripts/test_production_migration_guard.py",
+      "exit_code": 0,
+      "evidence": "Re-run at implementation head 86ff7f45133a873653123d28c75b8281e75d1eb6: Ran 239 tests, OK, plus both BOUNDED OK migration manifest controls."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on 25c4ca3b..db2b97e0."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static checks passed; scripts/test_migration_derivation.py 44 tests OK with derived-from 20260911061539 on db2b97e0."
-    },
-    {
-      "command": "hosted ephemeral migration regression suite",
-      "exit_code": 0,
-      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on 34b872e6 (run 34630156916, job 103364730068), whose supabase files are identical to implementation db2b97e0; it applied every migration and ran scraped_properties_page_asset_context_contracts.sql, db_data_admin_scraped_properties.sql, _opa_groups.sql and _source_purpose.sql."
+      "evidence": "No whitespace errors were reported for 5eaebe7c09683aef77bdef92aec454af5dddf2cb..86ff7f45133a873653123d28c75b8281e75d1eb6."
     }
   ],
   "assumptions_resolved": [
-    "Production plm.dcp_asset, plm.lucasfilm_dcp_asset, plm.dcp_style_guide and plm.lucasfilm_dcp_style_guide all have PRIMARY KEY (id), so resolving style guides from page assets yields the same set.",
-    "Production body md5 b63154a297ae649811cde7569657a146 equals 20260911061539; read-only parity on production: default page md5 530e12902785646a59c03b9c915d496c (1,067,395 bytes), Bambi and Cars 2 identical between current and new body."
+    "The live pre-parser census inspected seven open claims and found zero fences declaring expired-unconfirmed; the privacy-safe count and claim numbers are recorded on issue 2301.",
+    "Claim 2574 records C:/repos/shared-db-worktrees/issue-2503-bootstrap and that exact EDGE-DEV path was absent; the implementation requires an explicit absent declaration and does not treat absence alone as authorization.",
+    "Governed review at head 8e94f1148d6946aef87cf8424188d6e169638c5a returned REVISE with three High findings. Head 1907f42489019f78ea563bdeb61258eb6fc61f5c addresses them in code: recovery artifacts are dereferenced through githubIo.verifyArtifact rather than shape-checked, resumeAuthorLease re-verifies a stored artifact and lets an unreadable worktree observation throw, and remote relinquishment always requires a recovery artifact. No exact-head verdict exists yet for this fix; fresh review is required.",
+    "Merge of main 5eaebe7c09683aef77bdef92aec454af5dddf2cb resolved one lane-manager conflict by uniting the argument list (main's --target-url and --description plus the branch's --worktree-state and --recovery-artifact); no behaviour outside Phase A changed.",
+    "Blocking stop condition PR 2634 is merged (ecfe38ac39956fe45f5ec6fdc2b00029e39f0d05).",
+    "Issue 2301 remains open for Phase B-D. Fresh exact-head checks and approvals are required before PR 2640 may merge."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Implementation db2b97e0 contains main 25c4ca3b. Read-only production EXPLAIN ANALYZE: execution 24.9s to 4.7s, planning 1.26s to 42ms, no temp spill; default page 3.7-6.0s versus 12.4-33.7s; output md5 identical. No work_mem, statement_timeout, role or global setting changed. Contract generation 2 adds the OPA groups test path."
+  "stop_conditions_hit": []
 }

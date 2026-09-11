@@ -59,6 +59,8 @@ export const REPO = 'u2giants/shared-db'
 // database. Ref writes are ~6/hour per active lease; that caveat in
 // plan_multi_agent_database_coordination_hardening.md now scales with real work.
 export const AUTHOR_CAPACITY_STATES = Object.freeze(['active', 'relinquished', 'expired-unconfirmed'])
+export const AUTHORABLE_CAPACITY_STATES = Object.freeze(AUTHOR_CAPACITY_STATES.filter((state) => state !== 'expired-unconfirmed'))
+export const WORKTREE_STATES = Object.freeze(['clean', 'dirty', 'absent', 'remote'])
 export const DEFAULT_LEASE_HOURS = 12
 export const MUTEX_STALE_AFTER_MS = 2 * 60 * 1000
 export const MUTEX_REF = 'refs/db-coordination/author-acquisition'
@@ -953,6 +955,8 @@ export function parseAuthorLease(body, now = new Date()) {
     if (!match || fields.has(match[1])) throw new LaneError('unreadable db-author-lease block')
     fields.set(match[1], match[2].trim())
   }
+  const allowedFields = new Set(['owner', 'branch', 'worktree', 'expires_at', 'capacity_state', 'blocked_on', 'worktree_state', 'recovery'])
+  for (const key of fields.keys()) if (!allowedFields.has(key)) throw new LaneError(`db-author-lease contains unknown field ${key}`)
   for (const required of ['owner', 'branch', 'worktree', 'expires_at']) {
     if (!fields.get(required)) throw new LaneError(`db-author-lease is missing ${required}`)
   }
@@ -961,13 +965,24 @@ export function parseAuthorLease(body, now = new Date()) {
   const declaredCapacityState = fields.get('capacity_state') ?? 'active'
   if (!AUTHOR_CAPACITY_STATES.includes(declaredCapacityState)) throw new LaneError(`db-author-lease capacity_state must be one of ${AUTHOR_CAPACITY_STATES.join(', ')}`)
   const blockedOn = fields.get('blocked_on') ?? null
+  const declaredWorktreeState = fields.get('worktree_state') ?? null
+  const recoveryArtifact = fields.get('recovery') ?? null
   if (declaredCapacityState === 'relinquished' && !blockedOn) throw new LaneError('relinquished author capacity must name blocked_on')
   if (declaredCapacityState !== 'relinquished' && blockedOn) throw new LaneError('blocked_on is allowed only for relinquished author capacity')
+  if (declaredWorktreeState && !WORKTREE_STATES.includes(declaredWorktreeState)) throw new LaneError(`db-author-lease worktree_state must be one of ${WORKTREE_STATES.join(', ')}`)
+  if (declaredCapacityState !== 'relinquished' && declaredWorktreeState) throw new LaneError('worktree_state is allowed only for relinquished author capacity')
+  if (declaredCapacityState !== 'relinquished' && recoveryArtifact) throw new LaneError('recovery is allowed only for relinquished author capacity')
+  if (recoveryArtifact) validateImmutableArtifactReference(recoveryArtifact, 'db-author-lease recovery')
+  // Claims written before Phase A did not carry worktree_state. Keep them
+  // readable so locks/version reservations remain protected, but make their
+  // unknown evidence explicit and refuse mutation until reconciled.
+  const relinquishmentMetadataLegacy = declaredCapacityState === 'relinquished' && !declaredWorktreeState
+  const worktreeState = relinquishmentMetadataLegacy ? 'unknown-legacy' : declaredWorktreeState
   const active = expiresAt > now
   const capacityState = !active && declaredCapacityState === 'active' ? 'expired-unconfirmed' : declaredCapacityState
   // Clock expiry never frees capacity. Only an explicit relinquished fence does.
   const capacityActive = declaredCapacityState !== 'relinquished'
-  return { ...claim, legacy: false, owner: fields.get('owner'), branch: fields.get('branch'), worktree: fields.get('worktree'), expiresAt, active, capacityState, declaredCapacityState, capacityActive, blockedOn }
+  return { ...claim, legacy: false, owner: fields.get('owner'), branch: fields.get('branch'), worktree: fields.get('worktree'), expiresAt, active, capacityState, declaredCapacityState, capacityActive, blockedOn, worktreeState, recoveryArtifact, relinquishmentMetadataLegacy }
 }
 
 export function assertLaneAvailable(claims, proposedObjects, now = new Date(), { prSources = [] } = {}) {
@@ -987,7 +1002,7 @@ export function assertLaneAvailable(claims, proposedObjects, now = new Date(), {
   return { active: occupied, protected:parsed, relinquished:parsed.filter((claim)=>!claim.lease.capacityActive), stale: parsed.filter((claim) => !claim.lease.legacy && !claim.lease.active) }
 }
 
-export function claimBody({ version, objects, writes, reads = [], owner, branch, worktree, expiresAt, capacityState = 'active', blockedOn = null }) {
+export function claimBody({ version, objects, writes, reads = [], owner, branch, worktree, expiresAt, capacityState = 'active', blockedOn = null, worktreeState = null, recoveryArtifact = null }) {
   // `objects` is the deprecated parameter name for `writes`. Accepting both keeps
   // every existing caller working through the compatibility window; Step 8A drops
   // the alias once no open claim uses it.
@@ -997,11 +1012,23 @@ export function claimBody({ version, objects, writes, reads = [], owner, branch,
   // Emit `reads:` only when there is one. An always-present empty header would
   // make every legacy claim look edited in a diff.
   if (read.length) lines.push('reads:', ...read.map((o) => `  - ${o}`))
-  if (!AUTHOR_CAPACITY_STATES.includes(capacityState)) throw new LaneError(`capacityState must be one of ${AUTHOR_CAPACITY_STATES.join(', ')}`)
+  // AUTHORABLE vs PARSEABLE (#2775 + Phase A). `expired-unconfirmed` is DERIVED by
+  // parseAuthorLease when an 'active' lease outlives its expiry, so it must stay in
+  // AUTHOR_CAPACITY_STATES for parsing round-trips. It must never be AUTHORED: a
+  // claim that declares itself expired would be durable claim authority for a state
+  // no writer is entitled to assert. The write path therefore validates the narrower
+  // authorable set.
+  if (!AUTHORABLE_CAPACITY_STATES.includes(capacityState)) throw new LaneError(`capacityState must be one of ${AUTHORABLE_CAPACITY_STATES.join(', ')}`)
   if (capacityState === 'relinquished' && !blockedOn) throw new LaneError('relinquished capacity requires blockedOn')
   if (capacityState !== 'relinquished' && blockedOn) throw new LaneError('blockedOn is allowed only for relinquished capacity')
+  if (capacityState === 'relinquished' && !WORKTREE_STATES.includes(worktreeState)) throw new LaneError(`relinquished capacity requires worktreeState to be one of ${WORKTREE_STATES.join(', ')}`)
+  if (capacityState !== 'relinquished' && worktreeState) throw new LaneError('worktreeState is allowed only for relinquished capacity')
+  if (capacityState !== 'relinquished' && recoveryArtifact) throw new LaneError('recoveryArtifact is allowed only for relinquished capacity')
+  if (recoveryArtifact) validateImmutableArtifactReference(recoveryArtifact, 'recoveryArtifact')
   lines.push('```', '', '```db-author-lease', `owner: ${owner}`, `branch: ${branch}`, `worktree: ${worktree}`, `expires_at: ${expiresAt.toISOString()}`, `capacity_state: ${capacityState}`)
   if (blockedOn) lines.push(`blocked_on: ${blockedOn}`)
+  if (worktreeState) lines.push(`worktree_state: ${worktreeState}`)
+  if (recoveryArtifact) lines.push(`recovery: ${recoveryArtifact}`)
   lines.push('```', '',
     'This claim remains authoritative until explicitly released. Only an active author-capacity lease occupies an author slot.',
     'Expiry is an audit warning, not an automatic release. The migration version is permanent and is never reused.',
@@ -1791,7 +1818,24 @@ export const githubIo = {
     return execFileSync('git',['-C',worktree,'rev-parse','HEAD'],{encoding:'utf8'}).trim()
   },
   localHead(worktree){return execFileSync('git',['-C',worktree,'rev-parse','HEAD'],{encoding:'utf8'}).trim()},
-  localClean(worktree){return execFileSync('git',['-C',worktree,'status','--porcelain'],{encoding:'utf8'}).split(/\r?\n/).filter(Boolean).every((line)=>line.slice(3).replaceAll('\\','/').startsWith('.ai/')) },
+  localWorktreeState(worktree){
+    if(!existsSync(worktree))return {state:'absent'}
+    const clean=execFileSync('git',['-C',worktree,'status','--porcelain'],{encoding:'utf8'}).split(/\r?\n/).filter(Boolean).every((line)=>line.slice(3).replaceAll('\\','/').startsWith('.ai/'))
+    return {state:clean?'clean':'dirty'}
+  },
+  localClean(worktree){return existsSync(worktree)&&execFileSync('git',['-C',worktree,'status','--porcelain'],{encoding:'utf8'}).split(/\r?\n/).filter(Boolean).every((line)=>line.slice(3).replaceAll('\\','/').startsWith('.ai/'))},
+  // A recovery artifact is only worth anything if it can actually be READ back.
+  // Shape validation alone (40-64 hex characters) accepts invented digits, which
+  // makes a recovery gate assertion-only. This dereferences the reference as a
+  // git object in this repository; anything that cannot be resolved is refused.
+  verifyArtifact(reference){
+    const hash=/^artifact:([0-9a-f]{40,64})$/i.exec(String(reference??''))
+    if(!hash)return null
+    try{
+      const type=execFileSync('git',['cat-file','-t',hash[1]],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim()
+      return type?{kind:'git-object',type,id:hash[1].toLowerCase()}:null
+    }catch{return null}
+  },
   currentMaxVersion:currentMainMaxVersion,
   commandAvailable(command){return Boolean(resolveCommandPath(command))},
   // Ask the wrapper's own `doctor` whether it can actually work RIGHT NOW.
@@ -5379,10 +5423,14 @@ function replaceLeaseExpiry(body, expiresAt) {
   return body.slice(0,fences[0].index)+fences[0][0].replace(block,()=>replacement)+body.slice(fences[0].index+fences[0][0].length)
 }
 
-function replaceCapacityState(body, capacityState, blockedOn = null) {
+function replaceCapacityState(body, capacityState, blockedOn = null, worktreeState = null, recoveryArtifact = null) {
   if (!AUTHOR_CAPACITY_STATES.includes(capacityState)) throw new LaneError('invalid author capacity state')
   if (capacityState === 'relinquished' && !blockedOn) throw new LaneError('relinquished author capacity requires blocked_on')
   if (capacityState !== 'relinquished' && blockedOn) throw new LaneError('blocked_on is only valid for relinquished capacity')
+  if (capacityState === 'relinquished' && !WORKTREE_STATES.includes(worktreeState)) throw new LaneError(`relinquished author capacity requires worktree_state to be one of ${WORKTREE_STATES.join(', ')}`)
+  if (capacityState !== 'relinquished' && worktreeState) throw new LaneError('worktree_state is only valid for relinquished capacity')
+  if (capacityState !== 'relinquished' && recoveryArtifact) throw new LaneError('recovery is only valid for relinquished capacity')
+  if (recoveryArtifact) validateImmutableArtifactReference(recoveryArtifact, 'recovery')
   const fences=[...body.matchAll(/```db-author-lease\s*\n([\s\S]*?)```/g)]
   if(fences.length!==1)throw new LaneError('claim body must contain exactly one manager-owned db-author-lease block')
   let block=fences[0][1]
@@ -5391,10 +5439,14 @@ function replaceCapacityState(body, capacityState, blockedOn = null) {
   block=capacityMatches.length
     ? block.replace(/^capacity_state:\s*.+$/m,`capacity_state: ${capacityState}`)
     : `${block.replace(/\s*$/,'')}\ncapacity_state: ${capacityState}\n`
-  const blockedMatches=block.match(/^blocked_on:\s*.+$/gm)??[]
-  if(blockedMatches.length>1)throw new LaneError('claim blocked_on is ambiguous')
-  if(blockedMatches.length) block=block.replace(/^blocked_on:\s*.+\r?\n?/m,'')
+  for(const [field,label] of [['blocked_on','blocked_on'],['worktree_state','worktree_state'],['recovery','recovery']]){
+    const matches=block.match(new RegExp(`^${field}:\\s*.+$`,'gm'))??[]
+    if(matches.length>1)throw new LaneError(`claim ${label} is ambiguous`)
+    if(matches.length)block=block.replace(new RegExp(`^${field}:\\s*.+\\r?\\n?`,'m'),'')
+  }
   if(blockedOn) block=`${block.replace(/\s*$/,'')}\nblocked_on: ${blockedOn}\n`
+  if(worktreeState) block=`${block.replace(/\s*$/,'')}\nworktree_state: ${worktreeState}\n`
+  if(recoveryArtifact) block=`${block.replace(/\s*$/,'')}\nrecovery: ${recoveryArtifact}\n`
   return body.slice(0,fences[0].index)+fences[0][0].replace(fences[0][1],()=>block)+body.slice(fences[0].index+fences[0][0].length)
 }
 
@@ -5420,9 +5472,57 @@ function validateCapacityBlocker(blockedOn, io) {
     if(!blocker||blocker.state!=='open')throw new LaneError(`blocked_on issue #${issue[1]} is not durably open`)
     return `issue:#${issue[1]}`
   }
-  const artifact=/^artifact:(https:\/\/\S+|[0-9a-f]{40,64})$/i.exec(String(blockedOn??''))
-  if(!artifact)throw new LaneError('--blocked-on must be issue:#<number> or artifact:<immutable-url-or-hash>')
+  try{return validateImmutableArtifactReference(blockedOn, '--blocked-on')}
+  catch{throw new LaneError('--blocked-on must be issue:#<number> or artifact:<immutable-url-or-hash>')}
+}
+
+function validateImmutableArtifactReference(reference, label) {
+  const artifact=/^artifact:(https:\/\/\S+|[0-9a-f]{40,64})$/i.exec(String(reference??''))
+  if(!artifact)throw new LaneError(`${label} must be artifact:<immutable-url-or-hash>`)
   return `artifact:${artifact[1]}`
+}
+
+// HIGH: a recovery artifact that is merely well-formed is not a control. The
+// reference must be dereferenceable RIGHT NOW, or the resume gate is a spelling
+// check. https references are refused for recovery precisely because this tool
+// cannot dereference them; they remain acceptable for --blocked-on, which is an
+// informational blocker, not a recovery gate.
+function requireDereferenceableRecoveryArtifact(reference, io) {
+  const normalized=validateImmutableArtifactReference(reference,'--recovery-artifact')
+  if(!/^artifact:[0-9a-f]{40,64}$/i.test(normalized))throw new LaneError('--recovery-artifact must be an immutable object hash this repository can dereference')
+  if(typeof io.verifyArtifact!=='function')throw new LaneError('recovery artifact verification is unavailable; refusing to trust an unverifiable recovery artifact')
+  let resolved
+  try{resolved=io.verifyArtifact(normalized)}catch(error){throw new LaneError(`recovery artifact verification is ambiguous: ${error.message}`)}
+  if(!resolved)throw new LaneError(`recovery artifact ${normalized} cannot be dereferenced`)
+  return normalized
+}
+
+function requestedWorktreeState(value) {
+  if(value===undefined||value===null||value==='')return null
+  if(!WORKTREE_STATES.includes(value))throw new LaneError(`--worktree-state must be one of ${WORKTREE_STATES.join(', ')}`)
+  return value
+}
+
+function observedWorktreeState(worktree, io) {
+  let observed
+  try{observed=io.localWorktreeState?io.localWorktreeState(worktree):io.localClean?.(worktree)}catch(error){throw new LaneError(`claim worktree inspection is ambiguous: ${error.message}`)}
+  const state=typeof observed==='boolean'?(observed?'clean':'dirty'):typeof observed==='string'?observed:observed?.state
+  if(!WORKTREE_STATES.includes(state))throw new LaneError('claim worktree inspection is ambiguous')
+  return state
+}
+
+function resolveRelinquishmentWorktreeState(worktree, explicitState, io) {
+  const requested=requestedWorktreeState(explicitState),observed=observedWorktreeState(worktree,io)
+  if(observed==='clean'){
+    if(requested&&requested!=='clean')throw new LaneError(`claim worktree is clean; refusing contradictory --worktree-state ${requested}`)
+    return 'clean'
+  }
+  // A path absent on this machine may be either truly absent or known to live
+  // on another machine. The explicit declaration distinguishes those cases;
+  // a locally present clean/dirty tree can never be called remote.
+  if(observed==='absent'&&requested==='remote')return 'remote'
+  if(requested!==observed)throw new LaneError(`claim worktree is ${observed}; explicit --worktree-state ${observed} is required`)
+  return observed
 }
 
 function publishCapacityEvents({ workIssue, claim, eventTypes, actor, detail }, now, io) {
@@ -5447,25 +5547,30 @@ export function relinquishAuthorLease(options, now = new Date(), io = githubIo) 
     if(lease.legacy)throw new LaneError('legacy claim capacity cannot be relinquished')
     if(lease.owner!==options.owner)throw new LaneError('claim belongs to a different owner')
     const blocker=validateCapacityBlocker(options.blockedOn,io)
+    const recoveryArtifact=options.recoveryArtifact?requireDereferenceableRecoveryArtifact(options.recoveryArtifact,io):null
     if(lease.capacityState==='relinquished'){
-      if(lease.blockedOn===blocker)return {claim:Number(options.claim),capacityState:'relinquished',blockedOn:blocker,idempotent:true}
-      throw new LaneError('claim is already relinquished for a different blocker')
+      const replayState=requestedWorktreeState(options.worktreeState)??(lease.worktreeState==='clean'?'clean':null)
+      if(!lease.relinquishmentMetadataLegacy&&lease.blockedOn===blocker&&lease.worktreeState===replayState&&lease.recoveryArtifact===recoveryArtifact)return {claim:Number(options.claim),capacityState:'relinquished',blockedOn:blocker,worktreeState:replayState,recoveryArtifact,idempotent:true}
+      if(!lease.relinquishmentMetadataLegacy)throw new LaneError('claim is already relinquished with a different blocker, worktree state, or recovery artifact')
+      if(lease.blockedOn!==blocker)throw new LaneError('legacy relinquished claim names a different blocker')
     }
-    if(!io.localClean?.(lease.worktree))throw new LaneError('claim worktree is not clean')
+    const worktreeState=resolveRelinquishmentWorktreeState(lease.worktree,options.worktreeState,io)
     for(const [kind,ref] of Object.entries(EXCLUSIVE_REFS)){
       const held=io.readRef(ref)
       if(!held)continue
       const message=io.getCommitMessage?.(held)??''
       if(new RegExp(`(?:issue|claim)=${options.claim}(?:\\D|$)`).test(message))throw new LaneError(`claim still holds the ${kind} stage`)
     }
-    const expected=replaceCapacityState(before.body,'relinquished',blocker)
+    const currentBlocker=validateCapacityBlocker(options.blockedOn,io)
+    if(currentBlocker!==blocker)throw new LaneError('capacity blocker changed concurrently before relinquishment')
+    const expected=replaceCapacityState(before.body,'relinquished',blocker,worktreeState,recoveryArtifact)
     requireOwnedRef(MUTEX_REF,ownerSha,io);changed=true;io.updateIssue(options.claim,{body:expected})
     requireOwnedRef(MUTEX_REF,ownerSha,io)
     const after=io.getIssue(options.claim),afterLease=parseAuthorLease(after?.body??'',now)
-    if(after?.body!==expected||afterLease.capacityState!=='relinquished'||afterLease.blockedOn!==blocker)throw new LaneError('relinquished capacity readback failed')
+    if(after?.body!==expected||afterLease.capacityState!=='relinquished'||afterLease.blockedOn!==blocker||afterLease.worktreeState!==worktreeState||afterLease.recoveryArtifact!==recoveryArtifact)throw new LaneError('relinquished capacity readback failed')
     const workIssue=claimWorkIssue(before)
     publishCapacityEvents({workIssue,claim:options.claim,eventTypes:['author_capacity_relinquished','issue_blocked'],actor:options.owner,detail:blocker},now,io)
-    return {claim:Number(options.claim),workIssue,capacityState:'relinquished',blockedOn:blocker,idempotent:false}
+    return {claim:Number(options.claim),workIssue,capacityState:'relinquished',blockedOn:blocker,worktreeState,recoveryArtifact,idempotent:false}
   }catch(error){
     if(changed&&io.readRef(MUTEX_REF)===ownerSha)try{io.updateIssue(options.claim,{body:before.body})}catch(rollback){throw new LaneError(`${error.message}; rollback failed: ${rollback.message}`)}
     throw error
@@ -5485,6 +5590,22 @@ export function resumeAuthorLease(options, now = new Date(), io = githubIo) {
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||lease.owner!==options.owner)throw new LaneError('claim lease is legacy or belongs to a different owner')
     if(lease.capacityState!=='relinquished')throw new LaneError('claim capacity is not relinquished')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before resume')
+    const requestedRecovery=options.recoveryArtifact?requireDereferenceableRecoveryArtifact(options.recoveryArtifact,io):null
+    if(requestedRecovery&&lease.recoveryArtifact&&requestedRecovery!==lease.recoveryArtifact)throw new LaneError('recovery artifact does not match the relinquished claim')
+    if(lease.worktreeState!=='clean'){
+      // Every branch below fails closed. The stored reference is re-verified on
+      // every resume, never trusted because it was accepted once.
+      const recovery=requestedRecovery??(lease.recoveryArtifact?requireDereferenceableRecoveryArtifact(lease.recoveryArtifact,io):null)
+      // A `remote` relinquishment says the work lives on another machine. Any
+      // local tree at the same literal path is a different tree, so a clean
+      // local observation can never satisfy it.
+      if(lease.worktreeState==='remote'&&!recovery)throw new LaneError('resume from remote requires --recovery-artifact')
+      // An unreadable observation is an unknown state, and an unknown state is
+      // never excused by a stored recovery string. This must throw.
+      const observed=observedWorktreeState(lease.worktree,io)
+      if(lease.worktreeState!=='remote'&&observed!=='clean'&&!recovery)throw new LaneError(`resume from ${lease.worktreeState} requires a proven-clean worktree or --recovery-artifact`)
+    }
     const sources=io.prSources?.()??[],selfPrs=sources.filter((source)=>source.branch===lease.branch)
     if(selfPrs.length>1)throw new LaneError('claim branch has multiple open pull-request sources')
     if(selfPrs.length&&(selfPrs[0].versions?.length!==1||String(selfPrs[0].versions[0])!==lease.version))throw new LaneError('claim branch pull request does not carry the permanent claim version')
@@ -5536,6 +5657,7 @@ export function renewExpiredClaim(options, now = new Date(), io = githubIo) {
     if(!claimIssues.includes(Number(options.issue)))throw new LaneError('renewal issue number is not identified by the claim title')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy)throw new LaneError('legacy claim leases cannot be renewed')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('claim owner, branch, or worktree mismatch')
     const expectedBody=replaceLeaseExpiry(before.body,desiredExpiry)
     if(lease.active){
@@ -5615,6 +5737,7 @@ export function recoverExpiredClaimFromPr(options, now = new Date(), io = github
     if(claimIssues.length!==1||claimIssues[0]!==Number(options.issue))throw new LaneError('target claim does not belong to the exact issue')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||lease.active)throw new LaneError('target claim lease must be non-legacy and expired')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('claim owner, branch, or worktree mismatch')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const workIssue=io.getIssue(options.issue)
@@ -5671,6 +5794,7 @@ export function expandActiveClaimFromPr(options, now = new Date(), io = githubIo
     if(workIssue?.state!=='open'||scope?.status!=='ready'||scope.workType!=='structural'||scope.route!=='shared-db-orchestrator')throw new LaneError('exact work issue is not open ready structural orchestrator work')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||!lease.active)throw new LaneError('target claim lease is legacy or expired')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('target claim owner, branch, or worktree changed')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const pr=io.getPr(options.pr)
@@ -5718,6 +5842,7 @@ export function expandActiveClaimFromIssue(options,now=new Date(),io=githubIo){
     if(before?.state!=='open'||workstreamKey(before.title)!==`#${Number(options.issue)}`)throw new LaneError('target claim is not open or does not belong to the exact issue')
     const lease=parseAuthorLease(before.body,now)
     if(lease.legacy||!lease.active)throw new LaneError('target claim lease is legacy or expired')
+    if(lease.relinquishmentMetadataLegacy)throw new LaneError('legacy relinquished claim must be reconciled with --relinquish-author-lease before this mutation')
     if(lease.owner!==options.owner||lease.branch!==options.branch||lease.worktree!==options.worktree)throw new LaneError('target claim owner, branch, or worktree changed')
     if(!io.readRef(`refs/db-claims/${lease.version}`))throw new LaneError('permanent version reservation is unreadable')
     const workIssue=io.getIssue(options.issue),scope=parseQueueScope(workIssue?.body??'')
@@ -6266,7 +6391,7 @@ function parseArgs(argv) {
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--target-url','--description','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha','--verdict','--findings-ref','--replacement-sequence','--run-id','--artifact-id','--artifact-digest','--manifest-digest'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--target-url','--description','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha','--verdict','--findings-ref','--replacement-sequence','--run-id','--artifact-id','--artifact-digest','--manifest-digest','--worktree-state','--recovery-artifact'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
     else if(a==='--confirm-local-dependency-unfixable')out.confirmLocalDependencyUnfixable=true
     else if(a==='--skip-doctor')out.skipDoctor=true
     else if(a==='--confirm-no-verdict')out.confirmNoVerdict=true
