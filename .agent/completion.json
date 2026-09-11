@@ -1,1 +1,82 @@
-{"schema_version":1,"work_issue":2697,"outcome":"ready-for-merge","pr":2700,"migration_versions":[],"contract_ref":"refs/db-contracts/2697/12","contract_sha256":"c0204de9d365a10d2244617cbd274faaaa2de4e609fb291531a97d5779740d55","head_sha":"9a3bbf3e3bd6b9ecf071c446cffaa56207d96854","files_changed":[".agent/completion.json",".agent/contract.json","docs/verification/reviewer-assignment-api-budget-2026-08-28.md","docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md","scripts/manage-migration-author-lanes.mjs","scripts/manage-migration-author-lanes.test.mjs"],"db_reads":[],"db_writes":[],"checks":[{"command":"node --test scripts/manage-migration-author-lanes.test.mjs","exit_code":0,"evidence":"509 pass, 0 fail, 0 skipped; current keys measured 28 and legacy fallback 30."},{"command":"node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json","exit_code":0,"evidence":"Contract generation 12 is valid and published."},{"command":"git diff --check","exit_code":0,"evidence":"No whitespace errors."}],"assumptions_resolved":["The operation has its own measured ceiling of 30 and mutex reserve of 15.","The shared ceiling of 25 remains unchanged.","The redundant request was removed without removing the in-mutex proof."],"stop_conditions_hit":[]}
+{
+  "schema_version": 1,
+  "work_issue": 2741,
+  "outcome": "ready-for-merge",
+  "pr": 2743,
+  "migration_versions": [
+    "20260911063554"
+  ],
+  "contract_ref": "refs/db-contracts/2741/2",
+  "contract_sha256": "9c44da255cb1b0330a18efb44b0124dc1e6892d8c1cbeb826c9b6f6c6bbe1b3f",
+  "head_sha": "3c6f0058225d357efd8e680b9e350be8a647abe3",
+  "files_changed": [
+    "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
+    "supabase/tests/character_alias_forward_repair_contracts.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "db_reads": [
+    "table core.licensor",
+    "table core.property",
+    "table core.franchise"
+  ],
+  "db_writes": [
+    "column core.character_alias.licensor_id",
+    "column core.character_alias.normalized_alias",
+    "column core.character_alias.source_id",
+    "column core.character_alias.source_system",
+    "column core.taxonomy_source_ref.first_seen_at",
+    "column core.taxonomy_source_ref.is_current",
+    "column core.taxonomy_source_ref.last_seen_at",
+    "column core.taxonomy_source_ref.missing_since",
+    "column core.taxonomy_source_ref.source_licensor_id",
+    "function core.guard_character_alias_licensor",
+    "function core.guard_taxonomy_source_ref_identity",
+    "index core.character_alias_character_idx",
+    "index core.character_alias_licensor_idx",
+    "index core.character_alias_licensor_norm_key",
+    "index core.character_alias_licensor_source_key",
+    "index core.taxonomy_source_ref_current_idx",
+    "index core.taxonomy_source_ref_entity_idx",
+    "index core.taxonomy_source_ref_source_licensor_idx",
+    "policy shared_read on core.character_alias",
+    "table core.character_alias",
+    "table core.taxonomy_source_ref",
+    "trigger a_taxonomy_source_ref_identity_guard on core.taxonomy_source_ref",
+    "trigger character_alias_licensor_guard on core.character_alias",
+    "trigger set_updated_at on core.character_alias",
+    "function core.bump_taxonomy_source_ref_last_seen",
+    "trigger b_taxonomy_source_ref_last_seen on core.taxonomy_source_ref",
+    "table core.character",
+    "index core.character_id_licensor_id_key"
+  ],
+  "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards passed. Shared ledgers are owned by parent; no shared database execution."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "Database Contract Tests run34571296991",
+      "exit_code": 0,
+      "evidence": "Exact source3c6f0058:170 passing contract files, zero nonquarantined failures, one existing quarantined pass and12 existing quarantined failures. Historical-shape repair and original2355 behavioral suite both passed."
+    },
+    {
+      "command": "python .ai-test-guard.py",
+      "exit_code": 0,
+      "evidence": "Four owned disposable-DB scenarios passed: expected generated column accepted; plain, changed-expression and dependent-view cases refused."
+    }
+  ],
+  "assumptions_resolved": [
+    "Pinned old preview content manifest differs from final reviewed2355 migration; oldproof cannotauthorizefinalbytes.",
+    "Read-only preview catalog found exact derived expression, only internalgenerateddependency and no columnACL; DROP RESTRICT preserves unknownconsumers byrefusing.",
+    "Both historical upgrade and repeat finalschema application preserve all provenance rows and match reviewed function/constraint/index/policy/grant catalog; C10 parentcascade and ColdLion breakers pass.",
+    "Oldversion20260906222338 unchanged. Parent owns preview/production and finalindependentreview after2501 priority."
+  ],
+  "stop_conditions_hit": []
+}
