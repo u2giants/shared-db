@@ -5,7 +5,6 @@ declare
   v_failed boolean := false;
   v_plan uuid := gen_random_uuid();
   v_licensor uuid;
-  v_import_body text;
 begin
   begin
     insert into core.licensor(name, code, status) values ('guard-test', 'GUARD-TEST', 'active');
@@ -45,29 +44,16 @@ begin
     if position('does not accept drill writes' in sqlerrm) = 0 then raise; end if;
   end;
 
-  v_failed := false;
-  select p.prosrc into v_import_body
-  from pg_proc p
-  where p.oid = 'plm.import_master_data(jsonb,jsonb)'::regprocedure;
-  if position('retired by #1090 Step 1.0' in v_import_body) > 0 then
-    begin
-      perform * from plm.import_master_data('[]', '[]');
-    exception when others then
-      v_failed := position('retired by #1090 Step 1.0' in sqlerrm) > 0;
-    end;
-  else
-    -- The from-empty CI replay deliberately replays the held 20260802170000 body
-    -- after this migration. Its licensing write must still stop at the table guard.
-    begin
-      perform * from plm.import_master_data(
-        '[{"id":"guard-held-licensor","mg_code":"GUARD-HELD","title":"Guard Held Licensor","properties":[]}]',
-        '[]'
-      );
-    exception when others then
-      v_failed := position('no exact transaction-bound authorization' in sqlerrm) > 0;
-    end;
+  -- #2794 removed plm.import_master_data(jsonb,jsonb) outright. The contract is
+  -- now ABSENCE, which is strictly stronger than the previous "body is the #1090
+  -- retirement stub" assertion. The from-empty CI replay still replays the held
+  -- 20260802170000 body, but migration 20260911225801 drops it afterwards, so the
+  -- end state on every database this test runs against is "not present".
+  -- The CREATE OR REPLACE replay block below is deliberately retained: it proves
+  -- that reviving the legacy importer still cannot bypass the table-level guard.
+  if to_regprocedure('plm.import_master_data(jsonb,jsonb)') is not null then
+    raise exception 'retired DesignFlow importer plm.import_master_data is present after #2794 removal';
   end if;
-  if not v_failed then raise exception 'DesignFlow licensing importer bypassed retirement/table guard'; end if;
 
   if has_table_privilege('service_role', 'plm.licensing_write_authorization', 'INSERT') then
     raise exception 'service_role can forge licensing authorization';
