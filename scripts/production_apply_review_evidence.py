@@ -241,10 +241,10 @@ def validate_automatic_evidence(
     allowlist: list[str], workflow_actor: str,
 ) -> None:
     if set(data) != AUTOMATIC_FIELDS:
-        missing = sorted(AUTOMATIC_FIELDS - set(data))
+        absent = sorted(AUTOMATIC_FIELDS - set(data))
         unknown = sorted(set(data) - AUTOMATIC_FIELDS)
         raise EvidenceError(
-            f"strict automatic evidence schema mismatch; missing={missing}, unknown={unknown}"
+            f"strict automatic evidence schema mismatch; absent={absent}, unknown={unknown}"
         )
     expected = {
         "schema_version": AUTOMATIC_SCHEMA_VERSION,

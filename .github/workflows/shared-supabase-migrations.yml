@@ -1011,7 +1011,7 @@ jobs:
         run: |
           set -euo pipefail
           if [ -n "${SOURCE_MAP:-}" ] || ! [[ "$SOURCE_PR" =~ ^[1-9][0-9]*$ ]]; then
-            echo "::error::ENGINEER ACTION REQUIRED: automatic single-PR promotion cannot infer one source PR from a multi-PR or missing source. Nothing was dispatched. Use the governed migration-train path once it is qualified." >&2
+            echo "::error::ENGINEER ACTION REQUIRED: automatic single-PR promotion cannot infer one source PR from a multi-PR or absent source. Nothing was dispatched. Use the governed migration-train path once it is qualified." >&2
             exit 2
           fi
           if ! [[ "$PREVIEW_DIGEST" =~ ^sha256:[0-9a-f]{64}$ ]]; then
