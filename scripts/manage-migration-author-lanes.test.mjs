@@ -2589,12 +2589,15 @@ test('issue 1688 routes non-migration pull requests through the guarded merge la
   )
 })
 
-test('issue 1688 never leaves a durable ordinary-merge authorization before the merge lock', () => {
+test('issue 1688 permits success only after the appropriate merge lock is acquired', () => {
   const leaseWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/migration-author-lease.yml',import.meta.url)),'utf8')
   const mergeWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/guarded-migration-merge.yml',import.meta.url)),'utf8')
+  const documentsWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/documents-only-merge-authorization.yml',import.meta.url)),'utf8')
   const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
   assert.doesNotMatch(leaseWorkflow,/state=success[^\n]+Migration guarded merge authorization/)
   assert.match(mergeWorkflow,/--acquire-merge[\s\S]+state=success[^\n]+Migration guarded merge authorization/)
+  assert.match(documentsWorkflow,/check-documents-only-merge-authorization\.mjs[\s\S]+--authorize-repository-maintenance-status/)
+  assert.doesNotMatch(documentsWorkflow,/--acquire-(?:preview|merge|production)/)
   const acquire=productionWorkflow.indexOf('name: Acquire the exclusive production lane and freeze merges')
   const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')
   const release=productionWorkflow.indexOf('name: Release the exclusive production lane with ownership proof')
@@ -3227,6 +3230,12 @@ test('stranded reviewer queue and silence-release mutexes are recoverable',()=>{
 // acquire and release wedges every author lane with no sanctioned way out.
 test('stranded duplicate-claim-release mutex is recognized and safely recoverable',()=>{
   const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:'db-coordination duplicate-claim-release 1f0c3a2e-0000-4000-8000-000000000000',committer:{date:'2026-08-14T19:55:00Z'}})
+  const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
+  assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('stranded repository-maintenance authorization mutex is recognized and safely recoverable',()=>{
+  const io=memoryIo();io.refs.set(MUTEX_REF,'4a69fbbc');io.getCommit=()=>({message:`db-coordination repository-maintenance-authorization pr=2715 head=${'a'.repeat(40)}`,committer:{date:'2026-08-14T19:55:00Z'}})
   const result=recoverStaleAuthorMutex({expectedSha:'4a69fbbc',confirmStale:true,serializedRecovery:true,now:NOW,quietMs:0},io)
   assert.equal(result.released,'4a69fbbc');assert.equal(io.refs.has(MUTEX_REF),false)
 })

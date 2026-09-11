@@ -1653,9 +1653,11 @@ have already happened in this repo, more than once.
     `.github/workflows/guarded-migration-merge.yml`, whose required context
     `Migration guarded merge authorization` re-runs collision, exact-head review, and—when the
     pull request changes a migration—lease validation on a head that contains current `main`,
-    while holding the merge lock. **Every pull request, including documentation-only and other
-    non-migration changes, uses that guarded merge lane.** A non-migration pull request needs no
-    migration-author claim, but it is never auto-authorized by the lease workflow. When production
+    while holding the merge lock. **Every executable, rulebook, configuration, workflow, test,
+    migration, and mixed pull request uses that guarded merge lane.** A non-migration pull request
+    needs no migration-author claim, but it is never auto-authorized by the lease workflow. A
+    proven documents-only pull request instead receives the same required status from the
+    base-only lightweight path described in rule 18. When production
     acquires its lock, it revokes every open pull request's earlier merge authorization before
     releasing that lock, so a stale green result cannot bypass the production freeze.
 
@@ -1665,9 +1667,12 @@ have already happened in this repo, more than once.
     governs whether strict mode is ever reconsidered.
 
 18. **A DOCUMENTS-ONLY PULL REQUEST DRAWS NO DATABASE REVIEWER (owner decision, 2026-09-02, issue
-    #2102).** A pull request whose changed files are **all** prose documents still runs **every**
-    automated check and still merges through the **guarded merge lane**. What it no longer does is
-    consume a slot from the small external **database reviewer pool** that exists for migrations.
+    #2102; lightweight status path #2715).** A pull request whose changed files are **all** prose
+    documents still runs **every** automated check. It receives the required
+    `Migration guarded merge authorization` status from
+    `.github/workflows/documents-only-merge-authorization.yml` without dispatching the database
+    guarded-merge workflow or consuming a slot from the small external **database reviewer pool**
+    that exists for migrations.
     PR #2034 — a two-file documentation change — spent two reviewer draws, two dead-reviewer
     replacements and three full review runs, and PR #2070 repeated the shape. That capacity belongs
     to migrations.
@@ -1682,12 +1687,31 @@ have already happened in this repo, more than once.
     real customer order number heading into this **public** repository, so the content risk is
     real; what changed is only which pool answers for it. The automated checks and the guarded
     merge lane still answer, and a refusal already recorded at the exact head still blocks it — the
-    exemption is from *drawing* a reviewer, never from *answering* one.
+    exemption is from *drawing* a reviewer and dispatching the database merge workflow, never from
+    *answering* a review already recorded for the exact head or from running automated checks.
 
     Enforced, not documented: `scripts/lib/documents-only-change.mjs` is the single deterministic
     classifier, listing the rulebook exclusions explicitly and failing closed whenever the
-    changed-file list is empty, unreadable or absent. `scripts/check-exact-head-approval.mjs` — the
-    gate the guarded merge waits on — uses it to skip the reviewer requirement, and
+    changed-file list is empty, unreadable or absent. The required-status adapter
+    `scripts/check-documents-only-merge-authorization.mjs` separately permits plan files and
+    declarative routing pointers in AGENTS, task-router, and skill files. It inspects the actual
+    changed hunks and accepts only link-only list/table rows whose labels literally name the local
+    Markdown target; free-form or behavior-changing instructions stay on the guarded code path. A
+    fail-closed refusal posts a separate visible diagnostic that directs the pull request to guarded
+    code checks without competing for the required context. Ordinary mixed/code pull requests write
+    only that diagnostic; if the same commit already carries this workflow's lightweight success, or
+    if its base is retargeted, the command explicitly revokes that required status before guarded
+    checks re-authorize the new comparison. Thus an unreadable,
+    over-ceiling, retargeted, or non-prose comparison cannot strand an absent or stale-green result. The
+    lightweight workflow is restricted to `main`, independently proves the protected base repository
+    and branch before checkout, checks out only that trusted base, classifies the complete pull-request
+    file list, then reclassifies an immutable
+    exact base-to-head comparison (refusing GitHub's file ceiling) and rechecks the live PR
+    while holding only the global coordination mutex and proving the production ref absent before
+    it writes success. This repository-maintenance command never claims an author or reviewer lane,
+    never acquires preview, merge, or production, and emits no structural lifecycle event. Unknown or
+    non-document changes receive no status from that path. `scripts/check-exact-head-approval.mjs`
+    — the gate the guarded merge waits on — uses the classifier to skip the reviewer requirement, and
     `--assign-reviewer` in `scripts/manage-migration-author-lanes.mjs` refuses to draw for such a
     pull request. `scripts/lib/documents-only-change.test.mjs` fails if the classifier exempts a
     rulebook file or a mixed change.
