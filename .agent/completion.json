@@ -1,57 +1,41 @@
 {
   "schema_version": 1,
-  "work_issue": 2664,
+  "work_issue": 2769,
   "outcome": "ready-for-merge",
-  "pr": 2748,
+  "pr": 2776,
   "migration_versions": [
-    "20260911081204"
+    "20260911145659"
   ],
-  "contract_ref": "refs/db-contracts/2664/4",
-  "contract_sha256": "5b1b3b0d1a96eb5e8f13624ec6041622df51c2c58f5185340b6f404fbe3f85cd",
-  "head_sha": "e0a412e36812b291323394976d87845b6343e96a",
+  "contract_ref": "refs/db-contracts/2769/2",
+  "contract_sha256": "cb815eaa9c2adfa9bf76d6c1098af19287d15abf115d71c6136634e1fe7dc108",
+  "head_sha": "77646e31337d36296a5f0e39ae6a11ebe7352ab0",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/production-verification-sidecars/20260911081204.json"
+    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
+    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
+    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
+    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
   ],
-  "db_reads": [
-    "view api.dam_order_list"
-  ],
+  "db_reads": [],
   "db_writes": [
-    "function public.find_dam_order_list_row"
+    "function public.queue_nightly_rebuild_style_groups"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static guards passed; live-ledger check not configured. No shared database writes."
+      "evidence": "Run at 77646e31 (after merging main 9da98ede) in C:/repos/shared-db-worktrees/issue-2769: 'Static checks passed.' No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
     },
     {
-      "command": "python scripts/test_order_list_find_position.py",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "TEST_DATABASE_URL pointed to loopback127.0.0.1:55486; fresh uniquely-created database was removed afterward.14 expected-position cases,4 independent ranking parity cases, wildcard/null/JS-trim/RLS/auth/injection contracts passed;0 skipped."
-    },
-    {
-      "evidence": "49 sidecars validated; runtime dynamic SELECT marker96 explicitly covered as no additional durable catalog target.",
-      "command": "python scripts/check_production_verification_sidecars.py --repo . --scan-version 20260911081204",
-      "exit_code": 0
-    },
-    {
-      "evidence": "137 tests passed;0 skipped.",
-      "command": "python -m unittest scripts.test_production_business_risk_gate",
-      "exit_code": 0
+      "evidence": "git diff --check 9da98ede 77646e31 reported no whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "PopDAM main562dc999ac0039e017fd6b0fd0e32c6172ac6893 helpers define9 search fields, normalized filters and ascending-boolean sort, defaultorder_date descending/null-last/id ascending.",
-    "Duplicate2665 closed as duplicate, not delivered;2664 is canonical underclaim2747.",
-    "Draft preparation only: independent paid review, shared-preview plan/runtime proof and merge remain held for parent priority2734 and2703.",
-    "No application code or data writes, no shared database writes, no timeout changes.",
-    "Actual CI failure repaired with hash-bound runtime SELECT disposition and pinned producer sidecar; SQL bytes unchanged."
+    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
+    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
+    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
+    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
   ],
   "stop_conditions_hit": []
 }
