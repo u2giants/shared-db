@@ -2345,6 +2345,19 @@ def optional_text(value: Any) -> str | None:
     return text or None
 
 
+def enforce_automatic_risk_decision(review: dict[str, Any], decision: dict[str, Any]) -> None:
+    """An automatic v2 verdict may proceed only when every risk class is clear."""
+    if (
+        review.get("schema_version") == "shared-db-production-apply-review/v2"
+        and decision.get("automaticPromotionAllowed") is not True
+    ):
+        reasons = decision.get("ownerDecisionReasons") or ["business-risk decision is not clear"]
+        raise RiskGateError(
+            "ENGINEER ACTION REQUIRED: automatic production promotion is not fully "
+            f"machine-qualified: {'; '.join(str(reason) for reason in reasons)}"
+        )
+
+
 def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifact) -> dict[str, Any]:
     repo_root = args.repo.resolve()
     allowlist = normalize_review_allowlist(args.allowlist)
@@ -2400,10 +2413,13 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
             api=api, downloader=downloader, repo_root=repo_root,
         )
     decision = decide_business_risk(classify_sql(repo_root, allowlist), recovery_proven=True, review_approved=True)
-    # OWNER RULING 2026-08-18: the machine-readable owner-decision block is RETIRED
-    # as a blocking requirement. It is still verified when supplied, and the
+    enforce_automatic_risk_decision(review, decision)
+    # OWNER RULING 2026-08-18: the machine-readable owner-decision block remains
+    # retired as a mandatory technical rubber stamp. The five independently
     # derived risks are still recorded in the evidence below, but a missing block
-    # no longer stops a promotion.
+    # no longer stops the legacy/manual recovery path. The automatic v2 path has no
+    # human dispatch boundary, so it instead fails to an engineer whenever any
+    # one of the five derived risk conclusions is not clear.
     #
     # WHY, in the owner's own terms: he is not a programmer, cannot evaluate the
     # SQL a risk flag refers to, and was being asked to paste a JSON block whose
@@ -2423,9 +2439,8 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
     # project proof immediately before every write, single-writer locks, and
     # post-apply verification. Those are checks a machine can actually perform.
     #
-    # WHAT IS GENUINELY GIVEN UP: there is no longer a human stop between a green
-    # evidence chain and a production write. Recorded here, and in the incident
-    # ledger, so nobody later mistakes this for an oversight.
+    # #2716 therefore removes transcription, not judgement: only an exact v2
+    # evidence chain whose machine-derived risk decision is fully clear can pass.
     owner_evidence = None
     if decision["ownerDecisionReasons"] and args.owner_decision_run_id and args.owner_decision_digest:
         owner_evidence = verify_owner_decision(
@@ -2437,9 +2452,8 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
             raise RiskGateError("owner decision does not accept exactly the risks derived from governed evidence")
     return {
         **decision,
-        # Derived risks are DISCLOSED in this evidence, not used to block. See the
-        # owner ruling above. Everything that can be machine-verified has already
-        # been verified by the time this line is reached.
+        # Legacy/manual evidence preserves the earlier disclosure path. Automatic
+        # v2 evidence reached this line only after every derived risk class cleared.
         "productionPromotionAllowed": True,
         "disclosedRisks": decision["ownerDecisionReasons"],
         "governedEvidence": {

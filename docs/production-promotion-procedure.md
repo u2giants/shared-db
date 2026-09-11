@@ -104,8 +104,11 @@ artifact digests.
 
 The automatic dispatch queues behind this workflow's single global concurrency group. The
 production job then acquires the exclusive production lock and repeats the governed evidence
-checks. Missing, stale, multi-source, failed, or ambiguous evidence stops before dispatch with
-`ENGINEER ACTION REQUIRED`; it never falls back to asking Albert to name versions. Manual
+checks. Automatic v2 evidence also fails to an engineer if any of the five derived risk classes
+is present: permanent data loss/rewrite, expected downtime, material access change, unproven
+recovery, or unresolved material objection. Missing or ambiguous qualification evidence stops
+before dispatch; any failed recheck after dispatch still stops before a database write with
+`ENGINEER ACTION REQUIRED`. It never falls back to asking Albert to name versions. Manual
 production dispatch is a recovery/engineering path only and is not authorized by the automatic
 policy. That recovery path still requires the successful review-evidence workflow run ID and its
 exact `sha256:` artifact digest; #2716 removes transcription only from the ordinary automatic path.

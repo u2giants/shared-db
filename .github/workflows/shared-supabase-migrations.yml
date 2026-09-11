@@ -1007,10 +1007,12 @@ jobs:
         env:
           SOURCE_PR: ${{ inputs.merged_preview_source_pr }}
           SOURCE_MAP: ${{ inputs.merged_preview_source_pr_map }}
+          HISTORICAL_SOURCE_PR: ${{ inputs.historical_preview_source_pr }}
+          HISTORICAL_SOURCE_MAP: ${{ inputs.historical_preview_source_pr_map }}
           PREVIEW_DIGEST: ${{ steps.preview_evidence.outputs.digest }}
         run: |
           set -euo pipefail
-          if [ -n "${SOURCE_MAP:-}" ] || ! [[ "$SOURCE_PR" =~ ^[1-9][0-9]*$ ]]; then
+          if [ -n "${SOURCE_MAP:-}" ] || [ -n "${HISTORICAL_SOURCE_PR:-}" ] || [ -n "${HISTORICAL_SOURCE_MAP:-}" ] || ! [[ "$SOURCE_PR" =~ ^[1-9][0-9]*$ ]]; then
             echo "::error::ENGINEER ACTION REQUIRED: automatic single-PR promotion cannot infer one source PR from a multi-PR or absent source. Nothing was dispatched. Use the governed migration-train path once it is qualified." >&2
             exit 2
           fi

@@ -285,6 +285,7 @@ class WorkflowWiringTests(unittest.TestCase):
         self.assertIn('--admit-issue "$WORK_ISSUE" --pr "${{ inputs.source_pr }}"', self.apply)
         self.assertIn('confirmation:("APPLY " + $sha)', self.apply)
         self.assertIn("ENGINEER ACTION REQUIRED", self.apply)
+        self.assertIn("HISTORICAL_SOURCE_MAP", self.apply.split("automatic-production-promotion:", 1)[1].split("production-dry-run:", 1)[0])
         self.assertNotIn("--include-all", self.apply.split("automatic-production-promotion:", 1)[1].split("production-dry-run:", 1)[0])
 
 

@@ -14,7 +14,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from production_business_risk_gate import preview_instance_text, api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_bound_mainline_post_merge_original, prove_historical_original_apply_runs, prove_registered_historical_restoration_provenance, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
+from production_business_risk_gate import preview_instance_text, api_field, api_list, api_object, api_sublist, authored_merge, exact_main, ProvedTarget, tracked_paths_at, PREVIEW_PRODUCER_PATHS, PREVIEW_RUNTIME_DATA_DIRS, PREVIEW_RUNTIME_DATA_EXEMPTIONS, PRODUCTION_PROJECT_REF, RISK_TEXT, PREVIEW_WORKFLOW, RiskGateError, canonical_sha256, classify_sql, decide_business_risk, enforce_automatic_risk_decision, gh_json, is_pinned_historical_disney_source, load_activation, prove_activation, prove_applied_commit_is_main_line, preview_applied_commit, prove_governed_historical_supersession, prove_governed_original_reconciliation, prove_bound_mainline_post_merge_original, prove_historical_original_apply_runs, prove_registered_historical_restoration_provenance, prove_preview, prove_preview_migration_contents, prove_preview_producer_matches_main, prove_pr_and_checks, REQUIRED_CHECKS, GOVERNED_HISTORICAL_SUPERSESSION, GOVERNED_ORIGINAL_RECONCILIATION
 
 
 def disable_background_git_maintenance(root):
@@ -2202,6 +2202,19 @@ class ProductionBusinessRiskGateTests(unittest.TestCase):
                 result = decide_business_risk(sql_reasons, recovery_proven=recovery, review_approved=review)
                 self.assertFalse(result["automaticPromotionAllowed"])
                 self.assertEqual(len(result["ownerDecisionReasons"]), 1)
+
+    def test_automatic_v2_blocks_every_derived_risk_but_legacy_recovery_is_unchanged(self):
+        automatic = {"schema_version": "shared-db-production-apply-review/v2"}
+        legacy = {"schema_version": "shared-db-production-apply-review/v1"}
+        clear = decide_business_risk([], recovery_proven=True, review_approved=True)
+        enforce_automatic_risk_decision(automatic, clear)
+        for reason in RISK_TEXT.values():
+            decision = {"automaticPromotionAllowed": False, "ownerDecisionReasons": [reason]}
+            with self.subTest(reason=reason), self.assertRaisesRegex(
+                RiskGateError, "ENGINEER ACTION REQUIRED"
+            ):
+                enforce_automatic_risk_decision(automatic, decision)
+            enforce_automatic_risk_decision(legacy, decision)
 
     def test_forged_preview_claim_is_rejected_before_download(self):
         forged = "b" * 40

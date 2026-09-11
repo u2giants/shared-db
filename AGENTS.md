@@ -907,7 +907,8 @@ before dispatch with **ENGINEER ACTION REQUIRED**. The production job still
 re-proves current main, the durable exact-head verdict, guarded merge, immutable
 preview evidence, the one open independently admitted structural work issue linked
 by GitHub to the source PR, exact target, bounded allowlist, fresh dry-run,
-exclusive lock, and post-apply ledger/catalog result. This narrow path authorizes no manual
+all five machine-derived business-risk conclusions clear, exclusive lock, and
+post-apply ledger/catalog result. This narrow path authorizes no manual
 production command, manual workflow dispatch, other repository, or bypass.
 Docs-only PRs (no schema change) need just items 1 and "it reads correctly" —
 merge them promptly.
