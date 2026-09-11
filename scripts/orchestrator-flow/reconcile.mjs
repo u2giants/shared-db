@@ -46,6 +46,7 @@ export function persistInitialReady(input,io){
 export function preparePreviewDispatch(issue,io){
   assertMarker(io)
   return io.withMutex(()=>{
+    assertMarker(io)
     const snapshot=readyRecord(io.selectCurrent(Number(issue)))
     const current=persistInitialReady(snapshot,io)
     for(const old of io.listReady(Number(issue))){

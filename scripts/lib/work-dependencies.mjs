@@ -154,11 +154,16 @@ export function parseCompletionComment(body) {
  * second record means either a mistake or an attempt to overwrite history, and
  * quietly preferring one would hide both.
  */
-export function findCompletionRecord(comments) {
+export function findCompletionRecord(comments,{requireTrustedAuthor=false}={}) {
   const found = []
   for (const comment of comments ?? []) {
     const record = parseCompletionComment(comment?.body)
-    if (record) found.push(record)
+    if (record) {
+      const association=String(comment?.author_association??comment?.authorAssociation??'').toUpperCase()
+      const author=String(comment?.author??comment?.author_login??'').toLowerCase()
+      if(requireTrustedAuthor&&(association!=='OWNER'||author!=='u2giants'))throw new DependencyError('db-work-completion must be authored by repository owner u2giants with explicit OWNER association')
+      found.push(record)
+    }
   }
   if (found.length > 1) throw new DependencyError(`issue carries ${found.length} completion records; completion is immutable and there must be exactly one`)
   return found[0] ?? null
@@ -243,7 +248,7 @@ export function classifyDependency(number, state) {
   }
   let record
   try {
-    record = findCompletionRecord(state.comments)
+    record = findCompletionRecord(state.comments,{requireTrustedAuthor:true})
   } catch (error) {
     return { satisfied: false, status: 'unknown', reason: `dependency #${number} has an unusable completion record: ${error.message}` }
   }

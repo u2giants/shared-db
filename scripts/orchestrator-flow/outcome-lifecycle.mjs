@@ -120,6 +120,7 @@ export function assertOutcomeTransition(comments, next, issue) {
 export function advanceOutcome({issue,state,actor,timestamp=new Date().toISOString(),evidenceUrls=[]},io){
   const comments=io.issueComments(Number(issue))
   assertOutcomeTransition(comments,state,issue)
+  if(!['entered','classified'].includes(state)&&(!Array.isArray(evidenceUrls)||evidenceUrls.length<1||evidenceUrls.some((value)=>typeof value!=='string'||!EVIDENCE_REF.test(value))))throw new OutcomeError(`outcome ${state} requires at least one durable GitHub or artifact evidence reference`)
   const event=outcomeEvent({issue,state,actor,timestamp,evidenceUrls})
   io.commentIssue(Number(issue),formatEventComment(event))
   const readBack=outcomeHistory(io.issueComments(Number(issue)),issue)

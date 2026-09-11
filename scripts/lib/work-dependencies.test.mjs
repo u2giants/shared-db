@@ -14,7 +14,7 @@ const ruling = (over = {}) => ({
   schema_version: COMPLETION_SCHEMA_VERSION, work_issue: 10, outcome: 'owner-ruling-recorded',
   ruling_url: 'https://github.com/u2giants/shared-db/issues/1', resolved_by: 'https://github.com/u2giants/shared-db/commit/abc1234', ...over,
 })
-const comment = (record) => ({ body: '```db-work-completion\n' + JSON.stringify(record) + '\n```' })
+const comment = (record,over={}) => ({ body: '```db-work-completion\n' + JSON.stringify(record) + '\n```',author_association:'OWNER',author:'u2giants',...over })
 
 // --- ONE SCHEMA, CONDITIONAL FIELDS ----------------------------------------
 
@@ -87,6 +87,11 @@ test('two completion records on one issue is an error, not latest-wins', () => {
   assert.throws(() => findCompletionRecord([comment(merged()), comment(merged({ pr: 100 }))]), /completion is immutable/)
   assert.equal(findCompletionRecord([{ body: 'chatter' }]), null)
   assert.deepEqual(findCompletionRecord([{ body: 'chatter' }, comment(merged())]), merged())
+})
+
+test('only an explicitly identified repository owner can publish dependency completion',()=>{
+  for(const over of [{author_association:'NONE'},{author_association:undefined},{author:'attacker'},{author:undefined}])assert.throws(()=>findCompletionRecord([comment(merged(),over)],{requireTrustedAuthor:true}),/repository owner u2giants/)
+  assert.deepEqual(findCompletionRecord([comment(merged())],{requireTrustedAuthor:true}),merged())
 })
 
 // --- DECLARATION AND CYCLES ------------------------------------------------
@@ -234,7 +239,7 @@ test('the cutoff never rescues an unsuccessful outcome', () => {
   const cancelled = { schema_version: 1, work_issue: 10, outcome: 'cancelled', reason: 'dropped' }
   const result = classifyDependency(10, {
     exists: true, open: false, closedAt: '2026-08-01T00:00:00Z',
-    comments: [{ body: '```db-work-completion\n' + JSON.stringify(cancelled) + '\n```' }],
+    comments: [comment(cancelled)],
   })
   assert.equal(result.satisfied, false)
   assert.equal(result.status, 'completed-unsuccessfully')

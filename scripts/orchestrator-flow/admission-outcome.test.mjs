@@ -456,6 +456,19 @@ test('completion retries safely after completion-comment or close response loss'
   }
 })
 
+test('manual lifecycle advancement refuses missing or non-durable evidence',()=>{
+  const comments=eventComments('dispatched'),io={issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body))}
+  for(const evidenceUrls of [[],['x'],['http://github.com/u2giants/shared-db/issues/41'],[null]])assert.throws(()=>advanceOutcome({issue:41,state:'implementation_complete',actor:'test',evidenceUrls},io),/durable GitHub or artifact evidence/)
+  assert.equal(comments.length,3)
+})
+
+test('admission never silently replaces another requested primary operation',()=>{
+  let touched=false;const io={enforceAdmission:true,getIssue:()=>{touched=true;throw new Error('must not run')}}
+  const old=console.error;console.error=()=>{}
+  try{assert.equal(managerMain(['--admit-issue','41','--complete-work','7'],new Date(),io),2)}finally{console.error=old}
+  assert.equal(touched,false)
+})
+
 test('two concurrent completion commands serialize to one authoritative completion',()=>{
   const fixture=completionFixture();let owner=null,sequence=0,second=null,attempted=false
   const io={...fixture.io,
