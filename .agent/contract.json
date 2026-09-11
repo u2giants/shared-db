@@ -24,7 +24,6 @@
     "scripts/orchestrator-flow/admission.mjs",
     "scripts/orchestrator-flow/admission-outcome.test.mjs",
     "scripts/orchestrator-flow/outcome-lifecycle.mjs"
-    ,"scripts/orchestrator-flow/reconcile.test.mjs"
   ],
   "file_writes": [
     ".agent/contract.json",
@@ -41,7 +40,6 @@
     "scripts/orchestrator-flow/admission.mjs",
     "scripts/orchestrator-flow/admission-outcome.test.mjs",
     "scripts/orchestrator-flow/outcome-lifecycle.mjs"
-    ,"scripts/orchestrator-flow/reconcile.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -61,7 +59,7 @@
     "PR 2737 and the guarded-merge repair through current main dae160a0 are integrated while PR 2736 remains held until this branch lands because it consumes the admission resolver.",
     "Legacy structural work already in flight remains executable only when the proposed PR contains real schema DDL; new work requires the complete outcome fields.",
     "Outcome lifecycle replay is bound to the requested work issue so another issue's events cannot authorize completion.",
-    "Admission, dependent claim creation, dispatched recording, manual lifecycle advancement, reviewer entry, preview preparation, and shared-stage entry revalidate inside the operation's single author-mutex ownership interval.",
+    "Admission, dependent claim creation, dispatched recording, manual lifecycle advancement, reviewer entry, and shared-stage entry revalidate under one author-mutex ownership interval.",
     "Only owner-authored lifecycle evidence with explicit GitHub identity is replayed; every refused admission publishes current owner proof rather than trusting or deduplicating against stale comments; lost dispatch responses preserve ambiguous claims; completion is mutex-serialized through live verification, evidence, and closure; completion reads exact production apply, manifest, after-ledger, and catalog proof; closed issues mutate only after validation; and every supported multi-target DROP binds all objects."
   ],
   "stop_conditions": [
@@ -69,5 +67,5 @@
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 22
+  "generation": 21
 }
