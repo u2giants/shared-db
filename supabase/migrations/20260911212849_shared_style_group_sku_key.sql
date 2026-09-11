@@ -1,4 +1,4 @@
--- Issue #2478; claim #2745; reserved version 20260911204023.
+-- Issue #2478; claim #2745; reserved version 20260911212849.
 -- Shared path-to-SKU derivation. No application rows are repaired by this migration.
 -- derived-from: 20260906035323
 -- derived-from: 20260907031246
