@@ -55,12 +55,13 @@
   "assumptions": [
     "This recovery contract records the already-authorized repository-maintenance scope after the initial implementation commit; it does not claim prospective dispatch.",
     "PR 2737 merge 1b50c414 and canary main d530f85b are integrated; current main 5eaebe7c is merged while PR 2736 remains held until this branch lands because it consumes the admission resolver.",
-    "Legacy structural work already in flight remains executable only when the proposed PR contains real schema DDL; new work requires the complete outcome fields."
+    "Legacy structural work already in flight remains executable only when the proposed PR contains real schema DDL; new work requires the complete outcome fields.",
+    "Outcome lifecycle replay is bound to the requested work issue so another issue's events cannot authorize completion."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 8
+  "generation": 9
 }
