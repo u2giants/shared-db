@@ -123,6 +123,7 @@ export function inspectPrStructuralChange(prFiles = []) {
       if(typeof file.content!=='string')throw new AdmissionError(`migration ${name} content is unreadable; structural admission refuses filename-only evidence`)
       return file.content
     }
+    if(file.truncated===true)throw new AdmissionError(`migration ${name} patch is truncated; structural admission refuses an incomplete diff`)
     if(typeof file.patch!=='string')throw new AdmissionError(`migration ${name} patch is unreadable; structural admission refuses full-file evidence for a modified migration`)
     return file.patch.split(/\r?\n/).filter((line)=>line.startsWith('+')&&!line.startsWith('+++')).map((line)=>line.slice(1)).join('\n')
   })

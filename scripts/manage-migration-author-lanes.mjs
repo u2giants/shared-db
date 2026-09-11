@@ -2000,7 +2000,7 @@ function githubFlowAdapter(io,claimNumber=null,admissionOptions=null){
     createRef(ref,digest,record){const kind=ref.startsWith('refs/db-preview-ready-outcomes/')?'outcome':'ready',sha=io.makeOwnerCommit(`db-preview-${kind} ${JSON.stringify({digest,record})}`);return io.createRef(ref,sha)},
     readRef(ref){const sha=io.refreshRef?.(ref)??io.readRef(ref);return sha?payload(sha):null},
     listReady(issue){return io.listRefs('refs/db-preview-ready/').map((row)=>payload(row.sha)).filter((row)=>Number(row.record?.issue)===Number(issue))},
-    selectCurrent(issue){return deriveLivePreviewCandidate(Number(issue),io,{claimNumber})},
+    selectCurrent(issue){const candidate=deriveLivePreviewCandidate(Number(issue),io,{claimNumber});if(admissionOptions&&(Number(candidate.issue)!==Number(admissionOptions.admitIssue)||Number(candidate.pr)!==Number(admissionOptions.pr)))throw new LaneError(`preview candidate issue #${candidate.issue} pull request #${candidate.pr} is not the admitted issue #${admissionOptions.admitIssue} pull request #${admissionOptions.pr}`);return candidate},
     relinquishCapacity(row){return relinquishAuthorLease({claim:row.claim,owner:row.owner,blockedOn:row.blocker.reference},new Date(),io)},
     resumeCapacity(row){return resumeAuthorLease({claim:row.claim,owner:row.owner,leaseHours:DEFAULT_LEASE_HOURS},new Date(),io)},
     persistReady(row){return persistInitialReady(deriveLivePreviewCandidate(Number(row.issue),io),this)},
@@ -2031,12 +2031,15 @@ export function deriveLivePreviewCandidate(issue,io,{claimNumber=null}={}){
     if(!io.mergeCommitInMain(mergeCommit))throw new LaneError(`merged claim #${claim.number} merge commit ${mergeCommit} is not in main history`)
   }
   else throw new LaneError(`claim #${claim.number} must have exactly one live pull request`)
-  const head=pr.head.sha,changed=io.getPrFiles(pr.number).filter((file)=>file.status!=='removed').map((file)=>file.filename)
+  const head=pr.head.sha,prFiles=io.getPrFiles(pr.number),changed=prFiles.filter((file)=>file.status!=='removed').map((file)=>file.filename)
   const migrations=changed.filter((file)=>/^supabase\/migrations\/\d{14}_[^/]+\.sql$/.test(file)),versions=migrations.map((file)=>path.basename(file).slice(0,14))
   if(!migrations.length)throw new LaneError('pull request has no added migration to prepare')
   for(const row of claims)if(claimTitleWorkIssue(row.claim)===null&&versions.includes(row.lease.version))throw new LaneError(`open claim #${row.claim.number} with an invalid title protects recovery version ${row.lease.version}`)
   const inventory=JSON.parse(io.getFileAt('config/orchestrator-global-invalidators-v1.json',head)),allFiles=new Set([...migrations,...changed.filter((file)=>/^(?:supabase\/tests\/|scripts\/production-verification-sidecars\/)/.test(file)),...inventory.files,'config/orchestrator-global-invalidators-v1.json'])
   const contents=new Map([...allFiles].map((file)=>[file,io.getFileAt(file,head)])),headTree=io.treeFiles(head),order=headTree.filter((file)=>/^supabase\/migrations\/\d{14}_[^/]+\.sql$/.test(file)).sort()
+  // Preview readiness is structural evidence: classify the migration SQL itself, never its filename, and bind it to the claim's writes.
+  const structural=inspectPrStructuralChange(prFiles.filter((file)=>migrations.includes(file.filename)).map((file)=>({...file,content:contents.get(file.filename)}))),leaseWrites=[...(lease.writes??[])].sort()
+  if(structural.objects.length!==leaseWrites.length||structural.objects.some((value,index)=>value!==leaseWrites[index]))throw new LaneError(`pull request #${pr.number} structural objects do not exactly match claim #${claim.number} writes; preview preparation refused`)
   const bundle=buildEvidenceBundle({migrations,focusedFiles:changed.filter((file)=>file.startsWith('supabase/tests/')),verificationFiles:changed.filter((file)=>file.startsWith('scripts/production-verification-sidecars/')),writes:lease.writes,reads:lease.reads,migrationOrderDigest:sha256(canonicalJson(order)),issue,pr:pr.number,claim:claim.number,baseMainSha:pr.base.sha,integrationSha:head},{isClean:()=>true,fileExists:(file)=>contents.has(file),readFile:(file)=>contents.get(file)})
   const work=io.getIssue(issue),scope=parseQueueScope(work?.body??''),gate=io.previewGateProof(issue,pr.number,head,bundle.bundle_id,scope.dependencies)
   const main=io.mainSha(),mainVersions=io.treeFiles(main).filter((file)=>/^supabase\/migrations\/\d{14}_/.test(file)).map((file)=>path.basename(file).slice(0,14)),preview=io.previewLedger?.()??livePreviewLedger(),originalApplyEvidence=versions.every((version)=>preview.versions.includes(version))?validateOriginalPreviewApplyEvidence({issue,pr:pr.number,versions,mergeCommitSha:merged?pr.merge_commit_sha:null},io):null
@@ -5412,6 +5415,10 @@ function activateReviewCutoverOperation(io) {
 
 export function activateReviewCutover(io=githubIo){return withReviewRequestBudget(()=>activateReviewCutoverOperation(reviewOperationIo(io)))}
 
+// Issues created at or after this instant must carry change_type and the other
+// admission fields; only earlier in-flight work may use the legacy path.
+export const ADMISSION_LEGACY_CUTOVER = '2026-09-11T18:00:00Z'
+
 export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-migration-author-lanes', allowLegacy = false, timestamp } = {}) {
   let issue = io.getIssue(Number(number))
   let livePr=null
@@ -5431,6 +5438,8 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
     scope = parseQueueScope(issue?.body ?? '')
     let admitted
     if(allowLegacy&&scope?.changeType===null){
+      const created=Date.parse(String(issue?.created_at??issue?.createdAt??''))
+      if(!Number.isFinite(created)||created>=Date.parse(ADMISSION_LEGACY_CUTOVER))throw new AdmissionError(`legacy admission without change_type is limited to issues created before ${ADMISSION_LEGACY_CUTOVER}; issue #${number} must declare the admission fields`)
       if(issue?.state!=='open'||scope.workType!=='structural'||scope.route!=='shared-db-orchestrator'||scope.status!=='ready'||!scope.writes.length)throw new AdmissionError('legacy in-flight work is not an open ready structural issue with exact writes')
       admitted={admitted:true,issue:Number(number),legacy:true,service_class:'standard-application'}
     }else admitted = evaluateAdmission(issue, scope, parseImpactBlock(issue?.body ?? ''))
@@ -5509,7 +5518,8 @@ function requireAdmissionArguments(options,io,{pr=null}={}){
   if (options.issue !== undefined && Number(options.issue) !== Number(options.admitIssue)) {
     throw new LaneError(`--admit-issue #${options.admitIssue} does not match --issue #${options.issue}`)
   }
-  if(pr===null&&options.acquireExclusive)throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
+  if(options.preparePreviewDispatch!==undefined&&Number(options.preparePreviewDispatch)!==Number(options.admitIssue))throw new LaneError(`--admit-issue #${options.admitIssue} does not match --prepare-preview-dispatch #${options.preparePreviewDispatch}`)
+  if(pr===null&&(options.acquireExclusive||options.preparePreviewDispatch!==undefined))throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
 }
 
 function requireAdmission(options, io, { pr = null, timestamp, mutexOwner = null } = {}) {

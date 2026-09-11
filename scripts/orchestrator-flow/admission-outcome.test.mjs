@@ -112,6 +112,32 @@ test('legacy in-flight structural PRs remain executable but cannot enter as new 
   assert.throws(()=>admitIssue(41,io),/change_type/)
 })
 
+test('an issue created after the legacy cutover cannot skip the admission fields by naming a PR',()=>{
+  const body=['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n')
+  const base={closingIssuesForPr:()=>[{number:41,state:'open'}],getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);'}
+  for(const stamp of [{created_at:'2026-09-11T18:00:00Z'},{createdAt:'2026-09-12T00:00:00Z'},{}]){
+    const row={number:41,state:'open',title:'structural outcome',body,...stamp}
+    assert.throws(()=>admitIssue(41,{...base,getIssue:()=>row},{pr:7,allowLegacy:true}),/legacy admission without change_type is limited/,JSON.stringify(stamp))
+  }
+  const older={number:41,state:'open',title:'structural outcome',body,created_at:'2026-09-10T00:00:00Z'}
+  assert.equal(admitIssue(41,{...base,getIssue:()=>older},{pr:7,allowLegacy:true}).legacy,true)
+})
+
+test('a truncated modified-migration patch is refused instead of hiding objects past the cutoff',()=>{
+  assert.throws(()=>inspectPrStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'modified',truncated:true,patch:'@@ -2 +2 @@\n-old index\n+create index example_id_idx on core.example(id);'}]),/patch is truncated/)
+})
+
+test('preview preparation must name the admitted issue and its source PR',()=>{
+  const io={enforceAdmission:true,orchestratorFlowAdapter:()=>{throw new Error('adapter must not be reached')}}
+  const old=console.error;const messages=[];console.error=(m)=>messages.push(String(m))
+  try{
+    assert.equal(managerMain(['--prepare-preview-dispatch','41','--admit-issue','42','--pr','7'],new Date('2026-09-11T00:00:00Z'),io),2)
+    assert.equal(managerMain(['--prepare-preview-dispatch','41','--admit-issue','41'],new Date('2026-09-11T00:00:00Z'),io),2)
+  }finally{console.error=old}
+  assert.match(messages[0],/does not match --prepare-preview-dispatch/)
+  assert.match(messages[1],/--pr <source pull request>/)
+})
+
 test('a refused actual change publishes one typed refusal with return and reopening evidence', () => {
   const body=scopeBody({change:'application-code'}),comments=[]
   const io=serializedIo({enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value))})

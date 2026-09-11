@@ -5205,6 +5205,12 @@ test('immutable preview-ledger reconciliation evidence validates the renamed cur
   assert.throws(()=>validateOriginalPreviewApplyEvidence({...input,versions:['20260828113920']},reset),/found 0/)
 })
 
+test('preview preparation classifies migration SQL, not filenames, and binds it to the claim writes',()=>{
+  assert.throws(()=>deriveLivePreviewCandidate(1769,mergedRehearsalIo({migrationBody:'insert into plm.wwe_property values (1);'}).io),/not structural/)
+  assert.throws(()=>deriveLivePreviewCandidate(1769,mergedRehearsalIo({migrationBody:'create table plm.wwe_property();\ncreate table plm.undeclared();'}).io),/do not exactly match claim #1805 writes/)
+  assert.equal(deriveLivePreviewCandidate(1769,mergedRehearsalIo().io).pr,1809)
+})
+
 test('an already-applied merged claim receives validated evidence before route selection',()=>{
   const {io,mainSha,version}=mergedRehearsalIo()
   Object.assign(io,immutablePreviewApplyIo())
