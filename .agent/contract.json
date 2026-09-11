@@ -1,27 +1,48 @@
 {
   "schema_version": 1,
-  "generation": 5,
-  "work_issue": 2694,
-  "work_type": "repo-maintenance",
-  "route": "repository-maintenance",
-  "goal": "Implement Albert Hazan's 2026-09-10 owner policy that governed reviewers may run concurrent independent jobs. Replace the single active lease per reviewer with assignment-keyed leases while preserving exact-head binding, independent slots, durable verdicts, atomic release/replacement, and compatibility for active legacy leases.",
-  "base_sha": "5532d2bd401e67af39f0e60c6b08bcd1ebb0723f",
-  "dispatcher": "Albert Hazan owner instruction, issue #2694",
-  "worker": "Codex reviewer-concurrency-policy",
-  "branch": "codex/reviewer-concurrency-policy",
-  "worktree": "C:/repos/shared-db-worktrees/reviewer-concurrency-policy",
+  "generation": 16,
+  "work_issue": 2326,
+  "work_type": "documentation",
+  "route": "repo-maintenance",
+  "goal": "Publish a durable Step 3 evidence closeout and accurately update the programme status while preserving named unknowns, future gates, and issue #2662.",
+  "base_sha": "ef06ca5aec77ad4eccf0e3b40accc2c2faca2cd6",
+  "dispatcher": "Albert Hazan current-chat authorization",
+  "worker": "Codex Step 3 evidence closeout",
+  "branch": "codex/issue-2326-step3-phase",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2326-step3-phase",
   "allowed_paths": [
-    "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "scripts/record-review-verdict.test.mjs", "plan_reviewer_lease_capacity_truth.md", "docs/agents/section-4-anti-collision-rules.md", ".agent/contract.json", ".agent/completion.json"
+    "plan_database_efficiency_and_api_security.md",
+    "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
-  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "scripts/record-review-verdict.test.mjs", "plan_reviewer_lease_capacity_truth.md", "docs/agents/section-4-anti-collision-rules.md", ".agent/contract.json", ".agent/completion.json"],
+  "file_writes": [
+    "plan_database_efficiency_and_api_security.md",
+    "docs/verification/database-efficiency/20260910T140913Z/step-3-closeout.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
   "db_reads": [],
   "db_writes": [],
-  "prohibited_actions": ["No database access or mutation", "Do not weaken exact-head, independence, durable-verdict, atomic-transition, or legacy-lease safeguards", "Do not alter reviewer eligibility, roster, or provider wrappers", "Do not merge until the governed pull-request route has two durable exact-head approvals"],
-  "required_checks": ["node --test scripts/manage-migration-author-lanes.test.mjs", "node --test scripts/record-review-verdict.test.mjs", "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "git diff --check"],
-  "assumptions": ["The owner clarification supersedes the historical one-active-lease capacity assumption but not the evidence and independence safeguards.", "Legacy refs remain readable and releasable so no active review is invalidated by this change.", "Concurrent leases are keyed by the durable assignment tuple and only exact 40-character production heads enter the new namespace."],
+  "prohibited_actions": [
+    "No database, preview, production, cloud, migration-ledger, or migration-ref mutation",
+    "Do not edit SQL migrations, scripts, workflows, or configuration",
+    "Do not close, schedule, or remediate #2662",
+    "Do not weaken review, merge, or programme evidence requirements"
+  ],
+  "required_checks": [
+    "git diff --check ef06ca5aec77ad4eccf0e3b40accc2c2faca2cd6..HEAD",
+    "node --test scripts/check-sql.test.mjs",
+    "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json"
+  ],
+  "assumptions": [
+    "The active marker #2669 belongs to another session, so this is repository-maintenance work and performs no database interaction.",
+    "The closeout reconciles only durable evidence and already merged outcomes; it creates no structural change and does not reopen #2213, #2214, #2215, or #2662."
+  ],
   "stop_conditions": [
-    "A required test shows a concurrent lease can overwrite, release, or authorize a sibling assignment",
-    "The change would require relaxing an existing exact-head or independent-review rule",
-    "The work expands into database structure or application behavior"
+    "Evidence does not support an accurately scoped Step 3 status",
+    "The closeout would imply a new structural, scheduling, or #2662 remediation authorization",
+    "The pull request base moves before guarded merge",
+    "Any secret, row content, or private source material appears in the delta"
   ]
 }
