@@ -1,60 +1,54 @@
 {
-  "schema_version": 1,
-  "work_issue": 2744,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Make the Data Admin Scraped Properties default listing finish under the 8s authenticated statement_timeout with identical rows, rights, search and paging, by resolving style guides from the page's retained assets instead of materializing the whole DCP asset catalogs.",
-  "base_sha": "5761bc5e8763817c6deb722cac627f8924b5baaf",
-  "dispatcher": "claude orchestrator marker2758",
-  "worker": "claude-2758-2744-scraped-asset-context",
-  "branch": "claude/issue-2744-scraped-work-mem",
-  "worktree": "C:/Users/ahazan/AppData/Local/Temp/claude/C--repos-shared-db--claude-worktrees-recursing-poincare-85d3a9/ceb221ac-1746-4836-9306-6839c18dbced/scratchpad/wt2744",
-  "allowed_paths": [
-    "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
-    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
-    "scripts/production-verification-sidecars/20260911170526.json",
-    ".agent/contract.json",
-    ".agent/completion.json"
-  ],
-  "file_writes": [
-    "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
-    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql"
-  ],
-  "db_reads": [
-    "function api.db_data_admin_scraped_properties",
-    "table plm.dcp_asset",
-    "table plm.lucasfilm_dcp_asset",
-    "table plm.dcp_style_guide",
-    "table plm.lucasfilm_dcp_style_guide",
-    "table plm.dcp_asset_property_observation",
-    "table plm.lucasfilm_dcp_asset_property_observation"
-  ],
-  "db_writes": [
-    "function api.db_data_admin_scraped_properties"
-  ],
-  "prohibited_actions": [
-    "No direct production DDL; production only through the governed workflow.",
-    "Do not raise statement_timeout or set work_mem, and change no role or global setting.",
-    "Do not change the function signature, return shape, SECURITY DEFINER, STABLE, search_path or grants.",
-    "Do not reduce rows, search, paging, rights or authority features."
-  ],
-  "required_checks": [
-    "git diff --check",
-    "bash scripts/check-sql.sh",
-    "hosted ephemeral migration regression suite"
-  ],
-  "assumptions": [
-    "plm.dcp_asset, plm.lucasfilm_dcp_asset, plm.dcp_style_guide and plm.lucasfilm_dcp_style_guide keep primary key id, so the page style-guide set is identical (verified on production 2026-09-11).",
-    "The production body equals migration 20260911061539 (prosrc md5 b63154a297ae649811cde7569657a146 verified 2026-09-11).",
-    "Parent owns preview, merge, production and live acceptance.",
-    "Generation 4 changes no scope; it re-binds the evidence tail so both .agent files follow the implementation head eabb784e (main 120fb612).",
-    "Generation 5 changes no scope; it re-binds the evidence tail so both .agent files follow the implementation head 59696d96 (main f15f0f0e)."
-  ],
-  "stop_conditions": [
-    "Stop if the result digest of the default page, Bambi or Cars 2 differs from the current body.",
-    "Stop if the authenticated default listing does not finish under 8s on preview or production after apply."
-  ],
-  "generation": 6
+    "schema_version": 1,
+    "generation": 4,
+    "work_issue": 2478,
+    "work_type": "structural",
+    "route": "shared-db-orchestrator",
+    "goal": "Extract one SKU derivation shared by rebuild and read-only drift detector without changing grouping, correction, or drift behavior.",
+    "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
+    "dispatcher": "Codex orchestrator #2714",
+    "worker": "codex-2714-2478",
+    "branch": "codex/issue-2478-shared-sku-key",
+    "worktree": "C:/repos/shared-db-worktrees/issue-2478-shared-sku-key",
+    "allowed_paths": [
+        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
+        "supabase/tests/style_group_key_for_sku_contracts.sql",
+        "supabase/tests/style_group_drift_reconciler_contracts.sql",
+        ".agent/contract.json",
+        ".agent/completion.json"
+    ],
+    "file_writes": [
+        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
+        "supabase/tests/style_group_key_for_sku_contracts.sql",
+        "supabase/tests/style_group_drift_reconciler_contracts.sql",
+        ".agent/contract.json",
+        ".agent/completion.json"
+    ],
+    "db_reads": [],
+    "db_writes": [
+        "function public.style_group_key_for_sku",
+        "function public.rebuild_style_groups_batch",
+        "function public.reconcile_style_group_drift"
+    ],
+    "prohibited_actions": [
+        "No shared database writes by worker.",
+        "No correction of application row drift or change to nightly correction path.",
+        "No paid review, merge or main movement before parent priority window clears.",
+        "No changes to issues2705 or2709."
+    ],
+    "required_checks": [
+        "bash scripts/check-sql.sh",
+        "local PostgreSQL helper parity contracts",
+        "git diff --check"
+    ],
+    "assumptions": [
+        "Parent authorized adapting obsolete inline-token assertion to shared-helper wiring while preserving all existing behavior/security tests.",
+        "Latest consumer definitions derive from migrations20260906035323 and20260907031246.",
+        "Generation 4: claim #2745 version 20260911204023 was superseded to 20260911212849 by the governed --supersede-active-claim-version (supersession 861a3f5cb2c7ce8720c61da0f69ac53c32e0e27b) because main added later version 20260911210709."
+    ],
+    "stop_conditions": [
+        "Object overlap or changed source definitions.",
+        "Old/new grouping parity mismatch.",
+        "Consumer behavior or security changes beyond helper delegation."
+    ]
 }
