@@ -1,58 +1,52 @@
 {
   "schema_version": 1,
-  "work_issue": 2715,
+  "work_issue": 2478,
   "outcome": "ready-for-merge",
-  "pr": 2737,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2715/4",
-  "contract_sha256": "ebd03a0ed9437413447d0382b41bbc36fa27294374110ba6b55b65854ba3f871",
-  "head_sha": "8f26ff60f0366f7ff76f323db769ba8d6094dc45",
+  "pr": 2746,
+  "migration_versions": [
+    "20260911075244"
+  ],
+  "contract_ref": "refs/db-contracts/2478/1",
+  "contract_sha256": "adfee00a4d886efb70e6f3f5c46863e47d6fcc65a6ad4c40706df53d206cbd29",
+  "head_sha": "6cbb821ec784ee09e273c7e5712f0a4e8611d376",
   "files_changed": [
-    ".github/workflows/documents-only-merge-authorization.yml",
-    "AGENTS.md",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-documents-only-merge-authorization.mjs",
-    "scripts/check-documents-only-merge-authorization.test.mjs",
-    "scripts/check-documents-only-pull-request.mjs",
-    "scripts/documents-only-merge-authorization.test.mjs",
-    "scripts/lib/documents-only-change.mjs",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/repository-maintenance-authorization.test.mjs"
+    "supabase/migrations/20260911075244_shared_style_group_sku_key.sql",
+    "supabase/tests/style_group_drift_reconciler_contracts.sql",
+    "supabase/tests/style_group_key_for_sku_contracts.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function public.style_group_key_for_sku",
+    "function public.rebuild_style_groups_batch",
+    "function public.reconcile_style_group_drift"
+  ],
   "checks": [
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
+    },
+    {
+      "command": "local PostgreSQL helper parity contracts",
+      "exit_code": 0,
+      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on the exact rebased implementation diff."
+      "evidence": "No whitespace errors."
     },
     {
-      "command": "node --test scripts/lib/documents-only-change.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/check-documents-only-merge-authorization.test.mjs scripts/documents-only-merge-authorization.test.mjs scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs",
+      "command": "python -m unittest scripts.test_migration_derivation",
       "exit_code": 0,
-      "evidence": "562 tests passed with zero failures, cancellations, skips, or todos on main 84a1a1d7."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "Truth audit passed with 275 semantically bound call sites."
-    },
-    {
-      "command": "node scripts/check-github-transport-conformance.mjs",
-      "exit_code": 0,
-      "evidence": "All GitHub calls in 212 scanned files use the governed transport."
+      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
     }
   ],
   "assumptions_resolved": [
-    "Live issue, pull request, branch, worktree, and Codex task inventory found no prior owner for issue 2715.",
-    "The implementation changes no migration and performs no database or production write.",
-    "The command uses only the global mutex, proves production absent, and cannot consume author, reviewer, preview, merge, or production capacity.",
-    "Plans and bounded declarative pointer hunks qualify; behavior-changing rulebooks and every executable or unreadable change fail closed.",
-    "Eight independent review rounds found and resolved permissions, grammar, race, retarget, trust-boundary, link-target, recovery, live-base, and stale-status defects.",
-    "The ninth review found that a truncated instruction-file patch could hide additional changed lines; the classifier now proves API line totals and every hunk count before accepting a pointer.",
-    "The final implementation was rebuilt as the identical net feature diff directly on current main 84a1a1d7, removing obsolete evidence-only history before this immutable evidence pair."
+    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
+    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
+    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
+    "No 6392-row application drift correction and no nightly-path retirement."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Implementation is ready for final exact-head independent reviewer-safety review, required CI, guarded merge, and a live prose-only acceptance pull request."
+  "stop_conditions_hit": []
 }
