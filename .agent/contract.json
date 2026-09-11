@@ -1,52 +1,42 @@
 {
   "schema_version": 1,
-  "work_issue": 2664,
-  "generation": 4,
-  "work_type": "structural",
+  "work_issue": 2783,
+  "generation": 1,
+  "work_type": "tooling",
   "route": "shared-db-orchestrator",
-  "goal": "One authenticated invoker-safe OrderList Find position lookup preserving full filtered/sorted-grid semantics.",
-  "base_sha": "208ba30d0216d82874539c7c2649b1a45e297063",
-  "dispatcher": "Codex orchestrator marker2714",
-  "worker": "Codex issue2664 worker",
-  "branch": "codex/issue-2664-orderlist-find",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2664-orderlist-find",
+  "goal": "Make temp git fixture repos in the Python tests deterministic by disabling git's detached background maintenance (gc.auto=0, maintenance.auto=false), so TemporaryDirectory cleanup can no longer race it and fail the SQL migration guards job with Errno 39, without relaxing, skipping or retrying any guard or assertion.",
+  "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
+  "dispatcher": "Albert Hazan (owner request in chat)",
+  "worker": "Claude deterministic-git-fixture worker",
+  "branch": "claude/deterministic-git-fixture-cleanup",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/jovial-moore-5fd4c8",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production-verification-sidecars/20260911081204.json",
-    "scripts/production_business_risk_gate.py"
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/test_historical_preview_recovery.py",
+    "scripts/tests/test_import_order_list.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production-verification-sidecars/20260911081204.json",
-    "scripts/production_business_risk_gate.py"
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/test_historical_preview_recovery.py",
+    "scripts/tests/test_import_order_list.py"
   ],
-  "db_reads": ["view api.dam_order_list"],
-  "db_writes": [
-    "function public.find_dam_order_list_row"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "No shared database writes, application changes, paid review or merge in this preparation."
+    "No shared database reads or writes, no production or preview apply, no migration files, no change to any guard, assertion, skip or retry, no fabricated reviews."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "python scripts/test_order_list_find_position.py"
+    "python -m unittest scripts/test_production_business_risk_gate.py scripts/test_historical_preview_recovery.py"
   ],
   "assumptions": [
-    "Claim2747 reserves20260911081204 and exact function.",
-    "Live PopDAM helpers define normalized filters and sorts; duplicate2665 shares this contract.",
-    "Implementation committed and local synthetic contracts passed; draft2748 is held for parent priority work.",
-    "CI requires a hash-bound disposition for the runtime dynamic SELECT; it creates no additional durable catalog object and retains normal function/grant verification."
+    "The Errno 39 cleanup failures come from the detached git maintenance process that git 2.47+ spawns after each commit, not from an unwaited foreground subprocess."
   ],
   "stop_conditions": [
-    "Object collision or missing material application contract.",
-    "Any authorization/filter/sort/search parity failure."
+    "Any required check fails.",
+    "The fix would need to change a guard, an assertion, or the gate code under test."
   ]
 }
