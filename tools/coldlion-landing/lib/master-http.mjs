@@ -17,7 +17,10 @@ export async function fetchPagedMaster(endpoint, params, apiKey, options = {}) {
   for (let page = 0; ; page += 1) {
     if (options.requestGate) await options.requestGate();
     const requestParams = { ...params, page, size };
-    const { payload, httpStatus, bodyStatus } = await fetchPage(masterUrl(endpoint, requestParams), apiKey, options);
+    let response;
+    try { response = await fetchPage(masterUrl(endpoint, requestParams), apiKey, options); }
+    catch (error) { error.requestParams ??= requestParams; throw error; }
+    const { payload, httpStatus, bodyStatus } = response;
     options.onResponse?.({ endpoint, params: requestParams, httpStatus, bodyStatus });
     if (!payload || Array.isArray(payload) || !Array.isArray(payload.content)) throw new Error(`${endpoint} did not return a paged envelope`);
     if (payload.number !== page || payload.numberOfElements !== payload.content.length) throw new Error(`${endpoint} returned inconsistent page ${page}`);
@@ -61,6 +64,7 @@ export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = f
       onResponse?.({ endpoint, params, httpStatus: response.status, bodyStatus: Number.isInteger(payload?.status) ? payload.status : null });
       return payload;
     } catch (error) {
+      error.requestParams ??= params;
       lastError = error;
       if (error.permanent || attempt === MAX_ATTEMPTS) throw error;
       await delay(pauseMs);

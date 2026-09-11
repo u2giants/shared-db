@@ -6,7 +6,7 @@ import { ITEM_SPECS, MASTER_SPECS, knownApiFields } from "./coldlion-landing/lib
 import { assertKnownShape, projectCurrentRows, projectItemSlots } from "./coldlion-landing/lib/project-masters.mjs";
 import { buildMasterLoadSql } from "./coldlion-landing/lib/load-masters.mjs";
 import { dedupeSlots, main, parseArgs } from "./coldlion-landing/sync-masters.mjs";
-import { masterFailureSql } from "./coldlion-landing/lib/db.mjs";
+import { assertExpectedTarget, masterFailureSql } from "./coldlion-landing/lib/db.mjs";
 
 const RUN="11111111-1111-4111-8111-111111111111";
 const NOW="2026-09-09T00:00:00.000Z";
@@ -62,7 +62,7 @@ test("plain-array endpoints refuse a paged envelope",async()=>{
 
 test("plain-array non-JSON 4xx preserves wire status and is not retried",async()=>{
   let calls=0; const fetchImpl=async()=>{calls+=1;return{ok:false,status:404,text:async()=>"not json"}};
-  await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),error=>error.httpStatus===404 && error.permanent===true);
+  await assert.rejects(fetchArrayMaster("/itemDetails",{active:"N"},"hidden",{fetchImpl,pauseMs:0}),error=>error.httpStatus===404 && error.permanent===true && error.requestParams.active==="N");
   assert.equal(calls,1);
 });
 
@@ -120,9 +120,16 @@ test("an empty item snapshot still generates valid reconciliation SQL",()=>{
 });
 
 test("terminal master failures produce a failed run and alert without payload data",()=>{
-  const error=Object.assign(new Error("synthetic failure"),{httpStatus:503,bodyStatus:91});
+  const error=Object.assign(new Error("synthetic failure"),{httpStatus:503,bodyStatus:91,requestParams:{active:"N",divisionCode:"SD001",page:2,size:2000}});
   const sql=masterFailureSql({endpoint:"/customers",companyCode:"SYNCO",requestedBy:"test",error});
-  assert.match(sql,/coldlion\.sync_run/i); assert.match(sql,/'failed'/); assert.match(sql,/503, 91/); assert.match(sql,/pg_notify\('coldlion_sync_alert'/i);
+  assert.match(sql,/coldlion\.sync_run/i); assert.match(sql,/'failed'/); assert.match(sql,/active.*N.*divisionCode.*SD001.*page.*2.*size.*2000/); assert.match(sql,/503, 91/); assert.match(sql,/pg_notify\('coldlion_sync_alert'/i);
+});
+
+test("target guard accepts exact host or pool-user identity and rejects refs hidden elsewhere",()=>{
+  const ref="abcdefghijklmnopqrst";
+  assert.doesNotThrow(()=>assertExpectedTarget({expectedProjectRef:ref,databaseUrl:`postgresql://postgres:secret@db.${ref}.supabase.co/db`}));
+  assert.doesNotThrow(()=>assertExpectedTarget({expectedProjectRef:ref,databaseUrl:`postgresql://postgres.${ref}:secret@pool.example.com/db`}));
+  assert.throws(()=>assertExpectedTarget({expectedProjectRef:ref,databaseUrl:`postgresql://user:${ref}@wrong.example/db`}),/does not name project/);
 });
 
 test("CLI proves target before collection and write",async()=>{

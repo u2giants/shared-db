@@ -91,19 +91,21 @@ export function assertExpectedTarget({
   }
   const url = String(databaseUrl ?? "").trim();
   if (!url) throw new Error("DATABASE_URL is not set; refusing to write");
-  let host;
+  let parsed;
   try {
-    host = new URL(url).host;
+    parsed = new URL(url);
   } catch {
     throw new Error("DATABASE_URL is not a parseable connection URL; refusing to write");
   }
   // The project ref appears in the host of a direct connection and in the user of a
   // pooled one, so both spellings are accepted -- and nothing else is. The URL is
   // never printed; only the ref that was expected.
-  if (!url.includes(ref)) {
+  const hostParts = parsed.hostname.split(".");
+  const userParts = decodeURIComponent(parsed.username).split(/[.:]/);
+  if (!hostParts.includes(ref) && !userParts.includes(ref)) {
     throw new Error(`the connection does not name project ${ref}; refusing to write`);
   }
-  return { expectedProjectRef: ref, host };
+  return { expectedProjectRef: ref, host: parsed.host };
 }
 
 export function proveTarget(options = {}) {
@@ -172,7 +174,7 @@ insert into coldlion.sync_run
   (endpoint, company_code, request_params, status, requested_by, started_at, finished_at,
    http_status, body_status, error_message)
 values
-  (${literal(endpoint)}, ${literal(companyCode)}, jsonb_build_object('companyCode', ${literal(companyCode)}, 'fullSnapshot', true),
+  (${literal(endpoint)}, ${literal(companyCode)}, ${literal(JSON.stringify({companyCode,fullSnapshot:true,...(error?.requestParams ? {request:error.requestParams} : {})}))}::jsonb,
    'failed', ${literal(requestedBy)}, now(), now(), ${error?.httpStatus ?? "null"}, ${error?.bodyStatus ?? "null"}, ${literal(message)});
 select pg_notify('coldlion_sync_alert', ${literal(`${endpoint} master snapshot failed: ${message}`.slice(0, 7000))});
 commit;`;
