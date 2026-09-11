@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2789,
-  "generation": 1,
+  "generation": 2,
   "work_type": "tooling",
   "route": "shared-db-orchestrator",
   "goal": "Make the production apply review refuse a missing or non-numeric source_pr by name, before any production credential is used, whenever the automatic risk policy is active, without relaxing, removing or reordering any existing guard.",
@@ -14,13 +14,15 @@
     ".agent/contract.json",
     ".agent/completion.json",
     ".github/workflows/shared-supabase-migrations.yml",
-    "scripts/test_production_review_source_pr_preflight.py"
+    "scripts/test_production_review_source_pr_preflight.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
     ".github/workflows/shared-supabase-migrations.yml",
-    "scripts/test_production_review_source_pr_preflight.py"
+    "scripts/test_production_review_source_pr_preflight.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "db_reads": [],
   "db_writes": [],
