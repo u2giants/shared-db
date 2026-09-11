@@ -36,7 +36,7 @@ export function selectNewestCommitStatus(rows,context){
   return matching.sort((a,b)=>b.createdAt-a.createdAt||b.id-a.id)[0]??null
 }
 import { buildEvidenceBundle, canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
-import { selectPreviewRoute } from './orchestrator-flow/select-preview-route.mjs'
+import { databasePreviewRequiredFromEvidenceBundle, selectPreviewRoute } from './orchestrator-flow/select-preview-route.mjs'
 import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; import { verdictOpensLine as sharedVerdictOpensLine, evidenceTiedToHead as sharedEvidenceTiedToHead, isApprovalFor as sharedIsApprovalFor, isVerdictFor as sharedIsVerdictFor, anyVerdictFor as sharedAnyVerdictFor } from './lib/review-verdict.mjs'
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, assertFindingsRefForPr, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
@@ -1914,7 +1914,8 @@ export function deriveLivePreviewCandidate(issue,io,{claimNumber=null}={}){
   const work=io.getIssue(issue),scope=parseQueueScope(work?.body??''),gate=io.previewGateProof(issue,pr.number,head,bundle.bundle_id,scope.dependencies)
   const main=io.mainSha(),mainVersions=io.treeFiles(main).filter((file)=>/^supabase\/migrations\/\d{14}_/.test(file)).map((file)=>path.basename(file).slice(0,14)),preview=io.previewLedger?.()??livePreviewLedger(),originalApplyEvidence=versions.every((version)=>preview.versions.includes(version))?validateOriginalPreviewApplyEvidence({issue,pr:pr.number,versions,mergeCommitSha:merged?pr.merge_commit_sha:null},io):null
   const claimRows=claims.map((row)=>{const linked=io.openPulls().find((p)=>p.head?.ref===row.lease.branch);return{issue:claimTitleWorkIssue(row.claim),pr:linked?.number??0,versions:[row.lease.version],merged:false}}).filter((row)=>row.pr&&row.issue!==null)
-  const route=selectPreviewRoute({issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,versions,dependency_closure_complete:gate.dependency_closure_complete,claims:claimRows,main_versions:mainVersions,preview_versions:preview.versions,original_apply_evidence:originalApplyEvidence,merged})
+  const databasePreview=databasePreviewRequiredFromEvidenceBundle(bundle)
+  const route=selectPreviewRoute({issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,database_preview:databasePreview,inspected_files:databasePreview.files.map(({path,sha256})=>({path,sha256})),versions,dependency_closure_complete:gate.dependency_closure_complete,claims:claimRows,main_versions:mainVersions,preview_versions:preview.versions,original_apply_evidence:originalApplyEvidence,merged})
   if(route.status!=='READY')throw new LaneError(`preview route is ${route.status}: ${route.reason}`)
   const routeName=route.route==='NORMAL_PREVIEW'?'ordinary_preview_apply':route.route==='POST_MERGE_REHEARSAL'?'merged_rehearsal':'historical_rebind'
   const routeContext=routeName==='ordinary_preview_apply'?'':main
