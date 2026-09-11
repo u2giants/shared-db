@@ -1,56 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2501,
-  "outcome": "ready-for-merge",
-  "pr": 2527,
+  "work_issue": 2506,
+  "outcome": "blocked",
+  "pr": null,
   "migration_versions": [
-    "20260911045353"
+    "20260911044557"
   ],
-  "contract_ref": "refs/db-contracts/2501/3",
-  "contract_sha256": "17e9e0c0508b4f858b3dd7935ff82b26127d55bc3a889c169b1d396eb103396c",
-  "head_sha": "045088329df6f673464a3e41b05436bce7d58efc",
+  "contract_ref": "refs/db-contracts/2506/14",
+  "contract_sha256": "14062343cef9874d7f4af061cf5ba16c1cff8ab253ca5b1c046e8b9d6f7360d2",
+  "head_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
   "files_changed": [
-    ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+    ".agent/completion.json",
+    "supabase/migrations/20260911044557_popsg_search_v2_production_performance.sql",
+    "scripts/benchmark_popsg_search_v2_production.py",
+    "scripts/production-verification-sidecars/20260911044557.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/production_business_risk_gate.py",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json"
   ],
   "db_reads": [
-    "table public.assets",
-    "table public.style_groups",
-    "table public.asset_effective_tags",
-    "function public.get_effective_filter_counts_unchecked_1703",
-    "function public.require_dam_access",
-    "function public.assets_thumbnail_min_date"
+    "table public.style_guide_files",
+    "table public.style_guide_search_documents",
+    "table public.style_guide_render_queue"
   ],
   "db_writes": [
-    "function public.get_filter_counts",
-    "function public.get_effective_filter_counts",
-    "function public.filter_effective_assets"
+    "function public.search_style_guide_library_v2",
+    "index public.idx_sgf_live_preview_ids",
+    "index public.idx_sgf_live_missing_clean_ids",
+    "index public.idx_sgf_live_missing_error_ids"
   ],
   "checks": [
     {
+      "command": "python scripts/benchmark_popsg_search_v2_production.py --parity-only",
+      "exit_code": 0,
+      "evidence": "160 exact full-JSON parity cases passed including live-state NULL/empty strings and all queue states; zero skipped."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_catalog_verification",
+      "exit_code": 0,
+      "evidence": "188 tests passed."
+    },
+    {
       "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards passed after the normal current-main merge; the migration and both durable contracts retain the 8s timeout, force_custom_plan, and mutually exclusive tag-leading list arm. Live-ledger input was intentionally absent because this preparation performed no shared database write."
-    },
-    {
-      "command": "PYTHONPATH=scripts python3 -m unittest scripts.test_check_pass2_routine_supersession scripts.test_migration_derivation scripts.test_production_catalog_verification",
-      "exit_code": 0,
-      "evidence": "250 tests passed, zero failures on current merged implementation."
-    },
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "44 passed, zero failed, skipped, cancelled or todo on current merged implementation."
+      "exit_code": 1,
+      "evidence": "Expected unapplied-version ordering refusal; supported supersession pending preparatory PR."
     }
   ],
   "assumptions_resolved": [
-    "Current main71dca7b3 and PR head99f3d4ed are both ancestors of implementation head5d518124. Migration and test bytes are unchanged; only stale contract/version evidence is repaired.",
-    "Claim2525 remains active under inherited identity; no protected claims were changed.",
-    "No database writes, preview, merges or production promotion are performed by this worker.",
-    "Current main a671cd47 merged; supported reversion changed filename only. Earlier independent APPROVE does not automatically authorize the new head."
+    "Full production-width synthetic benchmark217193 docs and11660 queue rows: files6469\u21923315ms; guides4520\u21923292ms, identical complete-result hashes. Eight-second timeout unchanged.",
+    "No shared database writes performed."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [
+    "Final supported version reservation, refreshed evidence, CI and independent review remain pending."
+  ]
 }

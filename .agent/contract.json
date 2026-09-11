@@ -1,41 +1,45 @@
 {
   "schema_version": 1,
-  "work_issue": 2501,
-  "generation": 3,
+  "work_issue": 2506,
+  "generation": 14,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Recover inherited tag-filtered facet and exact list-total optimization after the separate replay-provenance repair lands, preserving count parity, access control and the existing viewer timeout.",
-  "base_sha": "a671cd47aaf7608c07a9db31822d3c708fda85b3",
+  "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
+  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
   "dispatcher": "Codex orchestrator marker2714",
-  "worker": "Codex issue2501 successor",
-  "branch": "codex/issue-2501-popdam-tag-totals",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2501-successor-2714",
+  "worker": "Codex issue2506 production-performance worker",
+  "branch": "codex/issue-2506-production-performance-2714",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2506-production-performance-2714",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+    "supabase/migrations/20260911044557_popsg_search_v2_production_performance.sql",
+    "scripts/benchmark_popsg_search_v2_production.py",
+    "scripts/production-verification-sidecars/20260911044557.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/production_business_risk_gate.py",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+    "supabase/migrations/20260911044557_popsg_search_v2_production_performance.sql",
+    "scripts/benchmark_popsg_search_v2_production.py",
+    "scripts/production-verification-sidecars/20260911044557.json",
+    "scripts/production_catalog_verification.py",
+    "scripts/production_business_risk_gate.py",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json"
   ],
   "db_reads": [
-    "table public.assets",
-    "table public.style_groups",
-    "table public.asset_effective_tags",
-    "function public.get_effective_filter_counts_unchecked_1703",
-    "function public.require_dam_access",
-    "function public.assets_thumbnail_min_date"
+    "table public.style_guide_files",
+    "table public.style_guide_search_documents",
+    "table public.style_guide_render_queue"
   ],
   "db_writes": [
-    "function public.get_filter_counts",
-    "function public.get_effective_filter_counts",
-    "function public.filter_effective_assets"
+    "function public.search_style_guide_library_v2",
+    "index public.idx_sgf_live_preview_ids",
+    "index public.idx_sgf_live_missing_clean_ids",
+    "index public.idx_sgf_live_missing_error_ids"
   ],
   "prohibited_actions": [
     "Do not rewrite applied migration bytes, raise timeouts, weaken RLS, quarantine assertions or remove fast/warm search capability.",
@@ -44,20 +48,17 @@
   ],
   "required_checks": [
     "bash scripts/check-sql.sh",
-    "PYTHONPATH=scripts python3 -m unittest scripts.test_check_pass2_routine_supersession scripts.test_migration_derivation scripts.test_production_catalog_verification",
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs"
+    "python scripts/benchmark_popsg_search_v2_production.py --parity-only",
+    "python -m unittest scripts.test_production_catalog_verification"
   ],
   "assumptions": [
-    "This adopts pre-contract work transparently; no claim that publication predates existing implementation.",
-    "Replay-provenance repair2537 landed as PR2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3; scoped real-SQL regression verifies the old restoration failure and repaired helper preservation.",
-    "Claim2525 retains original owner, branch, remote worktree and immutable version.",
-    "Independent exact-head review, representative authenticated cold/warm preview and production acceptance remain separate gates.",
-    "Successor preserves remote PR ancestry at 99f3d4ed713ae9dd0bd471ffa05cfe7b4c7b9900 by merging into current-main worktree. This generation only repairs stale evidence and reserved-version references; existing claim2525 identity is retained and remains active.",
-    "Current main2638 integrated without SQL conflicts. Manager superseded never-applied20260910223429 to20260911045353; migration body remains byte-identical."
+    "Fresh supported claim2722 covers exactly the function and three indexes.",
+    "Local diagnostic candidate predates this fresh contract; no false claim of publication before diagnostic authorship.",
+    "All fixture rows are synthetic. Production acceptance remains a separate parent-owned gate."
   ],
   "stop_conditions": [
-    "Stop before final evidence if current main is not an ancestor of implementation.",
-    "Stop on a new coordinator push or merge hold.",
-    "Stop on active worker ownership, unexpected claim changes, applied migration versions or expanded structural scope."
+    "Unexpected ownership or scope collision.",
+    "Any exact-result mismatch, lost live-state or authorization behavior.",
+    "No shared database writes by this worker."
   ]
 }

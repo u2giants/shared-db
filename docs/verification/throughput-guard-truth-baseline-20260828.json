@@ -1,6 +1,6 @@
 {
   "detector_schema_version": 1,
-  "detector_source_sha256": "db4323fcae9bf8ad9bdfdf93c4cb70b770e5dd995774a84ebbc3d4d9a8a9ea8b",
+  "detector_source_sha256": "2c114c7759f0e9b4f24a3bc4372a578aa1550965351df744f9c8e4d3c108cc39",
   "command": "node scripts/check-production-verification-sidecars.mjs",
   "total_migration_files": 639,
   "matched_count": 96,
