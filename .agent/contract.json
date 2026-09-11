@@ -1,64 +1,63 @@
 {
   "schema_version": 1,
-  "work_issue": 2715,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Add a fail-closed lightweight required-status path for prose-only pull requests without dispatching the database guarded-merge workflow or weakening behavior-changing changes.",
-  "base_sha": "439beffc5970b60bc7e1c8e0445f892fae46f8a7",
-  "dispatcher": "Codex issue 401 programme repo-maintenance owner",
-  "worker": "Codex prereq_2715",
-  "branch": "codex/issue-2715-docs-status-v3",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2715-docs-status-v3",
+  "work_issue": 2493,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Recover inherited PR2526 under enforced contract governance, preserving its four-file implementation and adding six-kind helper and role runtime tests. This records prospective recovery authority; original implementation predates publication.",
+  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
+  "dispatcher": "codex shared-db orchestrator marker2714",
+  "worker": "codex finish_2493 successor",
+  "branch": "codex/issue-2493-source-resolution-new-kinds",
+  "worktree": "C:/repos/shared-db-worktrees/finish-2493-2714",
   "allowed_paths": [
+    "scripts/production-verification-sidecars/20260911045438.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    ".github/workflows/documents-only-merge-authorization.yml",
-    "AGENTS.md",
-    "scripts/check-documents-only-merge-authorization.mjs",
-    "scripts/check-documents-only-merge-authorization.test.mjs",
-    "scripts/check-documents-only-pull-request.mjs",
-    "scripts/documents-only-merge-authorization.test.mjs",
-    "scripts/lib/documents-only-change.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/write-documents-only-merge-status.mjs",
-    "scripts/write-documents-only-merge-status.test.mjs"
+    ".agent/completion.json"
   ],
   "file_writes": [
-    ".agent/contract.json",
-    ".agent/completion.json",
-    ".github/workflows/documents-only-merge-authorization.yml",
-    "AGENTS.md",
-    "scripts/check-documents-only-merge-authorization.mjs",
-    "scripts/check-documents-only-merge-authorization.test.mjs",
-    "scripts/check-documents-only-pull-request.mjs",
-    "scripts/documents-only-merge-authorization.test.mjs",
-    "scripts/lib/documents-only-change.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/write-documents-only-merge-status.mjs",
-    "scripts/write-documents-only-merge-status.test.mjs"
+    "scripts/production-verification-sidecars/20260911045438.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "table core.property",
+    "table core.character",
+    "table core.style_guide",
+    "table dam.asset",
+    "table core.licensor",
+    "table core.franchise",
+    "table plm.source_resolution",
+    "function plm.set_source_resolution",
+    "function api.set_source_resolution"
+  ],
+  "db_writes": [
+    "function plm.source_resolution_target_missing",
+    "view api.source_resolution"
+  ],
   "prohibited_actions": [
-    "Do not modify a migration or any database state.",
-    "Do not authorize an unreadable, mixed, executable, workflow, script, test, configuration, migration, or behavior-changing rulebook diff.",
-    "Do not execute pull-request head code in the privileged status workflow.",
-    "Do not bypass the shared merge and production-freeze lock."
+    "Do not edit applied migration bytes.",
+    "Do not rewrite or retire either existing setter or five-argument helper.",
+    "No production or preview writes outside governed coordinator gates.",
+    "No merge or preview/production write by worker; parent orchestrator serializes those stages."
   ],
   "required_checks": [
     "git diff --check",
-    "node --test scripts/lib/documents-only-change.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/check-documents-only-merge-authorization.test.mjs scripts/documents-only-merge-authorization.test.mjs scripts/write-documents-only-merge-status.test.mjs scripts/check-github-transport-conformance.test.mjs scripts/manage-migration-author-lanes.test.mjs",
-    "node scripts/check-github-transport-conformance.mjs"
+    "node scripts/check-production-verification-sidecars.mjs",
+    "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "assumptions": [
-    "Issue 2715 is repo-maintenance outside the shared-db structure orchestrator.",
-    "Plans and bounded declarative routing pointers are lightweight prose; behavior-changing instruction edits retain the full guarded path.",
-    "Independent exact-head review, required CI, guarded merge, and live acceptance remain repository delivery gates after worker completion."
+    "Inherited implementation and earlier test patch predate this recovery contract; no retrospective publication claim.",
+    "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record.",
+    "Generation 3 binds supported unapplied version supersession to 20260911045438 and final main reconciliation after PR2527. SQL bytes unchanged. Fresh hosted CI and one governed exact-head reviewer required."
   ],
   "stop_conditions": [
-    "Stop if implementation requires a database or production write.",
-    "Stop if the pull-request head must be checked out or executed by pull_request_target.",
-    "Stop if an unknown diff can receive success."
+    "Stop if migration bytes or setter definitions change.",
+    "Stop if test assertions fail.",
+    "Stop if scope extends beyond the four implementation files."
   ],
-  "generation": 2
+  "generation": 3
 }
