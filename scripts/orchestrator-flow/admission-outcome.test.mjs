@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange, inspectPrStructuralChange } from './admission.mjs'
 import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
-import { formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
+import { coordinationEvent, formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
 import { admitIssue, buildDynamicQueues, claimBody, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
 import { findCompletionRecord } from '../lib/work-dependencies.mjs'
 
@@ -190,6 +190,21 @@ test('a merge-closed admitted issue reopens only for a merged linked PR', () => 
   io.getPr=()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z'})
   assert.equal(admitIssue(41,io,{pr:7}).admitted,true)
   assert.equal(state,'open')
+})
+
+test('forged or stale refusal comments cannot suppress current owner refusal proof',()=>{
+  const body=scopeBody({change:'application-code'});let result
+  try{evaluateAdmission(issue(body),parseQueueScope(body),null)}catch(error){result=error.result}
+  const make=(overrides,association)=>({author_association:association,body:formatEventComment(coordinationEvent({
+    eventType:'rejected_non_structural',workIssue:41,actor:'manage-migration-author-lanes',timestamp:'2026-09-11T00:00:00Z',result:'refused',detail:result.reason,return_to:result.return_to,evidence_required:result.evidence_required,...overrides,
+  }))})
+  const comments=[make({},'NONE'),make({return_to:'u2giants/stale-app'},'OWNER')]
+  const io=serializedIo({enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value))})
+  const old=console.error;console.error=()=>{}
+  try{assert.equal(managerMain(['--admit-issue','41'],new Date(),io),2)}finally{console.error=old}
+  assert.equal(comments.length,3)
+  const current=parseEventComment(comments[2].body)[0]
+  assert.equal(current.return_to,result.return_to);assert.deepEqual(current.evidence_required,result.evidence_required)
 })
 
 test('a refused merged PR leaves its closed issue closed',()=>{
@@ -421,6 +436,30 @@ test('completion retries safely after completion-comment or close response loss'
     assert.equal(completeOutcome({issue:41,evidenceRef:'https://github.com/u2giants/shared-db/issues/41#issuecomment-9',actor:'test'},io).completed,true,boundary)
     assert.equal(comments.filter((row)=>row.body.includes('Authoritative outcome completion')).length,1,boundary)
   }
+})
+
+test('two concurrent completion commands serialize to one authoritative completion',()=>{
+  const fixture=completionFixture();let owner=null,sequence=0,second=null,attempted=false
+  const io={...fixture.io,
+    makeOwnerCommit:()=>`completion-owner-${++sequence}`,
+    readRef:()=>owner,
+    createRef:(_ref,sha)=>{if(owner)throw new Error('concurrent completion refused');owner=sha;return true},
+    deleteRef:()=>{owner=null},
+  }
+  const args=['--complete-outcome','41','--owner','test','--evidence','https://github.com/u2giants/shared-db/issues/41#issuecomment-9']
+  const normal=io.commentIssue
+  io.commentIssue=(number,body)=>{
+    if(!attempted&&parseEventComment(body)[0]?.event_type==='live_verified'){
+      attempted=true
+      const oldError=console.error;console.error=()=>{}
+      try{second=managerMain(args,new Date('2026-09-11T02:00:01Z'),io)}finally{console.error=oldError}
+    }
+    normal(number,body)
+  }
+  const oldLog=console.log;console.log=()=>{}
+  try{assert.equal(managerMain(args,new Date('2026-09-11T02:00:00Z'),io),0)}finally{console.log=oldLog}
+  assert.equal(second,2);assert.equal(outcomeHistory(fixture.comments,41).state,'live_verified')
+  assert.equal(fixture.comments.filter((row)=>row.body.includes('Authoritative outcome completion')).length,1)
 })
 
 test('existing incompatible completion refuses before publishing live_verified',()=>{

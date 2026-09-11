@@ -43,7 +43,7 @@ import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIE
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
-import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
+import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, trustedOutcomeComments } from './orchestrator-flow/outcome-lifecycle.mjs'
 
 export const REPO = 'u2giants/shared-db'
 // AUTHOR LANE CAP. Raised from three to five on 2026-08-25 and from five to
@@ -2271,7 +2271,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:admission|outcome-advance|author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:admission|outcome-(?:advance|complete)|author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-failure(?:-replacement)?|reviewer-index-cutover-activation-audit)\b/.test(message))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -5442,14 +5442,15 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
     }
     if (error instanceof AdmissionError && error.result && io.commentIssue) {
       const comments = io.issueComments?.(Number(number)) ?? []
-      const already = comments.flatMap((comment)=>{
+      const refusal={event_type:'rejected_non_structural',work_issue:Number(number),actor,result:'refused',detail:error.result.reason,return_to:error.result.return_to,evidence_required:error.result.evidence_required}
+      const already = trustedOutcomeComments(comments).flatMap((comment)=>{
         try { return parseEventComment(comment?.body ?? '') } catch { return [] }
-      }).some((event)=>event.event_type==='rejected_non_structural'&&event.detail===error.result.reason)
+      }).some((event)=>['event_type','work_issue','actor','result','detail','return_to'].every((key)=>event[key]===refusal[key])&&JSON.stringify(event.evidence_required??[])===JSON.stringify(refusal.evidence_required??[]))
       if (!already) {
         const event = coordinationEvent({
-          eventType:'rejected_non_structural', workIssue:Number(number), actor,
-          timestamp:new Date().toISOString(), result:'refused', detail:error.result.reason,
-          return_to:error.result.return_to, evidence_required:error.result.evidence_required,
+          eventType:refusal.event_type, workIssue:refusal.work_issue, actor:refusal.actor,
+          timestamp:new Date().toISOString(), result:refusal.result, detail:refusal.detail,
+          return_to:refusal.return_to, evidence_required:refusal.evidence_required,
         })
         io.commentIssue(Number(number), formatEventComment(event))
       }
@@ -6521,7 +6522,11 @@ export function main(argv, now = new Date(), io = githubIo) {
     }
     if(o.completeOutcome){
       if(!o.evidence)throw new LaneError('--complete-outcome requires --evidence <durable comment URL>')
-      console.log(JSON.stringify(completeOutcome({issue:o.completeOutcome,evidenceRef:o.evidence,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString()}, {...io,parseScope:parseQueueScope}),null,2));return 0
+      const result=withAuthorMutex('outcome-complete',io,o,(ownerSha)=>completeOutcome({issue:o.completeOutcome,evidenceRef:o.evidence,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString()},{...io,parseScope:parseQueueScope,
+        commentIssue:(...args)=>{requireOwnedRef(MUTEX_REF,ownerSha,io);return io.commentIssue(...args)},
+        updateIssue:(...args)=>{requireOwnedRef(MUTEX_REF,ownerSha,io);return io.updateIssue(...args)},
+      }))
+      console.log(JSON.stringify(result,null,2));return 0
     }
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
     if(o.reconcileFlow){
