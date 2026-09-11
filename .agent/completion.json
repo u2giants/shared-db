@@ -1,57 +1,28 @@
 {
   "schema_version": 1,
-  "work_issue": 2664,
+  "work_issue": 2783,
   "outcome": "ready-for-merge",
-  "pr": 2748,
-  "migration_versions": [
-    "20260911081204"
-  ],
-  "contract_ref": "refs/db-contracts/2664/4",
-  "contract_sha256": "5b1b3b0d1a96eb5e8f13624ec6041622df51c2c58f5185340b6f404fbe3f85cd",
-  "head_sha": "e0a412e36812b291323394976d87845b6343e96a",
+  "pr": 2782,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2783/1",
+  "contract_sha256": "8fb07821210b281cbd983e43768bc7ccb0439b94d794b62e2e60c25a4aa6b8e1",
+  "head_sha": "d8676c8f14b829f919d26f2ed81e5b76c4c19ce3",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
-    "supabase/tests/dam_order_list_find_position.sql",
-    "scripts/test_order_list_find_position.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/production-verification-sidecars/20260911081204.json"
+    "scripts/test_historical_preview_recovery.py",
+    "scripts/test_production_business_risk_gate.py",
+    "scripts/tests/test_import_order_list.py"
   ],
-  "db_reads": [
-    "view api.dam_order_list"
-  ],
-  "db_writes": [
-    "function public.find_dam_order_list_row"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "python -m unittest scripts/test_production_business_risk_gate.py scripts/test_historical_preview_recovery.py",
       "exit_code": 0,
-      "evidence": "Static guards passed; live-ledger check not configured. No shared database writes."
-    },
-    {
-      "command": "python scripts/test_order_list_find_position.py",
-      "exit_code": 0,
-      "evidence": "TEST_DATABASE_URL pointed to loopback127.0.0.1:55486; fresh uniquely-created database was removed afterward.14 expected-position cases,4 independent ranking parity cases, wildcard/null/JS-trim/RLS/auth/injection contracts passed;0 skipped."
-    },
-    {
-      "evidence": "49 sidecars validated; runtime dynamic SELECT marker96 explicitly covered as no additional durable catalog target.",
-      "command": "python scripts/check_production_verification_sidecars.py --repo . --scan-version 20260911081204",
-      "exit_code": 0
-    },
-    {
-      "evidence": "137 tests passed;0 skipped.",
-      "command": "python -m unittest scripts.test_production_business_risk_gate",
-      "exit_code": 0
+      "evidence": "Ran 152 tests, OK at d8676c8f. PR CI job SQL migration guards (all scripts/test_*.py) also passed at d8676c8f. GIT_TRACE2_EVENT on a two-commit repo shows 4 detached 'git maintenance run --auto --detach' spawns without the settings and 0 with gc.auto=0 and maintenance.auto=false."
     }
   ],
   "assumptions_resolved": [
-    "PopDAM main562dc999ac0039e017fd6b0fd0e32c6172ac6893 helpers define9 search fields, normalized filters and ascending-boolean sort, defaultorder_date descending/null-last/id ascending.",
-    "Duplicate2665 closed as duplicate, not delivered;2664 is canonical underclaim2747.",
-    "Draft preparation only: independent paid review, shared-preview plan/runtime proof and merge remain held for parent priority2734 and2703.",
-    "No application code or data writes, no shared database writes, no timeout changes.",
-    "Actual CI failure repaired with hash-bound runtime SELECT disposition and pinned producer sidecar; SQL bytes unchanged."
+    "Confirmed: the only unwaited writer is git's detached auto-maintenance; every foreground fixture subprocess.run already waits. Attempt 2 of run 34615626046 passed the same tests on the same SHA, consistent with a race."
   ],
   "stop_conditions_hit": []
 }
