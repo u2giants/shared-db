@@ -45,8 +45,15 @@ begin
   if v_gate <> 1 then
     raise exception 'effective list function must invoke public.require_dam_access() exactly once, found %', v_gate;
   end if;
-  if position(') a where public.require_dam_access() and a.is_deleted = false and (' in v_lower) = 0 then
+  if position(') a where public.require_dam_access() and (' in v_lower) = 0 then
     raise exception 'effective list function must gate on DAM entitlement in its outer WHERE clause';
+  end if;
+
+  -- Deletion eligibility moved into every arm so each partial index can prove
+  -- it without fetching heap payload. No arm may lose that predicate.
+  if (length(v_lower)-length(replace(v_lower,'and a.is_deleted = false','')))
+       / length('and a.is_deleted = false') <> 9 then
+    raise exception 'each effective list arm must exclude deleted assets';
   end if;
 
   -- Nine mutually exclusive identity/tag/thumbnail arms, each pinned by its leading guard.
