@@ -60,12 +60,12 @@
     "Legacy structural work already in flight remains executable only when the proposed PR contains real schema DDL; new work requires the complete outcome fields.",
     "Outcome lifecycle replay is bound to the requested work issue so another issue's events cannot authorize completion.",
     "Admission, dependent claim creation, dispatched recording, and manual lifecycle advancement use one command clock and one author-mutex ownership interval.",
-    "Only owner-authored lifecycle evidence with explicit GitHub identity is replayed; completion reads exact production apply, manifest, after-ledger, and catalog proof; closed issues mutate only after validation; and every supported multi-target DROP binds all objects."
+    "Only owner-authored lifecycle evidence with explicit GitHub identity is replayed; lost dispatch responses reconcile the exact event before rollback, lost mutex ownership never closes a claim; completion reads exact production apply, manifest, after-ledger, and catalog proof; closed issues mutate only after validation; and every supported multi-target DROP binds all objects."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 15
+  "generation": 16
 }
