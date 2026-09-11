@@ -17,7 +17,7 @@
     "Only the bridge FK constraint is dropped; the erp_item_id column and its values are kept.",
     "Neither legacy table is dropped: both move to a new archive schema with anon/authenticated access revoked, so retirement is reversible."
   ],
-  "base_sha": "72c299b86ac68555fc66276302fb901df8bb8c6e",
+  "base_sha": "3ff51ae88def32de2d86731d3d893e3818961c84",
   "branch": "claude/issue-2482-retire-erp-items",
   "db_reads": [
     "table public.erp_items_current",
@@ -53,7 +53,7 @@
     ".agent/contract.json",
     ".agent/completion.json"
   ],
-  "generation": 12,
+  "generation": 13,
   "goal": "Retire the frozen DesignFlow item feed (public.erp_items_current and public.erp_items_raw) recoverably: repoint every live reader to a frozen identity crosswalk, drop only the bridge legacy FK, and move both tables to a revoked archive schema.",
   "prohibited_actions": [
     "No DROP of public.erp_items_current or public.erp_items_raw or their data",
