@@ -1,12 +1,14 @@
 {
   "schema_version": 1,
   "work_issue": 2744,
-  "outcome": "ready-for-review",
+  "outcome": "ready-for-merge",
   "pr": 2813,
   "migration_versions": [
     "20260911222514"
   ],
   "contract_ref": "refs/db-contracts/2744/7",
+  "contract_sha256": "f19ae3dcbf27012ee24eb40625a9df1fc9586219da7d75f80f49f2d97a0da256",
+  "head_sha": "3417106f01d9b2a1999c55a1b86b484a4803b678",
   "files_changed": [
     ".agent/contract.json",
     ".agent/completion.json",
@@ -61,5 +63,11 @@
     "Issue #2744 remains open and claim #2791 remains held; acceptance has not yet been re-run against production after this change.",
     "The reported 'Product pipeline could not load' outage is a different function: api.pm_pipeline_page('licensed', limit 100) measured 8235 ms cold as role authenticated and shares no objects with this migration. It needs its own issue and is reported on #2744 and #2758.",
     "Per AGENTS.md this migration requires two independent governed reviewers, not one."
-  ]
+  ],
+  "assumptions_resolved": [
+    "Narrow projection is load-bearing: materializing the retained-asset CTEs alone measured 4285/4226/4656 ms with no gain, and 12x work_mem measured no gain. Only the narrow (id, style_guide_id) map moved the number.",
+    "Output parity confirmed: the unfiltered default page is 1,311,298 bytes byte-identical, and the four targeted controls are byte-identical.",
+    "The dynamic-execution marker has no durable target beyond the one pre-existing function, and is hash-bound in the sidecar."
+  ],
+  "stop_conditions_hit": []
 }
