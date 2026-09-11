@@ -557,10 +557,13 @@ jobs:
             fi
           fi
           test -n "$CLAIM_PR"; test -n "$CLAIM_HEAD_SHA"
+          ADMITTED_ISSUE="$(node scripts/manage-migration-author-lanes.mjs --resolve-admitted-issue-for-pr "$CLAIM_PR" | jq -r .issue)"
+          test "$ADMITTED_ISSUE" -gt 0
           LOCK_KIND=preview
           if [ -n "$HISTORICAL_SOURCE_PR" ]; then LOCK_KIND=preview-recovery; fi
           if [ -n "${MERGED_SOURCE_PR:-}" ]; then LOCK_KIND=preview-rehearsal; fi
           node scripts/manage-migration-author-lanes.mjs --acquire-$LOCK_KIND \
+            --admit-issue "$ADMITTED_ISSUE" \
             --owner "github-actions:${GITHUB_RUN_ID}" --pr "$CLAIM_PR" --head-sha "$CLAIM_HEAD_SHA" \
             "${LANE_VERSIONS[@]}" \
             > "$RUNNER_TEMP/preview-lock.json"
@@ -1356,9 +1359,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_SHA: ${{ inputs.commit_sha }}
+          SOURCE_PR: ${{ inputs.source_pr }}
         run: |
           set -euo pipefail
+          test -n "$SOURCE_PR"
+          ADMITTED_ISSUE="$(node scripts/manage-migration-author-lanes.mjs --resolve-admitted-issue-for-pr "$SOURCE_PR" | jq -r .issue)"
+          test "$ADMITTED_ISSUE" -gt 0
           node scripts/manage-migration-author-lanes.mjs --acquire-production \
+            --admit-issue "$ADMITTED_ISSUE" --pr "$SOURCE_PR" \
             --owner "github-actions:${GITHUB_RUN_ID}" --head-sha "$REQUESTED_SHA" \
             > "$RUNNER_TEMP/production-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/production-lock.json")" >> "$GITHUB_OUTPUT"

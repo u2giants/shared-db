@@ -218,6 +218,23 @@ test('a merge-closed admitted issue reopens only for a merged linked PR', () => 
   assert.equal(state,'open')
 })
 
+test('a completed live outcome is re-admitted without reopening its closed issue', () => {
+  let state='closed',updates=0
+  const merge='b'.repeat(40)
+  const completion={schema_version:1,work_issue:41,outcome:'live_verified',pr:7,merge_sha:merge,application_repository:'u2giants/example-app',application_commit_sha:'c'.repeat(40),live_evidence:'artifact:live-proof'}
+  const comments=[{author_association:'OWNER',author:'u2giants',body:`\`\`\`db-work-completion\n${JSON.stringify(completion)}\n\`\`\``}]
+  const io={
+    closingIssuesForPr:()=>[{number:41,state}],getIssue:()=>({...issue(scopeBody()),state}),updateIssue:(_n,fields)=>{updates++;state=fields.state},
+    issueComments:()=>comments,getPr:()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:merge}),
+    getFileAt:()=> 'create table core.example(id bigint);',getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],
+  }
+  assert.equal(admitIssue(41,io,{pr:7}).admitted,true)
+  assert.equal(state,'closed');assert.equal(updates,0)
+  io.getPr=()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:'d'.repeat(40)})
+  assert.throws(()=>admitIssue(41,io,{pr:7}),/completed outcome does not match/)
+  assert.equal(state,'closed');assert.equal(updates,0)
+})
+
 test('shared-stage capacity revalidates admission after taking the author mutex',()=>{
   for(const operation of ['preview']){
     let state='open';const refs=new Map(),created=[]

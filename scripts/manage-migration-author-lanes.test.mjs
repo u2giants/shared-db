@@ -2695,6 +2695,26 @@ test('issue 1688 permits success only after the appropriate merge lock is acquir
   assert.match(productionWorkflow,/production-apply:[\s\S]+permissions:[\s\S]+statuses: write/)
 })
 
+test('every workflow acquisition supplies an admitted issue and source pull request', () => {
+  const files=['guarded-migration-merge.yml','shared-supabase-migrations.yml','preview-ledger-orphan-reconciliation.yml']
+  const commands=[]
+  for(const file of files){
+    const source=readFileSync(fileURLToPath(new URL(`../.github/workflows/${file}`,import.meta.url)),'utf8')
+    const lines=source.split(/\r?\n/)
+    for(let index=0;index<lines.length;index++){
+      if(!/manage-migration-author-lanes\.mjs --acquire-/.test(lines[index]))continue
+      let command=lines[index].trim()
+      while(command.endsWith('\\'))command+=`\n${lines[++index].trim()}`
+      commands.push(`${file}: ${command}`)
+    }
+  }
+  assert.equal(commands.length,4,commands.join('\n'))
+  for(const command of commands){
+    assert.match(command,/--admit-issue\s+\S+/,command)
+    assert.match(command,/--pr\s+\S+/,command)
+  }
+})
+
 test('issue 2116 the production freeze names itself and restores every authorization it revoked', () => {
   const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
   const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')

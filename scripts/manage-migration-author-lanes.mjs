@@ -5456,6 +5456,7 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
   let livePr=null
   let scope=null
   let reopenAfterValidation=false
+  let completedClosedOutcome=false
   try {
     if(pr!==null){
       livePr=io.getPr(Number(pr))
@@ -5463,7 +5464,13 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       if(!Array.isArray(linked)||linked.length!==1||Number(linked[0]?.number)!==Number(number))throw new AdmissionError(`pull request #${pr} must close exactly admitted issue #${number}`)
       if(String(issue?.state??'').toLowerCase()==='closed'){
         if(!livePr?.merged_at||typeof io.updateIssue!=='function')throw new AdmissionError(`issue #${number} is closed and cannot be admitted`)
-        reopenAfterValidation=true
+        const completion=typeof io.issueComments==='function'
+          ?findCompletionRecord(io.issueComments(Number(number)),{requireTrustedAuthor:true})
+          :null
+        if(completion?.outcome==='live_verified'){
+          if(completion.work_issue!==Number(number)||completion.pr!==Number(pr)||completion.merge_sha!==livePr.merge_commit_sha)throw new AdmissionError(`issue #${number} completed outcome does not match merged pull request #${pr}`)
+          completedClosedOutcome=true
+        }else reopenAfterValidation=true
         issue={...issue,state:'open'}
       }
     }
@@ -5490,7 +5497,7 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       issue=io.getIssue(Number(number))
       if(String(issue?.state??'').toLowerCase()!=='open')throw new AdmissionError(`issue #${number} did not reopen after its linked merge`)
     }
-    if(!admitted.legacy&&io.issueComments&&io.commentIssue){
+    if(!admitted.legacy&&!completedClosedOutcome&&io.issueComments&&io.commentIssue){
       let history=outcomeHistory(io.issueComments(Number(number)),number)
       if(!history.valid)throw new OutcomeError(`outcome history is invalid: ${history.problems.join('; ')}`)
       for(const state of ['entered','classified']){
