@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "3ff51ae88def32de2d86731d3d893e3818961c84",
+  "base_sha": "9ea5c664443f5c3fcdf43c5c40ca355450d0d394",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
@@ -86,12 +86,13 @@
     "Generation 38 repairs exact-head review findings at 9b75c623: the workflow resolver now preserves the same bounded pre-cutover legacy policy as PR-backed acquisition, and closed-issue admission filters untrusted completion comments before parsing or counting.",
     "Generation 39 repairs workflow execution at 6f8b4b15: only admission-calling workflows receive issues write so validated merge-closed issues can reopen, and standalone PR-backed admission uses the same bounded legacy policy as resolver and acquisition paths.",
     "Generation 40 refreshes the completed repair onto current main 3ff51ae8; only the evidence pair conflicted, and all admission, permission, unlimited-lane, disabled-reviewer-queue, and no-Step-7 guarantees remain intact.",
-    "Generation 41 repairs effective job permissions at 66b9ca83 and seals the effective-scope regression at 590eb037: preview and production-apply explicitly retain issues write despite job-level overrides, and the Python permission regression is included in the sealed work scope."
+    "Generation 41 repairs effective job permissions at 66b9ca83 and seals the effective-scope regression at 590eb037: preview and production-apply explicitly retain issues write despite job-level overrides, and the Python permission regression is included in the sealed work scope.",
+    "Generation 42 refreshes the completed repair onto current main 9ea5c664; only the sealed evidence pair conflicted, and every substantive file merged without conflict."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 41
+  "generation": 42
 }
