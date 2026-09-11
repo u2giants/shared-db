@@ -2566,12 +2566,14 @@ test('issue 1688 routes non-migration pull requests through the guarded merge la
   )
 })
 
-test('issue 1688 never leaves a durable ordinary-merge authorization before the merge lock', () => {
+test('issue 1688 permits success only after the appropriate merge lock is acquired', () => {
   const leaseWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/migration-author-lease.yml',import.meta.url)),'utf8')
   const mergeWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/guarded-migration-merge.yml',import.meta.url)),'utf8')
+  const documentsWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/documents-only-merge-authorization.yml',import.meta.url)),'utf8')
   const productionWorkflow=readFileSync(fileURLToPath(new URL('../.github/workflows/shared-supabase-migrations.yml',import.meta.url)),'utf8')
   assert.doesNotMatch(leaseWorkflow,/state=success[^\n]+Migration guarded merge authorization/)
   assert.match(mergeWorkflow,/--acquire-merge[\s\S]+state=success[^\n]+Migration guarded merge authorization/)
+  assert.match(documentsWorkflow,/check-documents-only-merge-authorization\.mjs[\s\S]+--acquire-merge[\s\S]+check-documents-only-merge-authorization\.mjs[\s\S]+write-documents-only-merge-status\.mjs[\s\S]+success/)
   const acquire=productionWorkflow.indexOf('name: Acquire the exclusive production lane and freeze merges')
   const revoke=productionWorkflow.indexOf('name: Revoke every pre-existing merge authorization while frozen')
   const release=productionWorkflow.indexOf('name: Release the exclusive production lane with ownership proof')

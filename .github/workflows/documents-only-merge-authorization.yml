@@ -1,0 +1,127 @@
+name: Documents-only merge authorization
+
+# A required legacy commit status must exist on every pull request, but prose-only
+# changes must not dispatch the database guarded-merge workflow (#2715). This
+# workflow runs only trusted code from the pull request base. It never checks out
+# or executes the pull request head.
+on:
+  pull_request_target:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: documents-only-merge-authorization-${{ github.event.pull_request.number }}
+  # Cancellation can strand the exclusive merge ref after acquisition.
+  cancel-in-progress: false
+
+jobs:
+  authorize:
+    name: Documents-only merge authorization
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out trusted base code only
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Prove the shared classifier before using it
+        run: >-
+          node --test
+          scripts/lib/documents-only-change.test.mjs
+          scripts/check-documents-only-pull-request.test.mjs
+          scripts/check-documents-only-merge-authorization.test.mjs
+          scripts/write-documents-only-merge-status.test.mjs
+
+      - name: Classify the complete pull request file list
+        id: classify
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if node scripts/check-documents-only-merge-authorization.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER"; then
+            echo 'documents_only=true' >> "$GITHUB_OUTPUT"
+          else
+            # This is the normal path for every non-document or unreadable change.
+            # It deliberately writes no authorization status: the guarded merge
+            # remains the only path that can authorize those pull requests.
+            echo 'documents_only=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Re-prove the exact head and acquire the merge/freeze lane
+        if: steps.classify.outputs.documents_only == 'true'
+        id: merge_lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          node scripts/manage-migration-author-lanes.mjs --acquire-merge \
+            --owner "github-actions:documents-only:${GITHUB_RUN_ID}" \
+            --pr "$PR_NUMBER" --head-sha "$HEAD_SHA" > "$RUNNER_TEMP/merge-lock.json"
+          echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/merge-lock.json")" >> "$GITHUB_OUTPUT"
+
+      - name: Reclassify under the lock and post the required status
+        if: steps.classify.outputs.documents_only == 'true' && steps.merge_lock.outputs.owner_sha != ''
+        id: authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          test "$(node scripts/gh-read.mjs pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json headRefOid --jq .headRefOid)" = "$HEAD_SHA"
+          node scripts/check-documents-only-merge-authorization.mjs "$GITHUB_REPOSITORY" "$PR_NUMBER"
+          node scripts/write-documents-only-merge-status.mjs \
+            "$GITHUB_REPOSITORY" "$HEAD_SHA" success \
+            'Prose-only head verified under the merge/freeze lock' \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+          for attempt in 1 2 3 4 5; do
+            observed="$(node scripts/gh-read.mjs api "repos/$GITHUB_REPOSITORY/commits/$HEAD_SHA/status" --jq '[.statuses[] | select(.context == "Migration guarded merge authorization")] | first | .state')"
+            [ "$observed" = success ] && exit 0
+            echo "authorization not visible yet (attempt $attempt, observed='${observed:-none}'); waiting"
+            sleep 2
+          done
+          exit 1
+
+      - name: Revoke an incomplete authorization before releasing the lane
+        if: failure() && steps.merge_lock.outputs.owner_sha != '' && steps.authorization.outcome != 'success'
+        id: revoke_authorization
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node scripts/write-documents-only-merge-status.mjs
+          "$GITHUB_REPOSITORY" "$HEAD_SHA" failure
+          'Documents-only authorization failed; guarded merge required'
+          "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+      - name: Release the exclusive merge lane with ownership proof
+        if: always() && steps.merge_lock.outputs.owner_sha != '' && (steps.authorization.outcome == 'success' || steps.revoke_authorization.outcome == 'success')
+        id: release_merge_lock
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OWNER_SHA: ${{ steps.merge_lock.outputs.owner_sha }}
+        run: node scripts/manage-migration-author-lanes.mjs --release-merge --owner-sha "$OWNER_SHA"
+
+      - name: Revoke success if lock release failed
+        if: failure() && steps.authorization.outcome == 'success' && steps.release_merge_lock.outcome != 'success'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: >-
+          node scripts/write-documents-only-merge-status.mjs
+          "$GITHUB_REPOSITORY" "$HEAD_SHA" failure
+          'Documents-only merge lock release failed; authorization revoked'
+          "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
