@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911152203"
   ],
-  "contract_ref": "refs/db-contracts/2741/13",
-  "contract_sha256": "f97cbb4bbcefba480342bf938c01eed261294f1fa250cd52fbcb146a210838dc",
-  "head_sha": "75d9680d46ef7106340e19cbfa05a3ddb7c4dd39",
+  "contract_ref": "refs/db-contracts/2741/14",
+  "contract_sha256": "33aee64be50a1f193cb60d324111a0409929d43d437f63db11cb470779940879",
+  "head_sha": "c8755e1aa5a514b821fc0f8425db100443a67c38",
   "files_changed": [
     "supabase/migrations/20260911152203_character_alias_provenance_forward_repair.sql",
     "supabase/tests/character_alias_forward_repair_contracts.sql",
@@ -57,7 +57,7 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass on implementation 75d9680d (main 5761bc5e, re-reserved 20260911152203)."
+      "evidence": "Static SQL guards pass on implementation c8755e1a (main 11d0e2b4, re-reserved 20260911152203)."
     },
     {
       "command": "git diff --check",
@@ -94,7 +94,8 @@
     "Generation10 rebinds both evidence files after merging origin/main 9da98ede (implementation a663cf83); no SQL, policy, test or claim change.",
     "Generation11 follows governed claim-version supersession 20260911063554 -> 20260911152203 (implementation 97f9b20a); SQL body unchanged, file name, test and guard-message references renamed only.",
     "Generation12 rebinds both evidence files after merging origin/main 9b02ad48 (implementation b3593908); no SQL, policy, test or claim change.",
-    "Generation13 rebinds both evidence files after merging origin/main 5761bc5e (implementation 75d9680d); no SQL, policy, test or claim change."
+    "Generation13 rebinds both evidence files after merging origin/main 5761bc5e (implementation 75d9680d); no SQL, policy, test or claim change.",
+    "Generation14 rebinds both evidence files after merging origin/main 11d0e2b4 (implementation c8755e1a); no SQL, policy, test or claim change."
   ],
   "stop_conditions_hit": []
 }

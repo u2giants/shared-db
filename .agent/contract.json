@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 13,
+  "generation": 14,
   "work_issue": 2741,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -84,7 +84,8 @@
     "Generation10 rebinds evidence after merging origin/main 9da98ede (#2748) as implementation a663cf83; migration SQL, tests, guards and claims unchanged.",
     "Generation11 records the governed claim-version supersession 20260911063554 -> 20260911152203 (refs/db-claim-supersessions/2742-20260911063554) after #2748 landed newer 20260911081204; migration SQL body unchanged, file and test references renamed only.",
     "Generation12 rebinds evidence after merging origin/main 9b02ad48 (#2767) as implementation b3593908; migration SQL, tests, guards and claims unchanged.",
-    "Generation13 rebinds evidence after merging origin/main 5761bc5e (#2764, #2761) as implementation 75d9680d; migration SQL, tests, guards and claims unchanged."
+    "Generation13 rebinds evidence after merging origin/main 5761bc5e (#2764, #2761) as implementation 75d9680d; migration SQL, tests, guards and claims unchanged.",
+    "Generation14 rebinds evidence after merging origin/main 11d0e2b4 (#2790, #2786) as implementation c8755e1a; migration SQL, tests, guards and claims unchanged."
   ],
   "stop_conditions": [
     "Unexpected legacy column definition or dependent consumer.",
