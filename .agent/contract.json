@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 2,
+  "generation": 3,
   "work_issue": 2697,
   "work_type": "repo-maintenance",
   "route": "repo-session",
@@ -48,7 +48,8 @@
     "A ceiling derived for one operation may differ from another operation's ceiling. What issue #2075 forbids is raising a number to fit a failure, not an operation carrying its own written, measured budget.",
     "The reclaim legitimately costs more than an assignment because it re-proves the lease, the PR state, the activity fingerprint and the durable verdict a second time inside the mutex; that re-proof is the safety property and cannot be traded for budget.",
     "consumeReviewWireRequest holds back cleanupReserve while the mutex is held (2 with atomicReviewMutexRelease, 8 without), so the derivation must fit the locked non-cleanup section inside limit minus that reserve.",
-    "This pull request touches no database object, so db_reads and db_writes are empty and no migration version, claim or sidecar is involved."
+    "This pull request touches no database object, so db_reads and db_writes are empty and no migration version, claim or sidecar is involved.",
+    "Successor measurement includes current assignment-specific lease keys and legacy fallback under parallel mode; each resolution retains its own chosen-ref snapshot and re-proves it inside the mutex."
   ],
   "stop_conditions": [
     "The measurement shows the existing 25-request ceiling is genuinely right for this path, in which case the redundancy is fixed instead and no ceiling changes",
