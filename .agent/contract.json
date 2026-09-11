@@ -49,11 +49,11 @@
     "plm.dcp_asset, plm.lucasfilm_dcp_asset, plm.dcp_style_guide and plm.lucasfilm_dcp_style_guide keep primary key id, so the page style-guide set is identical (verified on production 2026-09-11).",
     "The production body equals migration 20260911061539 (prosrc md5 b63154a297ae649811cde7569657a146 verified 2026-09-11).",
     "Parent owns preview, merge, production and live acceptance.",
-    "Generation 3 changes no scope; it re-binds the evidence tail so both .agent files follow the implementation head db2b97e0."
+    "Generation 4 changes no scope; it re-binds the evidence tail so both .agent files follow the implementation head eabb784e (main 120fb612)."
   ],
   "stop_conditions": [
     "Stop if the result digest of the default page, Bambi or Cars 2 differs from the current body.",
     "Stop if the authenticated default listing does not finish under 8s on preview or production after apply."
   ],
-  "generation": 3
+  "generation": 4
 }
