@@ -1,70 +1,60 @@
 {
   "schema_version": 1,
-  "work_issue": 2506,
+  "work_issue": 2724,
   "outcome": "ready-for-merge",
-  "pr": 2726,
+  "pr": 2804,
   "migration_versions": [
-    "20260911213429"
+    "20260911214438"
   ],
-  "contract_ref": "refs/db-contracts/2506/37",
-  "contract_sha256": "beb5102231ceb894bcad2edb12da7c7670d92bc4abc8beb87623a852e98c8994",
-  "head_sha": "feb3a45710dd05b7e541797c6c93fc92abe5cc90",
+  "contract_ref": "refs/db-contracts/2724/5",
+  "contract_sha256": "31a3a3c38dc86816d7e95e46e305d19f16e374d8fd79d8686c0e76f21750d2aa",
+  "head_sha": "58b492ba0055b4df1162b4747b9f97758b522a73",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911213429.json",
-    "scripts/production_business_risk_gate.py",
-    "scripts/production_catalog_verification.py",
-    "scripts/test_production_catalog_verification.py",
-    "supabase/migrations/20260911213429_popsg_search_v2_production_performance.sql"
+    "config/db-data-admin-property-source-coverage.json",
+    "supabase/migrations/20260911214438_plm_factory_time_templates.sql",
+    "supabase/tests/plm_factory_time_template_contracts.sql"
   ],
-  "db_reads": [
-    "table public.style_guide_search_documents",
-    "table public.style_guide_render_queue"
-  ],
+  "db_reads": [],
   "db_writes": [
-    "function public.search_style_guide_library_v2",
-    "index public.idx_sgf_live_preview_ids",
-    "index public.idx_sgf_live_missing_clean_ids",
-    "index public.idx_sgf_live_missing_error_ids",
-    "table public.style_guide_files"
+    "table plm.\"FactoryTime\"",
+    "column plm.\"FactoryTime\".name",
+    "column plm.\"FactoryTime\".description",
+    "column plm.\"FactoryTime\".tags",
+    "column plm.\"FactoryTime\".updated_by",
+    "column plm.\"FactoryTime\".product_subtype",
+    "index plm.factory_time_name_ci_key",
+    "table plm.product_type_factory_time",
+    "column plm.product_type_factory_time.previous_factory_time_id",
+    "index plm.product_type_factory_time_factory_time_id_idx"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "SQL guards pass at aad19862 after supersession to 20260911170219 (backdated guard clear against main 5761bc5e)."
+      "evidence": "Static checks passed at implementation head 8db739a2; 1 added migration, no prohibited verification read."
     },
     {
-      "command": "python scripts/benchmark_popsg_search_v2_production.py --parity-only",
+      "command": "node scripts/check-db-data-admin-property-source-coverage.mjs",
       "exit_code": 0,
-      "evidence": "PASS: authorization boundary identical for baseline and forward (deny authenticated-without-access, deny anon, allow authorized). PASS: 160 exact full-JSON parity cases; 0 skipped. Fresh disposable loopback PostgreSQL at aad19862."
+      "evidence": "Passed at 8db739a2: 37 families, 15 exposed, 331 plm tables classified; the new family claims plm.product_type_factory_time by exact name."
     },
     {
-      "command": "python -m unittest scripts.test_production_catalog_verification",
+      "command": "python -m unittest scripts/test_migration_derivation.py",
       "exit_code": 0,
-      "evidence": "Ran 189 tests, OK, including the new binding of the production-performance catalog md5 to the 20260911170219 function body."
+      "evidence": "44 tests, OK at 8db739a2; the migration declares derived-from: none."
     }
   ],
   "assumptions_resolved": [
-    "Full production-width synthetic benchmark217193 docs and11660 queue rows: files6469→3315ms; guides4520→3292ms, identical complete-result hashes. Eight-second timeout unchanged.",
-    "No shared database writes performed.",
-    "Main39ee46b2 merged without SQL changes.188 verifier tests and complete sidecar inventory pass on this integration.",
-    "Existing160 exact JSON parity cases, production-width benchmark and dirty visibility-map proof retained; no unchanged benchmark rerun.",
-    "One governed external review, required CI, parent preview and actual production runtime acceptance remain separate delivery gates.",
-    "Exact-PR supported expansion added the CREATE INDEX parent table to claim2722; no structural SQL changed. Contract16 immutable ref readback confirmed after transient GitHub visibility delay.",
-    "Main8e81462f integration preserves SQL and benchmarks; 188 catalog tests and 275-site truth audit pass again. Contract17 published for refreshed exact-head review.",
-    "Main5af3fafa maintenance integration changes no migration or benchmark bytes. Prior GLM approval remains historical only; new exact-head review required.",
-    "Main208ba30d integration preserves SQL/benchmark bytes; contract19 replaces metadata authority, fresh exact-head CI and review pending.",
-    "Main5eaebe7c integrated; supersession re-reserved 20260911051552 as 20260911124016 (rename only, SQL bytes unchanged). Contract20 published; Grok assignment2323 stays bound to superseded head84e9bd0c, fresh exact-head review pending.",
-    "Contract21 binds both evidence files after implementation head967d6349.",
-    "Refreshed on main b68a1900 at implementation head 8bde76f5 (merge commit; only the two .agent evidence files conflicted). Contract generation 22 records the new base; both evidence files follow that head together.",
-    "Refreshed on main 9da98ede at implementation head f721c5d0 (merge commit; only the two .agent evidence files conflicted). Contract generation 23 records the new base; both evidence files follow that head together.",
-    "Refreshed on main 9b02ad48 at implementation head a2b58746 (merge commit; only the two .agent evidence files conflicted). Contract generation 24 records the new base; both evidence files follow that head together.",
-    "Grok REVISE 6a1d4ad7 findings 1-4 addressed at aad19862 (contract 25): migration lock/statement bounds, asserted full-width hash equality, authorization boundary in the parity run, catalog md5 unit binding; version superseded to 20260911170219 by the lane tool."
+    "The migration itself refuses at apply time if plm.\"FactoryTime\" holds rows, so the zero-row assumption is enforced rather than trusted.",
+    "Version 20260911214438 is the version reserved by author claim #2803.",
+    "No object was renamed; previous_factory_time_id and every other name match the WIP head the consuming app was built against.",
+    "The ephemeral-database contract test failure was reproduced on a disposable local PostgreSQL cluster: the row state was correct and the only defect was the test accepting a single SQLSTATE for an ON DELETE RESTRICT refusal. The handler now accepts restrict_violation or foreign_key_violation; the test was not quarantined and the schema was not changed. That fix passed the CI ephemeral-database job at the earlier head 4aab3768.",
+    "Generation 2 at head 4aab3768 earned a governed APPROVE (refs/db-review-verdicts/2724-2804-4aab37683541138f598cd6ba707919a0731374d8). Main then advanced to 5ec8aef0 and the branch was REBASED, which rewrites history, so that verdict was voided and not carried. The carry-forward checker added by PR #2780 was run against it and refused for exactly that reason: 4aab3768 is not an ancestor of b5a98122.",
+    "A second full governed review was therefore run at head b5a98122 and returned APPROVE from muse-spark-1.3-contributor, durable verdict ref refs/db-review-verdicts/2724-2804-b5a981222a2b73b195e357b7f9b54336f405e84a.",
+    "Main then advanced again to 26d9345b. This time the branch was refreshed by MERGING main rather than rebasing, so the approved head b5a98122 remains an ancestor of the merge head 35aa1d34 and the pull request's own diff is byte-identical at both (.agent evidence aside). The b5a98122 APPROVE therefore carries forward under the PR #2780 rule and no third review was run. No reviewer was drawn at the merge head, because a head carrying reviewer records of its own is judged on those alone and that would have forfeited the carry."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Structural change refreshed onto main e420cd86 by merging main, not rebasing, so the governed APPROVE at b5a98122 survives. The three implementation files are unchanged in content across every refresh. Head 58b492ba; only the two .agent evidence files follow it. Ready for guarded merge on the carried approval, with the preview rehearsal after merge and production after that."
 }
