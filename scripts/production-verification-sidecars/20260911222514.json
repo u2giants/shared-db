@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "migration_version": "20260911222514",
+  "migration_sha256": "33d55ffa432b09f476e6121fb380e3d676dc287c576a2aefdc03b813744fbaff",
+  "marker_schema_version": 1,
+  "marker_reviews": [
+    {
+      "line_start": 89,
+      "line_end": 89,
+      "reason": "The EXECUTE replays a CREATE OR REPLACE FUNCTION text that this migration derives from pg_get_functiondef of the already-applied api.db_data_admin_scraped_properties(text,text,integer), with five literal replace() edits to its query body: two CTEs change from 'not materialized' to 'materialized', two joins retarget from plm.dcp_asset / plm.lucasfilm_dcp_asset to narrow in-query CTEs, and one narrow (id, style_guide_id) asset-map CTE pair is inserted. The durable target is therefore exactly one pre-existing function, named statically in the migration text and unchanged in name, schema, argument types, return type, volatility, security attributes and search_path -- the function identity comes from pg_get_functiondef itself, not from any runtime-computed identifier. Preconditions refuse with SQLSTATE 55000 unless the applied predecessor contains the exact strings being replaced, and postconditions refuse unless every replacement is present and the licensing-manager gate and keyset-pagination predicate survive, so the EXECUTE cannot run against an unexpected predecessor or emit a definition missing its authorization gate. No catalog object is created, dropped, renamed or re-permissioned, no grant or RLS policy is touched, and no application data is read or written. The function's existence, signature, security attributes, privileges and CTE shape are asserted by supabase/tests/scraped_properties_page_asset_context_contracts.sql, which this pull request updates in the same change; that contract test is the durable verification of the resulting definition.",
+      "disposition": "no_durable_target"
+    }
+  ],
+  "checks": []
+}

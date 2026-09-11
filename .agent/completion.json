@@ -1,35 +1,35 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
-  "outcome": "ready-for-merge",
-  "pr": 2746,
+  "work_issue": 2744,
+  "outcome": "ready-for-review",
+  "pr": 2813,
   "migration_versions": [
-    "20260911212849"
+    "20260911222514"
   ],
-  "contract_ref": "refs/db-contracts/2478/4",
-  "contract_sha256": "433e32594d69874c2cae511acec319c749d96af1334a8fbae6581a8f792f7d84",
-  "head_sha": "462d5ee4765c575c043d9708a30bf6b626c09df5",
+  "contract_ref": "refs/db-contracts/2744/7",
   "files_changed": [
-    "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
+    "scripts/production-verification-sidecars/20260911222514.json"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "table plm.dcp_asset",
+    "table plm.lucasfilm_dcp_asset",
+    "table plm.dcp_asset_property_observation",
+    "table plm.lucasfilm_dcp_asset_property_observation",
+    "table plm.dcp_style_guide",
+    "table plm.lucasfilm_dcp_style_guide"
+  ],
   "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
+    "function api.db_data_admin_scraped_properties"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
-    },
-    {
-      "command": "local PostgreSQL helper parity contracts",
-      "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
+      "evidence": "Static SQL guards pass. Guard B confirms 20260911222514 sorts after the base branch's newest version 20260911212849. Guard B2 did not run: no live ledger source configured in this worktree, so full PR database CI remains required."
     },
     {
       "command": "git diff --check",
@@ -37,16 +37,29 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "python -m unittest scripts.test_migration_derivation",
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
+      "evidence": "status OK across 50 sidecars. Version 20260911222514 reports markers [89] with sidecar true; the single dynamic-execution marker is the EXECUTE that replays the derived CREATE OR REPLACE FUNCTION text, reviewed as no_durable_target and hash-bound to migration_sha256 33d55ffa432b09f476e6121fb380e3d676dc287c576a2aefdc03b813744fbaff."
+    },
+    {
+      "command": "read-only production latency probe, role authenticated, statement_timeout 8s, inside begin; ... rollback;",
+      "exit_code": 0,
+      "evidence": "Interleaved on one session under identical live load at page size 500: before 9991/4867/4466 ms, after 2671/2525/3273 ms. The baseline's 9991 ms tail is the source of the 8400 ms acceptance cancellation; the fixed statement's worst run was 3273 ms. Nothing was committed to any database."
+    },
+    {
+      "command": "read-only production result-parity probe",
+      "exit_code": 0,
+      "evidence": "Unfiltered default page is 1,311,298 bytes byte-identical before and after. Cinderella, Bambi, Cars 2 and Georgia Green Glass are byte-identical at page size 100."
+    },
+    {
+      "command": "read-only refutation probes (recorded so they are not retried)",
+      "exit_code": 0,
+      "evidence": "Materializing the retained-asset CTEs alone measured 4285/4226/4656 ms, no gain over baseline. Raising work_mem 12x measured no gain, refuting the theory named in claim #2791's title. The narrow (id, style_guide_id) projection is the load-bearing change."
     }
   ],
-  "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
-  ],
-  "stop_conditions_hit": []
+  "notes": [
+    "Issue #2744 remains open and claim #2791 remains held; acceptance has not yet been re-run against production after this change.",
+    "The reported 'Product pipeline could not load' outage is a different function: api.pm_pipeline_page('licensed', limit 100) measured 8235 ms cold as role authenticated and shares no objects with this migration. It needs its own issue and is reported on #2744 and #2758.",
+    "Per AGENTS.md this migration requires two independent governed reviewers, not one."
+  ]
 }

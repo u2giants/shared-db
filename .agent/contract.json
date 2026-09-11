@@ -1,54 +1,53 @@
 {
-    "schema_version": 1,
-    "generation": 4,
-    "work_issue": 2478,
-    "work_type": "structural",
-    "route": "shared-db-orchestrator",
-    "goal": "Extract one SKU derivation shared by rebuild and read-only drift detector without changing grouping, correction, or drift behavior.",
-    "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
-    "dispatcher": "Codex orchestrator #2714",
-    "worker": "codex-2714-2478",
-    "branch": "codex/issue-2478-shared-sku-key",
-    "worktree": "C:/repos/shared-db-worktrees/issue-2478-shared-sku-key",
-    "allowed_paths": [
-        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "file_writes": [
-        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "db_reads": [],
-    "db_writes": [
-        "function public.style_group_key_for_sku",
-        "function public.rebuild_style_groups_batch",
-        "function public.reconcile_style_group_drift"
-    ],
-    "prohibited_actions": [
-        "No shared database writes by worker.",
-        "No correction of application row drift or change to nightly correction path.",
-        "No paid review, merge or main movement before parent priority window clears.",
-        "No changes to issues2705 or2709."
-    ],
-    "required_checks": [
-        "bash scripts/check-sql.sh",
-        "local PostgreSQL helper parity contracts",
-        "git diff --check"
-    ],
-    "assumptions": [
-        "Parent authorized adapting obsolete inline-token assertion to shared-helper wiring while preserving all existing behavior/security tests.",
-        "Latest consumer definitions derive from migrations20260906035323 and20260907031246.",
-        "Generation 4: claim #2745 version 20260911204023 was superseded to 20260911212849 by the governed --supersede-active-claim-version (supersession 861a3f5cb2c7ce8720c61da0f69ac53c32e0e27b) because main added later version 20260911210709."
-    ],
-    "stop_conditions": [
-        "Object overlap or changed source definitions.",
-        "Old/new grouping parity mismatch.",
-        "Consumer behavior or security changes beyond helper delegation."
-    ]
+  "schema_version": 1,
+  "work_issue": 2744,
+  "generation": 7,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Return the unfiltered Scraped Properties / DCP identity listing to comfortably under eight seconds for role authenticated, without changing its output, its authorization gate, or any timeout, role or memory setting.",
+  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
+  "dispatcher": "Claude orchestrator marker 2758",
+  "worker": "Claude issue 2744 migration-author lane",
+  "branch": "claude/issue-2744-narrow-asset-style",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
+  "allowed_paths": [
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
+    "scripts/production-verification-sidecars/20260911222514.json"
+  ],
+  "file_writes": [
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
+    "scripts/production-verification-sidecars/20260911222514.json"
+  ],
+  "db_reads": [
+    "table plm.dcp_asset",
+    "table plm.lucasfilm_dcp_asset",
+    "table plm.dcp_asset_property_observation",
+    "table plm.lucasfilm_dcp_asset_property_observation",
+    "table plm.dcp_style_guide",
+    "table plm.lucasfilm_dcp_style_guide"
+  ],
+  "db_writes": [
+    "function api.db_data_admin_scraped_properties"
+  ],
+  "prohibited_actions": [
+    "Do not change statement_timeout, work_mem, hash_mem_multiplier, any role, or any global setting.",
+    "Do not weaken or remove the licensing-manager authorization gate, the SECURITY DEFINER / STABLE attributes, the search_path setting, or the execute privileges.",
+    "Do not change the listing's output: paging, asset_count, style_guide_count and style_guide_names must stay byte-identical.",
+    "Do not re-introduce the whole-catalog asset context joined to style-guide folder names that issue 2744 retired.",
+    "Do not run direct DDL on any database or write to production outside the governed workflow.",
+    "Do not touch issues 2705, 2709, 2290, the 2543 residual, or 2678."
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "git diff --check",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "supabase/tests against an ephemeral database",
+    "two independent governed reviewers at the exact head"
+  ]
 }
