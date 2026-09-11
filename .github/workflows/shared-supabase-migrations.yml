@@ -1264,6 +1264,8 @@ jobs:
             echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
             exit 1
           fi
+          # Pre-lane only: nothing is held yet, so a GitHub quota exhaustion may
+          # wait up to 15 minutes for its reset. The lane-held run fails fast.
           python scripts/production_business_risk_gate.py \
             --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
             --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
@@ -1272,6 +1274,7 @@ jobs:
             --preview-project-ref "$PREVIEW_PROJECT_REF" \
             --owner-decision-run-id "$OWNER_DECISION_RUN_ID" \
             --owner-decision-digest "$OWNER_DECISION_ARTIFACT_DIGEST" \
+            --rate-limit-wait-seconds 900 \
             | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
       - name: Upload pre-approval evidence
         if: always()

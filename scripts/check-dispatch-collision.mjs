@@ -558,10 +558,19 @@ export function gatherOpenPrObjects(repo, io = defaultIo) {
   const open = io.listPulls(repo)
   const sources = []
   for (const listed of open) {
+    const files = io.listPullFiles(repo, listed.number)
+    if (!Array.isArray(files)) throw new Unknown(`PR #${listed.number} returned an unreadable file list`)
+    // The detail read exists only to prove the file list complete (the list
+    // endpoint omits changed_files). It is skipped ONLY when that proof cannot
+    // change the answer: no migration file in the list, AND fewer than 100
+    // files. A list under one full page has no pagination seam, so no page can
+    // have been lost; a list of 100 or more is always proved, because a missing
+    // later page could hide a migration. Every migration pull request is still
+    // proved exactly as before. This saves one call per unrelated open PR.
+    const touchesMigrations = files.some((file) => String(file?.filename ?? '').startsWith(`${MIGRATIONS_DIR}/`))
+    if (!touchesMigrations && files.length < 100) continue
     const pr = io.getPull(repo, listed.number)
     if (!pr || pr.number !== listed.number) throw new Unknown(`PR #${listed.number} returned unreadable detail metadata`)
-    const files = io.listPullFiles(repo, pr.number)
-    if (!Array.isArray(files)) throw new Unknown(`PR #${pr.number} returned an unreadable file list`)
     if (!Number.isInteger(pr.changed_files) || pr.changed_files < 0) throw new Unknown(`PR #${pr.number} has no trustworthy changed_files count`)
     if (pr.changed_files >= 3000) throw new Unknown(`PR #${pr.number} reaches GitHub's 3000-file limit; refusing incomplete coverage`)
     if (files.length !== pr.changed_files) throw new Unknown(`PR #${pr.number} returned ${files.length} of ${pr.changed_files} changed files`)

@@ -15,6 +15,9 @@ import {
   isMutatingCall,
   GitHubTransportError,
   spawnGitHub,
+  isRateLimitExhausted,
+  rateLimitMaxWaitMs,
+  rateLimitResetDelayMs,
 } from './github-transport.mjs'
 
 const noWait = () => {}
@@ -99,6 +102,110 @@ test('a SEMANTIC read failure is never retried', () => {
     executor, wait: noWait, attempts: 4, reportStderr() {},
   }))
   assert.equal(calls.length, 1, 'a 404 answer must cost exactly one call')
+})
+
+// ---------------------------------------------------------------------------
+// Primary rate-limit exhaustion — one bounded wait for the stated reset
+// ---------------------------------------------------------------------------
+
+const RATE_LIMITED = 'gh: API rate limit exceeded for installation ID 1234. (HTTP 403)'
+const NOW_MS = Date.UTC(2026, 8, 11, 12, 0, 0)
+const rateLimitResponse = (resetSeconds, remaining = 0, extraHeaders = '') =>
+  `HTTP/2.0 200 OK\nContent-Type: application/json\nX-Ratelimit-Reset: ${resetSeconds}\n${extraHeaders}\n` +
+  JSON.stringify({ resources: { core: { limit: 5000, remaining, reset: resetSeconds }, graphql: { limit: 5000, remaining: 4000, reset: resetSeconds } } })
+
+function rateLimitedExecutor({ failures = 1, probe, stdout = '{"ok":true}', stderr = RATE_LIMITED }) {
+  const calls = []
+  let failed = 0
+  return {
+    calls,
+    executor(_bin, args) {
+      calls.push(args)
+      if (args.join(' ') === 'api -i rate_limit') {
+        if (probe instanceof Error) throw probe
+        return probe
+      }
+      if (failed < failures) {
+        failed += 1
+        const error = new Error('Command failed')
+        error.stderr = stderr
+        throw error
+      }
+      return stdout
+    },
+  }
+}
+
+test('a rate-limit 403 waits for the stated reset, then succeeds', () => {
+  const resetSeconds = Math.floor(NOW_MS / 1000) + 300
+  const waits = []
+  const { calls, executor } = rateLimitedExecutor({ probe: rateLimitResponse(resetSeconds) })
+  const out = ghJson(['api', 'repos/o/r/pulls?state=open&per_page=100'], {
+    executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, reportStderr() {},
+  })
+  assert.deepEqual(out, { ok: true })
+  assert.deepEqual(calls.map((args) => args.join(' ')), [
+    'api repos/o/r/pulls?state=open&per_page=100',
+    'api -i rate_limit',
+    'api repos/o/r/pulls?state=open&per_page=100',
+  ])
+  assert.deepEqual(waits, [301000], 'waits until the reset plus one second, exactly once')
+})
+
+test('retry-after is honoured when GitHub states one', () => {
+  const waits = []
+  const { executor } = rateLimitedExecutor({
+    probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 3000, 0, 'Retry-After: 60\n'),
+    stderr: 'HTTP 429: API rate limit exceeded',
+  })
+  runGitHubCommand(['api', 'repos/o/r/issues'], { executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, reportStderr() {} })
+  assert.deepEqual(waits, [61000])
+})
+
+test('a different 403 still fails immediately with no wait and no probe', () => {
+  for (const stderr of ['HTTP 403: Resource not accessible by integration', 'HTTP 403: Forbidden', 'You have exceeded a secondary rate limit (HTTP 403)']) {
+    const { calls, executor } = rateLimitedExecutor({ failures: 5, stderr, probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 10) })
+    assert.throws(
+      () => runGitHubCommand(['api', 'repos/o/r/pulls/1'], { executor, wait: () => assert.fail(`${stderr} waited`), now: () => NOW_MS, reportStderr() {} }),
+      (error) => error instanceof GitHubTransportError && error.rateLimitExhausted === false,
+    )
+    assert.equal(calls.length, 1, `${stderr} must cost exactly one call`)
+  }
+})
+
+test('a reset further away than fifteen minutes fails CLOSED without waiting', () => {
+  const { calls, executor } = rateLimitedExecutor({ probe: rateLimitResponse(Math.floor(NOW_MS / 1000) + 16 * 60) })
+  assert.throws(
+    () => runGitHubCommand(['api', 'repos/o/r/pulls'], { executor, wait: () => assert.fail('waited past the cap'), now: () => NOW_MS, reportStderr() {} }),
+    (error) => error.rateLimitExhausted === true && /rate limit exceeded/.test(error.message),
+  )
+  assert.equal(calls.length, 2, 'the original call and the free rate_limit probe, nothing more')
+})
+
+test('an unreadable reset, a second exhaustion, a write, or a zero cap all fail closed', () => {
+  const inWindow = rateLimitResponse(Math.floor(NOW_MS / 1000) + 60)
+  const unreadable = rateLimitedExecutor({ probe: new Error('probe failed') })
+  assert.throws(() => runGitHubCommand(['api', 'x'], { executor: unreadable.executor, wait: () => assert.fail('guessed a reset'), now: () => NOW_MS, reportStderr() {} }))
+  const twice = rateLimitedExecutor({ failures: 2, probe: inWindow })
+  const waits = []
+  assert.throws(() => runGitHubCommand(['api', 'x'], { executor: twice.executor, wait: (ms) => waits.push(ms), now: () => NOW_MS, reportStderr() {} }))
+  assert.equal(waits.length, 1, 'waits at most once per call')
+  const write = rateLimitedExecutor({ probe: inWindow })
+  assert.throws(() => runGitHubCommand(['api', '-X', 'POST', 'repos/o/r/git/refs'], { executor: write.executor, wait: () => assert.fail('a write waited'), now: () => NOW_MS, reportStderr() {} }))
+  assert.equal(write.calls.length, 1)
+  const capped = rateLimitedExecutor({ probe: inWindow })
+  assert.throws(() => runGitHubCommand(['api', 'x'], { executor: capped.executor, maxRateLimitWaitMs: 0, wait: () => assert.fail('a lock holder waited'), now: () => NOW_MS, reportStderr() {} }))
+  assert.equal(capped.calls.length, 1)
+})
+
+test('the wait cap is configurable down, never up, and malformed values fail fast', () => {
+  assert.equal(rateLimitMaxWaitMs({}), 15 * 60 * 1000)
+  assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '0' }), 0)
+  assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '120' }), 120000)
+  assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '99999' }), 15 * 60 * 1000)
+  assert.equal(rateLimitMaxWaitMs({ GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: 'soon' }), 0)
+  assert.equal(isRateLimitExhausted({ stderr: 'API rate limit exceeded' }), false, 'no status code, no wait')
+  assert.equal(rateLimitResetDelayMs('garbage', ['api', 'x'], NOW_MS), null)
 })
 
 // ---------------------------------------------------------------------------

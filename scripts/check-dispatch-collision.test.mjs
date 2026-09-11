@@ -579,8 +579,21 @@ test('open PRs hydrate detail metadata because the list endpoint omits changed_f
 })
 
 test('open PR gathering fails closed when detail hydration is unreadable', () => {
-  const io=fakeIo([PR(984)],{984:[]});io.getPull=()=>null
+  const io=fakeIo([PR(984)],{984:[FILE('supabase/migrations/20260806120000_x.sql')]});io.getPull=()=>null
   assert.throws(()=>gatherOpenPrObjects('o/r',io),/unreadable detail metadata/)
+})
+
+test('a short non-migration file list skips only the detail read; a full page is still proved', () => {
+  let hydrated = 0
+  const docs = Array.from({ length: 99 }, (_, i) => FILE(`docs/${i}.md`))
+  const io = fakeIo([PR(10), PR(11)], { 10: docs, 11: [...docs, FILE('docs/99.md')] })
+  const counting = { ...io, getPull: (...args) => (hydrated += 1, io.getPull(...args)) }
+  assert.deepEqual(gatherOpenPrObjects('o/r', counting), [])
+  assert.equal(hydrated, 1, 'the 99-file PR has no pagination seam; the 100-file PR is still proved')
+  // A 100-file page whose detail says more exist is refused exactly as before:
+  // the missing page could hold a migration.
+  const truncated = fakeIo([PR(12, { changed_files: 150 })], { 12: [...docs, FILE('docs/99.md')] })
+  assert.throws(() => gatherOpenPrObjects('o/r', truncated), /returned 100 of 150/)
 })
 
 test('a DRAFT pull request counts as in flight at dispatch time', () => {
