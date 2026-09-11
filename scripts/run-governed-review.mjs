@@ -264,7 +264,7 @@ export function codexGovernedBody(report,headSha,reportName='the codex report'){
 
 export function wrapperVerdictContractArgs(wrapper,args,headSha){
   const name=wrapperBaseName(wrapper)
-  if(!['ai-gemini','ai-qwen'].includes(name))return args
+  if(!['ai-gemini','ai-qwen','ai-deepseek-agent'].includes(name))return args
   const list=[...args],head=String(headSha??'').toLowerCase()
   // EVERY spelling of the flag is checked, not the first one found: `--x value`,
   // `--x=value`, and a repeat later in the argument list. A single unchecked
@@ -281,8 +281,9 @@ export function wrapperVerdictContractArgs(wrapper,args,headSha){
     supplied=true
   }
   if(supplied)return list
-  if(!['new','ask'].includes(String(list[0]??'')))throw new Error(`${name} governed reviews must start with the new or ask subcommand`)
-  list.splice(1,0,'--governed-verdict',String(headSha))
+  const commands=name==='ai-deepseek-agent'?['send','reply']:['new','ask']
+  if(!commands.includes(String(list[0]??'')))throw new Error(`${name} governed reviews must start with the ${commands.join(' or ')} subcommand`)
+  list.splice(name==='ai-deepseek-agent'&&list[0]==='reply'?2:1,0,'--governed-verdict',String(headSha))
   return list
 }
 export function wrapperSpawnPlan(resolved,args,platform=process.platform){

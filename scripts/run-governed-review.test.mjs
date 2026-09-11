@@ -41,6 +41,12 @@ function sourceIo(overrides={}){
 test('source resolver binds live non-main PR target to local merge-base',()=>{
   assert.deepEqual(resolveReviewSource(options,sourceIo()),fixtureSource(options))
 })
+test('DeepSeek receives the exact governed terminal head without changing advisory mode',()=>{
+  const head=options.headSha
+  assert.deepEqual(wrapperVerdictContractArgs('ai-deepseek-agent',['send','review this','--review'],head),['send','--governed-verdict',head,'review this','--review'])
+  assert.deepEqual(wrapperVerdictContractArgs('C:\\tools\\ai-deepseek-agent.cmd',['reply','session','followup','--review'],head),['reply','session','--governed-verdict',head,'followup','--review'])
+  assert.throws(()=>wrapperVerdictContractArgs('ai-deepseek-agent',['send','--governed-verdict','f'.repeat(40),'review this','--review'],head),/does not match/)
+})
 test('source resolver refuses stale or wrong repository evidence before provider work',()=>{
   for(const overrides of [
     {pr:{state:'closed'}},{pr:{head:{sha:'f'.repeat(40)}}},
