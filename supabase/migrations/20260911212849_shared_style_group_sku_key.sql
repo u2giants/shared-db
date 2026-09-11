@@ -26,18 +26,10 @@ AS $$
 $$;
 
 REVOKE ALL ON FUNCTION public.style_group_key_for_sku(text) FROM PUBLIC;
-DO $revoke_api_roles$
-DECLARE v_role text;
-BEGIN
-  -- Hosted Supabase grants anon and authenticated EXECUTE at CREATE FUNCTION time;
-  -- revoking PUBLIC alone leaves those named grants behind.
-  FOREACH v_role IN ARRAY ARRAY['anon', 'authenticated'] LOOP
-    IF EXISTS (SELECT 1 FROM pg_catalog.pg_roles WHERE rolname = v_role) THEN
-      EXECUTE pg_catalog.format('REVOKE ALL ON FUNCTION public.style_group_key_for_sku(text) FROM %I', v_role);
-    END IF;
-  END LOOP;
-END
-$revoke_api_roles$;
+-- Hosted Supabase grants anon and authenticated EXECUTE at CREATE FUNCTION time;
+-- revoking PUBLIC alone leaves those named grants behind.
+REVOKE ALL ON FUNCTION public.style_group_key_for_sku(text) FROM anon;
+REVOKE ALL ON FUNCTION public.style_group_key_for_sku(text) FROM authenticated;
 GRANT EXECUTE ON FUNCTION public.style_group_key_for_sku(text) TO postgres, service_role;
 
 CREATE OR REPLACE FUNCTION public.rebuild_style_groups_batch(
