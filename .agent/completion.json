@@ -1,41 +1,52 @@
 {
   "schema_version": 1,
-  "work_issue": 2753,
+  "work_issue": 2768,
   "outcome": "ready-for-merge",
-  "pr": 2755,
-  "migration_versions": [
-    "20260911170650"
-  ],
-  "contract_ref": "refs/db-contracts/2753/3",
-  "contract_sha256": "cbb90064dd60968824c5277b6597a50f2ad8fa9555193c5e88cda2af101bd943",
-  "head_sha": "aea34c557016d281a762be94006367b4be7dfe53",
+  "pr": 2770,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2768/8",
+  "contract_sha256": "ee6dce1765e1fce2e1e8d094e224674bfbdc48ab24ba0e8cc639b62ae5dc00b3",
+  "head_sha": "b98d25e2e37da7c474aae0c49f1e0fd586f4f1cd",
   "files_changed": [
-    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
-    "supabase/tests/pim_item_picker_contract.sql",
-    "scripts/test_pim_item_picker.py"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "scripts/historical-migration-restorations.mjs",
+    "scripts/historical-migration-restorations.test.mjs",
+    "scripts/test_production_migration_guard.py"
   ],
-  "db_reads": [
-    "table plm.item"
-  ],
-  "db_writes": [
-    "view api.pim_item_picker"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
+      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
       "exit_code": 0,
-      "evidence": "Static SQL guards passed; live-ledger check not configured, parent owns fresh ledger.",
-      "command": "bash scripts/check-sql.sh"
+      "evidence": "40 tests, 40 pass, 0 fail, 0 skipped."
     },
     {
+      "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "Loopback disposable database: canonical identity, duplicate-number distinction, null preservation, authenticated read, inherited RLS, anonymous denial and write denial passed;0 skipped.",
-      "command": "python scripts/test_pim_item_picker.py"
+      "evidence": "OK."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static checks passed."
+    },
+    {
+      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "exit_code": 0,
+      "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors."
     }
   ],
   "assumptions_resolved": [
-    "Claim2754 reserves20260911170650; no overlap.",
-    "Rebound to base f15f0f0ef39a1f433c16c40ead9a3bead2418772 and implementation head aea34c557016d281a762be94006367b4be7dfe53 (version re-reserved from 20260911093445 after main advanced). Ready for exact-head review, required CI, and guarded merge.",
-    "Preserves legacy21columnview and all existing policies."
+    "Run 34281856111 log binding confirmed: rehearsalMode claim, appliedCommit 69226335c20fef57f8a7c15cd7b014a157b61484, previewProjectRef mvpkijzfmfcxhnzqogzs, allowlist [20260908202651].",
+    "git rev-parse shows blob 578c06da0161d7d19d7a254d03f6f4404d4c35b0 at 69226335, d669c43e, and main."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Registry-only change; ready for exact-head governed review, CI, and guarded merge."
 }
