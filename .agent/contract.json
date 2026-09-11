@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 1,
+  "generation": 2,
   "work_issue": 2694,
   "work_type": "repo-maintenance",
   "route": "repository-maintenance",
@@ -11,9 +11,9 @@
   "branch": "codex/reviewer-concurrency-policy",
   "worktree": "C:/repos/shared-db-worktrees/reviewer-concurrency-policy",
   "allowed_paths": [
-    "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "plan_reviewer_lease_capacity_truth.md", ".agent/contract.json", ".agent/completion.json"
+    "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "plan_reviewer_lease_capacity_truth.md", "docs/agents/section-4-anti-collision-rules.md", ".agent/contract.json", ".agent/completion.json"
   ],
-  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "plan_reviewer_lease_capacity_truth.md", ".agent/contract.json", ".agent/completion.json"],
+  "file_writes": ["scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs", "plan_reviewer_lease_capacity_truth.md", "docs/agents/section-4-anti-collision-rules.md", ".agent/contract.json", ".agent/completion.json"],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": ["No database access or mutation", "Do not weaken exact-head, independence, durable-verdict, atomic-transition, or legacy-lease safeguards", "Do not alter reviewer eligibility, roster, or provider wrappers", "Do not merge until the governed pull-request route has two durable exact-head approvals"],
