@@ -1344,6 +1344,12 @@ export const githubIo = {
   enableReviewerQueue:false,
   enableReviewerSilence:true,
   requiresExactReviewHeadSha: true,
+  databasePreviewClassification(issue){
+    const evidence=this.databasePreviewClassificationEvidence
+    if(evidence===undefined||evidence===null)return null
+    if(Number(evidence.issue)!==Number(issue))throw new LaneError(`database preview evidence is for issue #${evidence.issue}, not #${issue}`)
+    return evidence
+  },
   // The changed-file list a documents-only classification is made from (#2102).
   // Fetched through `ghPaginated` so this side and the merge gate
   // (`check-exact-head-approval.mjs`) build the list the SAME way: paginate,
@@ -1893,6 +1899,18 @@ export function deriveLiveNoDatabasePreview(issue,io){
   if(route.status==='UNVERIFIABLE')throw new LaneError(`database preview classification is unverifiable: ${route.reason}`)
   if(route.route!== 'NO_DATABASE_PREVIEW')return null
   return {issue:Number(issue),pr:evidence.pr,base_sha:evidence.base_sha,head_sha:evidence.head_sha,bundle_id:evidence.bundle_id,route:'no_database_preview',route_context:'',decision_id:route.decision_id,reason:route.reason,next_action:'return-to-natural-owner',applicable_checks:route.classification.applicable_checks}
+}
+
+export function readDatabasePreviewClassificationFile(file,{reader=readFileSync}={}){
+  if(typeof file!=='string'||!file.trim())throw new LaneError('database preview classification file path is required')
+  let parsed
+  try{parsed=JSON.parse(reader(file,'utf8'))}catch(error){throw new LaneError(`database preview classification file is unreadable: ${error.message}`)}
+  if(!parsed||typeof parsed!=='object'||Array.isArray(parsed))throw new LaneError('database preview classification file must contain exactly one evidence object')
+  return parsed
+}
+
+export function withDatabasePreviewClassificationFile(io,file,options={}){
+  return {...io,databasePreviewClassificationEvidence:readDatabasePreviewClassificationFile(file,options)}
 }
 export function deriveLivePreviewCandidate(issue,io,{claimNumber=null}={}){
   const noDatabasePreview=deriveLiveNoDatabasePreview(issue,io)
@@ -6247,7 +6265,7 @@ function parseArgs(argv) {
     else if (a === '--confirm-stale') out.confirmStale = true
     else if (/^--acquire-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.acquireExclusive = a.slice(10)
     else if (/^--release-(preview|preview-recovery|preview-rehearsal|merge|production)$/.test(a)) out.releaseExclusive = a.slice(10)
-    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--target-url','--description','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha','--verdict','--findings-ref','--replacement-sequence','--run-id','--artifact-id','--artifact-digest','--manifest-digest'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
+    else if (['--task','--owner','--branch','--worktree','--issue','--pr','--head-sha','--owner-sha','--expected-sha','--released-claim','--active-claim','--source-pr','--target-pr','--target-branch','--target-worktree','--target-url','--description','--claim-number','--failed-sequence','--failure-code','--failing-check','--old-version','--reviewer','--wrapper','--version-pr-map','--blocked-on','--review-slot','--reason','--evidence-sha','--verdict','--findings-ref','--replacement-sequence','--run-id','--artifact-id','--artifact-digest','--manifest-digest','--database-preview-classification-file'].includes(a)) { out[a.slice(2).replace(/-([a-z])/g, (_,c)=>c.toUpperCase())] = next(i); i++ }
     else if(a==='--confirm-local-dependency-unfixable')out.confirmLocalDependencyUnfixable=true
     else if(a==='--skip-doctor')out.skipDoctor=true
     else if(a==='--confirm-no-verdict')out.confirmNoVerdict=true
@@ -6263,6 +6281,7 @@ function parseArgs(argv) {
 export function main(argv, now = new Date(), io = githubIo) {
   try {
     const o = parseArgs(argv)
+    if(o.databasePreviewClassificationFile)io=withDatabasePreviewClassificationFile(io,o.databasePreviewClassificationFile)
     if(o.authorizeRepositoryMaintenanceStatus){console.log(JSON.stringify(authorizeRepositoryMaintenanceStatus(o,io),null,2));return 0}
     if(o.recoverMutex){console.log(JSON.stringify(recoverStaleAuthorMutex({expectedSha:o.expectedSha,confirmStale:o.confirmStale,serializedRecovery:process.env.GITHUB_ACTIONS==='true'&&process.env.AUTHOR_MUTEX_RECOVERY_SERIALIZED==='true',now},io),null,2));return 0}
     if(o.reconcileFlow){
