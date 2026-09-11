@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 3,
+  "generation": 4,
   "work_issue": 2507,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -13,13 +13,13 @@
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
+    "supabase/migrations/20260911042655_popsg_pdf_terminal_outcomes.sql",
     "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
+    "supabase/migrations/20260911042655_popsg_pdf_terminal_outcomes.sql",
     "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
   ],
   "db_reads": [
@@ -47,7 +47,8 @@
     "Migration 20260905104802 remains the base PDF contract and its existing completion RPC remains callable for staggered clients.",
     "The sanctioned claim supersession from 20260908134917 to 20260909162929 changes only the reserved migration identity, not the SQL behavior.",
     "A failed result remains transiently reclaimable under the existing maximum-attempt policy, while skipped and extracted results remain terminal until content identity changes.",
-    "Generation 3 refresh preserves existing implementation ancestry and byte-identical SQL/tests while reconciling only shared evidence files against current main. Claim 2578 renewed by sanctioned manager."
+    "Generation 3 refresh preserves existing implementation ancestry and byte-identical SQL/tests while reconciling only shared evidence files against current main. Claim 2578 renewed by sanctioned manager.",
+    "Current successor verified old and original versions absent from both live ledgers before guarded supersession to 20260911042655; SQL is unchanged."
   ],
   "stop_conditions": [
     "Stop if the implementation requires changing claim_style_guide_pdf_text or any database object outside claim 2578.",

@@ -4,16 +4,16 @@
   "outcome": "ready-for-merge",
   "pr": 2638,
   "migration_versions": [
-    "20260909162929"
+    "20260911042655"
   ],
-  "contract_ref": "refs/db-contracts/2507/3",
-  "contract_sha256": "98cf13ade48b394f9cac0d7db5bf7d7d24d2488869ce17c59f883764b8fb7634",
-  "head_sha": "7cddf1eca0ff855a7eb103978cb2296a88ac1823",
-  "evidence_note": "Successor refresh preserves prior implementation ancestry and unchanged SQL/tests. Current implementation head merges current main; only the two evidence files follow. Prior hosted tests remain historical proof; new head CI will be checked separately.",
+  "contract_ref": "refs/db-contracts/2507/4",
+  "contract_sha256": "9693f1a86f76e36ea03ad5e3430b2c9dbc237faacf2a176c2eee7de89b4029fc",
+  "head_sha": "2f58f03ad6a814ee88ededb46462cc34f0da9300",
+  "evidence_note": "Guarded supersession is a byte-identical SQL rename after live absence proof on both targets. Only two evidence files follow implementation head. Historical hosted tests remain historical proof; fresh head CI is required.",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
+    "supabase/migrations/20260911042655_popsg_pdf_terminal_outcomes.sql",
     "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
   ],
   "db_reads": [
