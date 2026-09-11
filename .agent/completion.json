@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/14",
-  "contract_sha256": "37f6a63ed5ea788c3d1555c3d1f4e8ef5aeddf4f5434b7fafd48b66db06bfcbf",
-  "head_sha": "46f7398d0ead9d465650d335ad88c5b2d27dfdb4",
+  "contract_ref": "refs/db-contracts/2727/15",
+  "contract_sha256": "8ded282f34323eeb41f723c4dce1e98eea99c0366e97aa9b84d657d62f8d3e89",
+  "head_sha": "b226644a55344a9ded0a108ddceee56e5ef21b18",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -34,7 +34,7 @@
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "695 tests passed; zero failed, skipped, cancelled, or todo (including issue-bound lifecycle reads and mutex-serialized admission writes); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
+      "evidence": "697 tests passed; zero failed, skipped, cancelled, or todo (including issue-bound lifecycle reads and single-interval admission, claim, dispatch, and advance writes); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
@@ -52,7 +52,7 @@
     "The sealed be971275 review REJECT is retained in PR evidence, and all three findings were repaired before this report.",
     "PR 2737 and its successful prose-only canary are integrated; its mutex-only command remains outside claims, reviewer assignment, shared stages, and lifecycle events.",
     "PR 2736 remains correctly held until this resolver and admission interface reaches main.",
-    "The sealed and parallel reviews rejected unadmitted legacy dispatch, unbound objects, linkage confusion, cross-issue or unidentified replay, unsafe partial writes, metadata-only production proof, incomplete multi-target DDL, clock inversion, and unserialized admission writes; every finding is fixed and covered before this report.",
+    "The sealed and parallel reviews rejected unadmitted legacy dispatch, unbound objects, linkage confusion, cross-issue or unidentified replay, unsafe partial writes, metadata-only production proof, incomplete multi-target DDL, clock inversion, and admission-to-dependent-write races; every finding is fixed and covered before this report.",
     "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects."
   ],
   "stop_conditions_hit": []
