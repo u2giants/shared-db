@@ -6,7 +6,7 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2694/2",
   "contract_sha256": "ed009fa5fb33903f6466c02f004b142adf3aa069a3c6b9bad8b8524f94fc19a6",
-  "head_sha": "8272877046e0ff0f1b04c7df1a0dbc2aac0b1e93",
+  "head_sha": "82728770791887f995dd9aa8aeabe54e69689052",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -21,7 +21,7 @@
     {
       "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 502, pass 502, fail 0, skipped 0, todo 0. Against the pre-fix script restored with `git show a1d7f8c5:scripts/manage-migration-author-lanes.mjs` (plus the two new exported marker helpers stubbed so the module still loads): tests 502, pass 493, fail 9 - the eight new #2694 round-2 proofs and the tightened #2311 lease-ref assertion. The ninth new test, the transient-failure positive control, passes both before and after and is meant to."
+      "evidence": "tests 502, pass 502, fail 0, skipped 0, todo 0. Against the pre-fix script restored with `git show a1d7f8c5efc7662a6df147e2e0d1c10dc86fc2da:scripts/manage-migration-author-lanes.mjs` (plus the two new exported marker helpers stubbed so the module still loads): tests 502, pass 493, fail 9 - the eight new #2694 round-2 proofs and the tightened #2311 lease-ref assertion. The ninth new test, the transient-failure positive control, passes both before and after and is meant to."
     },
     {
       "command": "node --test scripts/record-review-verdict.test.mjs",
