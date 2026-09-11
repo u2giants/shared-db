@@ -28,9 +28,7 @@
     "scripts/production-verification-sidecars/20260911081204.json",
     "scripts/production_business_risk_gate.py"
   ],
-  "db_reads": [
-    "view api.dam_order_list"
-  ],
+  "db_reads": ["view api.dam_order_list"],
   "db_writes": [
     "function public.find_dam_order_list_row"
   ],
