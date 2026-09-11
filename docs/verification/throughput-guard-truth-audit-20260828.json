@@ -1945,9 +1945,16 @@
       "line_sha256": "5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4",
       "disposition": "excluded",
       "reason": "Issue 2789 early refusal: with the automatic risk policy active, a production apply review dispatched without a numeric source_pr is refused by name before any credential is used. It adds a refusal and changes no existing check."
+    },
+    {
+      "site": "scripts/production_migration_guard.py:1969",
+      "semantic_key": "scripts/production_migration_guard.py:50799e3f2862268507b004d60991c5c99a0c3324c03f871a8dbf0ceb31fa398d:1",
+      "line_sha256": "50799e3f2862268507b004d60991c5c99a0c3324c03f871a8dbf0ceb31fa398d",
+      "disposition": "excluded",
+      "reason": "#2809. This line is explanatory comment prose quoting the guard refusal text it fixes; it performs no missing-object detection and changes no refusal behaviour, so it carries no enrichment obligation."
     }
   ],
-  "call_site_count": 276,
-  "call_site_sha256": "f6039611702d56bc44e6b074c74f2b928fdd91b8dc2c2b1246bbdb918135cfc8",
+  "call_site_count": 277,
+  "call_site_sha256": "59965bf6503298e345048733639b06644e7f1a870fb1a20fa689a25f716ea58a",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
