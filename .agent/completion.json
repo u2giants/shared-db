@@ -1,41 +1,59 @@
 {
   "schema_version": 1,
-  "work_issue": 2769,
+  "work_issue": 2662,
   "outcome": "ready-for-merge",
-  "pr": 2776,
+  "pr": 2764,
   "migration_versions": [
-    "20260911145659"
+    "20260911124746"
   ],
-  "contract_ref": "refs/db-contracts/2769/2",
-  "contract_sha256": "cb815eaa9c2adfa9bf76d6c1098af19287d15abf115d71c6136634e1fe7dc108",
-  "head_sha": "d23bb43449e5496316af39c8cad676cfe3305c3f",
+  "contract_ref": "refs/db-contracts/2662/6",
+  "contract_sha256": "d147d233f14733d214884880d2bbe10fac7dcc0703b00ba75a080a43ec6dcde4",
+  "head_sha": "439cc01bc1f07a5b5a2fa8fb4073e663c364ef23",
   "files_changed": [
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
+    "supabase/migrations/20260911124746_crm_definer_views_caller_gate.sql",
+    "supabase/tests/crm_definer_views_caller_gate_contracts.sql"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "table core.customer",
+    "table crm.ingested_domain",
+    "table plm.customer_import",
+    "table app.app_access",
+    "table app.profile",
+    "view api.crm_contact_list",
+    "table core.contact",
+    "table public.sku_files_used",
+    "table public.style_guide_files",
+    "table public.style_groups"
+  ],
   "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
+    "view api.crm_customer_list",
+    "view api.crm_account_list",
+    "view api.crm_ingested_domain_list",
+    "view api.crm_contact_segment_list",
+    "view api.crm_contact_segment_counts",
+    "view public.sg_archive_usage"
   ],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Run at d23bb434 (after merging main 9b02ad48) in C:/repos/shared-db-worktrees/issue-2769: Static checks passed. No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
-    },
-    {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 9b02ad48 d23bb434 reported no whitespace errors."
+      "evidence": "No whitespace errors on 9b02ad48..439cc01b."
+    },
+    {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "Static checks passed on 439cc01b."
+    },
+    {
+      "command": "hosted ephemeral migration regression suite",
+      "exit_code": 0,
+      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on commit a4848fde (run 34617412771, job 103322678124), whose supabase files are byte-identical to implementation commit 439cc01b; it applied every migration, including the base-table policy and contact-gate assertions, and ran supabase/tests/crm_definer_views_caller_gate_contracts.sql with non-zero contact and archive fixtures as the authenticated role."
     }
   ],
   "assumptions_resolved": [
-    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
-    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
-    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
-    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
+    "App consumer search across popcrm-web, popdam3, poppim-web, dflow_plm and edge functions found only popcrm-web authenticated browser reads of the changed views; no service-role consumer.",
+    "Read-only preview baseline: CRM callers with and without a role read 862/862/96 customer/account/domain rows; a DAM-only caller also read 862/862/96, which is the leak closed here."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Implementation 439cc01b on main 9b02ad48 (supabase files identical to a4848fde) addresses the REVISE on 4a262c06 (refs/db-review-verdicts/2662-2764-4a262c06b52ea83e9912e4a8edf8db4464aec7ca): base-table grant and open-policy guard for sg_archive_usage, definer and gate guard on api.crm_contact_list, OR rejection on gated view text, non-vacuous contact and archive fixtures. Contract generation 6 declares the added reads. Diff check, static SQL checks and the hosted ephemeral suite all exit 0."
 }
