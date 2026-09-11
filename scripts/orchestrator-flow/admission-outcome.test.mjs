@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange, inspectPrStructuralChange } from './admission.mjs'
 import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
-import { admitIssue, buildDynamicQueues, claimBody, EXCLUSIVE_REFS, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, MUTEX_REF, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
+import { admitIssue, buildDynamicQueues, claimBody, derivePrOperationRoute, EXCLUSIVE_REFS, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, MUTEX_REF, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
 import { findCompletionRecord } from '../lib/work-dependencies.mjs'
 
 const issue = (body, number = 41) => ({ number, state: 'open', title: 'structural outcome', body, createdAt: '2026-09-11T00:00:00Z' })
@@ -24,6 +24,10 @@ const scopeBody = ({ service='standard-application', change='migration', stage='
   'priority: 5', 'depends_on:', 'writes:', `  - ${object}`, '```', extra,
 ].join('\n')
 const impact = (kind) => ['```db-impact', JSON.stringify({ kind, environment:'production', evidence:'https://github.com/u2giants/example-app/issues/1' }), '```'].join('\n')
+const repoScopeBody = ({change='repo-maintenance',objects='',createdAt='2026-09-11T17:00:00Z'}={}) => ({
+  number:41,state:'open',createdAt,
+  body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance',...(change===null?[]:[`change_type: ${change}`]),'priority: 5','depends_on:','objects:',objects,'```'].join('\n'),
+})
 
 test('every structural actual-change type is independently admissible', () => {
   for (const change of STRUCTURAL_CHANGE_TYPES) {
@@ -58,6 +62,38 @@ test('actual pull request files must contain a migration before reviewer or shar
   assert.deepEqual(assertPrCarriesStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'modified',content:'create table core.example(id bigint);',patch:'@@ -2 +2 @@\n-old index\n+create index example_id_idx on core.example(id);'}]),['supabase/migrations/20260911120000_example.sql'])
 })
 
+test('shared reviewer and merge routing admits deterministic repository maintenance without fabricated DDL',()=>{
+  const head='a'.repeat(40),work=repoScopeBody()
+  const io={
+    getPr:()=>({state:'open',head:{sha:head}}),getPrFiles:()=>[
+      {filename:'scripts/tool.mjs',status:'modified'},
+      {filename:'scripts/tool.test.mjs',status:'added'},
+      {filename:'docs/note.md',status:'modified'},
+    ],closingIssuesForPr:()=>[{number:41}],getIssue:()=>work,
+  }
+  assert.deepEqual(derivePrOperationRoute(7,io,{headSha:head,issue:41}),{route:'repo-maintenance',issue:41,pr:7,headSha:head,changeType:'repo-maintenance',legacy:false})
+})
+
+test('shared operation routing fails closed for structural, mixed, and unknown inputs',()=>{
+  const head='a'.repeat(40),work=repoScopeBody()
+  const base={getPr:()=>({state:'open',head:{sha:head}}),closingIssuesForPr:()=>[{number:41}],getIssue:()=>work}
+  assert.equal(derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_x.sql',status:'added'}]},{headSha:head,issue:41}).route,'structural')
+  assert.equal(derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',previous_filename:'supabase/migrations/20260911120000_x.sql',status:'renamed'}]},{headSha:head,issue:41}).route,'structural')
+  assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[]},{headSha:head,issue:41}),/empty or unreadable/)
+  assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs'}]},{headSha:head,issue:41}),/unreadable entry/)
+  assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}],closingIssuesForPr:()=>[{number:41},{number:42}]},{headSha:head,issue:41}),/exactly one work issue/)
+  assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}]},{headSha:'b'.repeat(40),issue:41}),/exact head changed/)
+  assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}],getIssue:()=>issue(scopeBody())},{headSha:head,issue:41}),/not deterministic ready repository-maintenance/)
+  for(const change of ['migration','application-row','source-data','security-settings'])assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}],getIssue:()=>repoScopeBody({change})},{headSha:head,issue:41}),/recognized repository-maintenance/,change)
+})
+
+test('only bounded pre-cutover repository-maintenance may omit change_type',()=>{
+  const head='a'.repeat(40),files=[{filename:'scripts/x.mjs',status:'modified'}]
+  const make=(work)=>({getPr:()=>({state:'open',head:{sha:head}}),getPrFiles:()=>files,closingIssuesForPr:()=>[{number:41}],getIssue:()=>work})
+  assert.equal(derivePrOperationRoute(7,make(repoScopeBody({change:null})),{headSha:head,issue:41}).legacy,true)
+  assert.throws(()=>derivePrOperationRoute(7,make(repoScopeBody({change:null,createdAt:'2026-09-11T18:00:00Z'})),{headSha:head,issue:41}),/must declare/)
+})
+
 test('finish-first queue order is service class, nearest-live stage, transitive impact, creation time, then issue', () => {
   const same=(number,service,stage,createdAt='2026-09-11T00:00:00Z')=>({...issue(scopeBody({service,stage,extra:service==='urgent-application'?impact('blocked-release'):''}),number),createdAt})
   const rows=[same(40,'maintenance','entered','2026-08-01T00:00:00Z'),same(30,'standard-application','entered','2026-09-01T00:00:00Z'),same(20,'urgent-application','entered'),same(10,'urgent-application','preview_verified')]
@@ -86,16 +122,15 @@ test('unrelated structural authors can dispatch concurrently while object confli
   assert.equal(buildDynamicQueues(conflicting,[]).dispatchable.length,1)
 })
 
-test('manager requires explicit admission before claim, reviewer, and shared-stage operations', () => {
+test('manager requires explicit admission before claim and database-only shared stages', () => {
   const io={enforceAdmission:true}
   const calls=[
     ['--claim','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.x'],
-    ['--assign-reviewer','--issue','41','--pr','1','--head-sha','a'.repeat(40)],
-    ['--acquire-merge','--owner','o','--pr','1','--head-sha','a'.repeat(40)],
+    ['--acquire-preview','--owner','o','--pr','1','--head-sha','a'.repeat(40)],
   ]
   const old=console.error;const messages=[];console.error=(m)=>messages.push(String(m))
   try { for (const args of calls) assert.equal(managerMain(args,new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
-  assert.equal(messages.filter((m)=>m.includes('--admit-issue')).length,3,messages.join(' | '))
+  assert.equal(messages.filter((m)=>m.includes('--admit-issue')).length,2,messages.join(' | '))
 })
 
 test('production admission requires the source PR so actual SQL is rechecked',()=>{

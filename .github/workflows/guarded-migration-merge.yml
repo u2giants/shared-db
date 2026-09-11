@@ -93,10 +93,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          ADMITTED_ISSUE="$(node scripts/manage-migration-author-lanes.mjs --resolve-admitted-issue-for-pr "${{ inputs.pull_request }}" | jq -r .issue)"
-          test "$ADMITTED_ISSUE" -gt 0
           node scripts/manage-migration-author-lanes.mjs --acquire-merge \
-            --admit-issue "$ADMITTED_ISSUE" \
             --owner "github-actions:${GITHUB_RUN_ID}" --pr "${{ inputs.pull_request }}" \
             --head-sha "${{ inputs.head_sha }}" > "$RUNNER_TEMP/merge-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/merge-lock.json")" >> "$GITHUB_OUTPUT"

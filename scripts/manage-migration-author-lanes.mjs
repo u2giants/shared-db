@@ -42,7 +42,7 @@ import { PROJECT_REFS } from './orchestrator-flow/read-preview-ledger.mjs'; impo
 import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIEW_VERDICTS, assertFindingsRefForPr, findingsDigest, formatVerdictMessage, parseVerdictCommit, parseVerdictRef, validateVerdictArtifact, verdictRef } from './lib/review-verdict-artifact.mjs'
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
-import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
+import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
 import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
 import { isContentPreservingRefresh } from './lib/pr-content-equivalence.mjs'
 
@@ -4282,7 +4282,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1,admissionOptions=n
   requireReviewWireCapacity(REVIEW_MUTEX_SECTION_RESERVE)
   acquireReviewMutex(ownerSha,io)
   try{
-    if(admissionOptions)requireAdmission(admissionOptions,io,{pr,mutexOwner:ownerSha})
+    if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true})
     const exclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
     // Slot 1 keeps the original, unsuffixed ref namespace so every existing
     // caller and every already-recorded assignment/replacement is untouched.
@@ -4867,7 +4867,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       if(liveReplacement&&liveReplacement.sha!==priorReplacement&&!staleReplacement)throw new LaneError(`reviewer ${parsed.reviewer} has an unrelated live lease; idempotent replacement repair refused`)
       ownerSha=io.makeOwnerCommit(`db-coordination reviewer-replacement-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''}`)
       requireReviewWireCapacity(11);acquireReviewMutex(ownerSha,io);mutexAcquired=true
-      if(admissionOptions)requireAdmission(admissionOptions,io,{pr,mutexOwner:ownerSha})
+      if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true})
       const freshStates=io.readReviewStates?.([parsed,...(staleReplacement?[staleReplacement.assignment]:[])])
       const freshExclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
       // Same deliberate refusal as the assignment paths: only --exclude-reviewer
@@ -5057,7 +5057,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     let failureCreated=false, cursorUpdated=false,failedLeaseReleased=false,replacementStaleReleased=false,replacementLeaseCreated=false
     requireReviewWireCapacity(12);acquireReviewMutex(ownerSha,io);mutexAcquired=true
     try{
-      if(admissionOptions)requireAdmission(admissionOptions,io,{pr,mutexOwner:ownerSha})
+      if(admissionOptions)requirePrOperationRoute(admissionOptions,io,{pr,headSha,issue,mutexOwner:ownerSha,allowMerged:true})
       const freshExclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
       if(freshExclusions.has(reviewer.name))throw new LaneError(`selected replacement reviewer ${reviewer.name} became excluded for this PR before mutex acquisition; retry to select from the fresh roster`)
       if(io.atomicReviewRefs){
@@ -5553,6 +5553,61 @@ export function resolveAdmittedIssueForPr(pr, io = githubIo) {
   if (linked.length !== 1) throw new LaneError(`pull request must close exactly one structural work issue; found ${linked.length}`)
   const result = admitIssueSerialized(Number(linked[0].number), io, { pr:Number(pr), allowLegacy:true })
   return { issue:Number(linked[0].number), pr:Number(pr), admission:result.admitted ? 'admitted' : 'refused' }
+}
+
+const MIGRATION_PATH = /^supabase\/migrations\/[^/]+\.sql$/
+const REPOSITORY_MAINTENANCE_CHANGE_TYPES = new Set(['documentation','ci','reviewer-tooling','workflow','repo-maintenance'])
+
+// Merge and reviewer machinery serves both database migrations and ordinary
+// repository code. Derive that boundary from the live PR while the operation's
+// mutex is held: a caller-provided bypass would turn a routing choice into an
+// authority grant. Any migration path, including the old side of a rename,
+// stays structural; unreadable inventory stays unknown and refuses.
+export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issue = null, allowMerged = false } = {}) {
+  if (!Number.isInteger(Number(pr)) || Number(pr) < 1) throw new LaneError('operation routing requires a pull request number')
+  const livePr=io.getPr(Number(pr))
+  const prState=String(livePr?.state??'open').toLowerCase(),eligibleState=prState==='open'||(allowMerged&&prState==='closed'&&Boolean(livePr?.merged_at))
+  if(!livePr||!eligibleState||!/^[0-9a-f]{40}$/i.test(String(livePr?.head?.sha??'')))throw new LaneError(`pull request #${pr} live head is unreadable or not eligible`)
+  if(headSha!==null&&String(livePr.head.sha).toLowerCase()!==String(headSha).toLowerCase())throw new LaneError(`pull request #${pr} exact head changed before operation routing`)
+  const files=io.getPrFiles(Number(pr))
+  if(!Array.isArray(files)||!files.length)throw new LaneError(`pull request #${pr} complete file inventory is empty or unreadable`)
+  const paths=[]
+  for(const file of files){
+    if(!file||typeof file.filename!=='string'||!file.filename.trim()||typeof file.status!=='string'||!file.status.trim())throw new LaneError(`pull request #${pr} complete file inventory contains an unreadable entry`)
+    paths.push(file.filename)
+    if(file.previous_filename!==undefined){
+      if(typeof file.previous_filename!=='string'||!file.previous_filename.trim())throw new LaneError(`pull request #${pr} prior filename is unreadable`)
+      paths.push(file.previous_filename)
+    }
+  }
+  const linked=io.closingIssuesForPr(Number(pr))
+  if(!Array.isArray(linked)||linked.length!==1)throw new LaneError(`pull request must close exactly one work issue; found ${Array.isArray(linked)?linked.length:'an unreadable set'}`)
+  const linkedNumber=Number(linked[0]?.number)
+  if(!Number.isInteger(linkedNumber)||linkedNumber<1)throw new LaneError('pull request linked work issue identity is unreadable')
+  if(issue!==null&&Number(issue)!==linkedNumber)throw new LaneError(`operation issue #${issue} does not match pull request #${pr} linked issue #${linkedNumber}`)
+  const structural=paths.some((value)=>MIGRATION_PATH.test(String(value).replace(/\\/g,'/')))
+  if(structural)return {route:'structural',issue:linkedNumber,pr:Number(pr),headSha:livePr.head.sha}
+
+  const work=io.getIssue(linkedNumber),scope=parseQueueScope(work?.body??'')
+  if(String(work?.state??'open').toLowerCase()!=='open'||scope?.status!=='ready'||scope?.workType!=='repo-maintenance'||scope?.route!=='repo-maintenance'||scope?.writes?.length)throw new LaneError(`pull request #${pr} is not deterministic ready repository-maintenance work with no database objects`)
+  let changeType=scope.changeType,legacy=false
+  if(changeType===null){
+    const created=Date.parse(String(work?.created_at??work?.createdAt??''))
+    if(!Number.isFinite(created)||created>=Date.parse(ADMISSION_LEGACY_CUTOVER))throw new LaneError(`repository-maintenance issue #${linkedNumber} must declare a recognized non-structural change_type`)
+    changeType='repo-maintenance';legacy=true
+  }
+  if(!NON_STRUCTURAL_CHANGE_TYPES.includes(changeType)||!REPOSITORY_MAINTENANCE_CHANGE_TYPES.has(changeType))throw new LaneError(`repository-maintenance issue #${linkedNumber} must declare a recognized repository-maintenance change_type`)
+  return {route:'repo-maintenance',issue:linkedNumber,pr:Number(pr),headSha:livePr.head.sha,changeType,legacy}
+}
+
+function requirePrOperationRoute(options,io,{pr,headSha,issue,mutexOwner,allowMerged=false}){
+  if(io.enforceAdmission!==true)return null
+  if(mutexOwner)requireOwnedRef(MUTEX_REF,mutexOwner,io)
+  const route=derivePrOperationRoute(pr,io,{headSha,issue,allowMerged})
+  if(route.route==='repo-maintenance')return route
+  if(!Number.isInteger(Number(options?.admitIssue))||Number(options.admitIssue)!==route.issue)throw new LaneError(`structural pull request #${pr} requires --admit-issue ${route.issue}`)
+  requireAdmission(options,io,{pr,mutexOwner})
+  return route
 }
 
 function requireAdmissionArguments(options,io,{pr=null}={}){
@@ -6353,7 +6408,10 @@ export function acquireExclusive(kind, metadata, io = githubIo) {
   }))
   acquireMutex(ownerSha, io)
   try {
-    if(metadata.admissionOptions)requireAdmission(metadata.admissionOptions,io,{pr:metadata.pr??null,mutexOwner:ownerSha})
+    if(metadata.admissionOptions){
+      if(kind==='merge')requirePrOperationRoute(metadata.admissionOptions,io,{pr:metadata.pr,headSha:metadata.headSha,issue:metadata.admissionOptions.issue??null,mutexOwner:ownerSha})
+      else requireAdmission(metadata.admissionOptions,io,{pr:metadata.pr??null,mutexOwner:ownerSha})
+    }
     if (kind === 'production') {
       if (metadata.headSha !== io.mainSha?.()) throw new LaneError('production lane requires the exact current main SHA')
       if (io.readRef(EXCLUSIVE_REFS.merge)) throw new LaneError('a guarded merge is active; production promotion must wait')
@@ -6648,7 +6706,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.resumeAuthorLease){console.log(JSON.stringify(resumeAuthorLease({...o,claim:o.claimNumber??o.claim},now,io),null,2));return 0}
     if(o.reissueMergedClaim){console.log(JSON.stringify(reissueMergedStrandedClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
     if(o.reversionClaim){console.log(JSON.stringify(reversionActiveClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
-    if(o.replaceFailedReviewer){requireAdmissionArguments(o,io,{pr:o.pr});const result=replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1,admissionOptions:io.enforceAdmission===true?o:null},io);console.log(JSON.stringify(result,null,2));return 0}
+    if(o.replaceFailedReviewer){const result=replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1,admissionOptions:io.enforceAdmission===true?o:null},io);console.log(JSON.stringify(result,null,2));return 0}
     if(o.releaseFailedReviewer){console.log(JSON.stringify(releaseFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.probeSilentReviewer){console.log(JSON.stringify(probeSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
     if(o.reclaimSilentReviewer){console.log(JSON.stringify(reclaimSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
@@ -6656,9 +6714,9 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.excludeReviewer){console.log(JSON.stringify(excludeReviewerForPr(o,io),null,2));return 0}
     if(o.reinstateReviewerExclusion){console.log(JSON.stringify(reinstateReviewerExclusion(o,io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
-    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);requireAdmissionArguments(o,io,{pr:o.pr});console.log(JSON.stringify(assignWithMutexRetry({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1,admissionOptions:io.enforceAdmission===true?o:null},io),null,2));return 0}
+    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);console.log(JSON.stringify(assignWithMutexRetry({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1,admissionOptions:io.enforceAdmission===true?o:null},io),null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
-    if (o.acquireExclusive) { requireAdmissionArguments(o,io,{pr:o.pr??null});console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap, admissionOptions:o }, io), null, 2)); return 0 }
+    if (o.acquireExclusive) { if(o.acquireExclusive!=='merge')requireAdmissionArguments(o,io,{pr:o.pr??null});console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap, admissionOptions:o }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
     if(o.claim){
       for (const k of ['task','owner','branch','worktree']) if (!o[k]) throw new LaneError(`--${k} is required`)

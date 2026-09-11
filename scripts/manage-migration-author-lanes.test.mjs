@@ -2695,7 +2695,7 @@ test('issue 1688 permits success only after the appropriate merge lock is acquir
   assert.match(productionWorkflow,/production-apply:[\s\S]+permissions:[\s\S]+statuses: write/)
 })
 
-test('every workflow acquisition supplies an admitted issue and source pull request', () => {
+test('database-only workflow acquisitions supply admission while guarded merge rederives its route', () => {
   const files=['guarded-migration-merge.yml','shared-supabase-migrations.yml','preview-ledger-orphan-reconciliation.yml']
   const commands=[]
   for(const file of files){
@@ -2710,9 +2710,79 @@ test('every workflow acquisition supplies an admitted issue and source pull requ
   }
   assert.equal(commands.length,4,commands.join('\n'))
   for(const command of commands){
-    assert.match(command,/--admit-issue\s+\S+/,command)
     assert.match(command,/--pr\s+\S+/,command)
+    if(command.startsWith('guarded-migration-merge.yml:')){
+      assert.doesNotMatch(command,/--admit-issue\s+\S+/,command)
+      assert.match(command,/--head-sha\s+\S+/,command)
+    }else assert.match(command,/--admit-issue\s+\S+/,command)
   }
+})
+
+test('guarded merge rederives deterministic repository maintenance inside its mutex',()=>{
+  const io=memoryIo(),head='a'.repeat(40),comments=[];io.enforceAdmission=true
+  io.getPr=()=>({number:7,state:'open',head:{sha:head,ref:'codex/tooling'},base:{sha:'main'}})
+  io.getPrFiles=()=>[{filename:'scripts/tool.mjs',path:'scripts/tool.mjs',status:'modified'}]
+  io.closingIssuesForPr=()=>[{number:41}]
+  io.getIssue=()=>({number:41,state:'open',createdAt:'2026-09-11T17:00:00Z',body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance','change_type: workflow','priority: 5','depends_on:','objects:','```'].join('\n')})
+  io.commentIssue=(_number,body)=>comments.push(body)
+  const oldLog=console.log,oldError=console.error;console.log=()=>{};console.error=()=>{}
+  try{assert.equal(main(['--acquire-merge','--owner','tooling','--pr','7','--head-sha',head],NOW,io),0)}finally{console.log=oldLog;console.error=oldError}
+  assert.ok(io.refs.has(EXCLUSIVE_REFS.merge));assert.equal(io.refs.has(MUTEX_REF),false);assert.equal(comments.length,0)
+  assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-claims/')),false);assert.equal(io.refs.has(EXCLUSIVE_REFS.preview),false)
+})
+
+test('guarded merge cannot route migration or unknown inventory as repository maintenance',()=>{
+  const io=memoryIo(),head='a'.repeat(40);io.enforceAdmission=true
+  io.getPr=()=>({number:7,state:'open',head:{sha:head,ref:'codex/tooling'},base:{sha:'main'}})
+  io.closingIssuesForPr=()=>[{number:41}]
+  io.getIssue=()=>({number:41,state:'open',createdAt:'2026-09-11T17:00:00Z',body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance','change_type: workflow','priority: 5','depends_on:','objects:','```'].join('\n')})
+  io.getPrFiles=()=>[{filename:'supabase/migrations/20260911120000_x.sql',status:'added'}]
+  assert.throws(()=>acquireExclusive('merge',{owner:'tooling',pr:7,headSha:head,admissionOptions:{pr:7}},io),/requires --admit-issue 41/)
+  io.getPrFiles=()=>[]
+  assert.throws(()=>acquireExclusive('merge',{owner:'tooling',pr:7,headSha:head,admissionOptions:{pr:7}},io),/empty or unreadable/)
+  assert.equal(io.refs.has(EXCLUSIVE_REFS.merge),false);assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('repository-maintenance reviewer keeps natural exact-head review without DDL admission',()=>{
+  const {io,headSha,mutexCreates}=admittedReviewIo()
+  io.getIssue=()=>({number:41,state:'open',title:'tooling repair',createdAt:'2026-09-11T17:00:00Z',body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance','change_type: reviewer-tooling','priority: 5','depends_on:','objects:','```'].join('\n')})
+  io.getPrFiles=()=>[{filename:'scripts/reviewer-tool.mjs',status:'modified'},{filename:'scripts/reviewer-tool.test.mjs',status:'added'}]
+  const result=assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{pr:7}},io)
+  assert.ok(result.reviewer);assert.equal(mutexCreates(),1);assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('manager assignment and replacement preserve repository-maintenance review without admission writes',()=>{
+  const {io,headSha}=admittedReviewIo();const comments=[]
+  io.getIssue=()=>({number:41,state:'open',title:'tooling repair',createdAt:'2026-09-11T17:00:00Z',body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance','change_type: reviewer-tooling','priority: 5','depends_on:','objects:','```'].join('\n')})
+  io.getPrFiles=()=>[{filename:'scripts/reviewer-tool.mjs',status:'modified'}]
+  io.commentIssue=(_number,body)=>comments.push(body)
+  const oldLog=console.log,oldError=console.error;console.log=()=>{};console.error=()=>{}
+  try{
+    assert.equal(main(['--assign-reviewer','--issue','41','--pr','7','--head-sha',headSha],NOW,io),0)
+    assert.equal(main(['--replace-failed-reviewer','--issue','41','--pr','7','--head-sha',headSha,'--failed-sequence','1','--failure-code','insufficient_quota','--confirm-no-verdict','--confirm-no-artifact'],NOW,io),0)
+  }finally{console.log=oldLog;console.error=oldError}
+  assert.ok([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_ASSIGNMENT_REF_PREFIX)))
+  assert.ok([...io.refs.keys()].some((ref)=>ref.startsWith(REVIEW_REPLACEMENT_REF_PREFIX)))
+  assert.equal(comments.length,0);assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-claims/')),false)
+  assert.equal(io.refs.has(EXCLUSIVE_REFS.preview),false)
+})
+
+test('structural reviewer cannot omit admission through the shared reviewer path',()=>{
+  const {io,headSha}=admittedReviewIo()
+  assert.throws(()=>assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{pr:7}},io),/requires --admit-issue 41/)
+  assert.equal(io.refs.has(REVIEW_CURSOR_REF),false)
+})
+
+test('manager structural assignment and replacement still require the linked admission',()=>{
+  let fixture=admittedReviewIo(),messages=[];const oldLog=console.log,oldError=console.error;console.log=()=>{};console.error=(value)=>messages.push(String(value))
+  try{
+    assert.equal(main(['--assign-reviewer','--issue','41','--pr','7','--head-sha',fixture.headSha],NOW,fixture.io),2)
+    fixture=admittedReviewIo();fixture.io.enforceAdmission=false
+    const first=assignNextReviewer({issue:41,pr:7,headSha:fixture.headSha},fixture.io)
+    fixture.io.enforceAdmission=true
+    assert.equal(main(['--replace-failed-reviewer','--issue','41','--pr','7','--head-sha',fixture.headSha,'--failed-sequence',String(first.sequence),'--failure-code','insufficient_quota','--confirm-no-verdict','--confirm-no-artifact'],NOW,fixture.io),2)
+  }finally{console.log=oldLog;console.error=oldError}
+  assert.equal(messages.filter((value)=>value.includes('requires --admit-issue 41')).length,2,messages.join(' | '))
 })
 
 test('issue 2116 the production freeze names itself and restores every authorization it revoked', () => {
