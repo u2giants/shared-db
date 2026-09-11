@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 433,
-  "generation": 2,
+  "generation": 3,
   "work_type": "tooling",
   "route": "shared-db-orchestrator",
   "goal": "Consume the sender-side database preview classification and make no-preview routing explicit, exact-input-bound, deterministic, target-bound, and fail closed before claim or review admission.",
@@ -13,22 +13,26 @@
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "scripts/orchestrator-flow/qualify-change.mjs",
     "scripts/orchestrator-flow/qualify-change.test.mjs",
     "scripts/orchestrator-flow/select-preview-route.mjs",
     "scripts/orchestrator-flow/select-preview-route.test.mjs"
+    ,"scripts/test_production_business_risk_gate.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs",
     "scripts/orchestrator-flow/qualify-change.mjs",
     "scripts/orchestrator-flow/qualify-change.test.mjs",
     "scripts/orchestrator-flow/select-preview-route.mjs",
     "scripts/orchestrator-flow/select-preview-route.test.mjs"
+    ,"scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
