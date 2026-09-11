@@ -5,7 +5,7 @@ import { fetchArrayMaster, fetchPagedMaster, masterUrl } from "./coldlion-landin
 import { ITEM_SPECS, MASTER_SPECS, knownApiFields } from "./coldlion-landing/lib/master-specs.mjs";
 import { assertKnownShape, projectCurrentRows, projectItemSlots } from "./coldlion-landing/lib/project-masters.mjs";
 import { buildMasterLoadSql } from "./coldlion-landing/lib/load-masters.mjs";
-import { dedupeSlots, main, parseArgs } from "./coldlion-landing/sync-masters.mjs";
+import { assertRequestedScope, dedupeSlots, main, parseArgs } from "./coldlion-landing/sync-masters.mjs";
 import { assertExpectedTarget, masterFailureSql } from "./coldlion-landing/lib/db.mjs";
 
 const RUN="11111111-1111-4111-8111-111111111111";
@@ -58,6 +58,11 @@ test("paged masters refuse an incomplete total",async()=>{
 test("plain-array endpoints refuse a paged envelope",async()=>{
   const fetchImpl=async()=>({ok:true,status:200,text:async()=>JSON.stringify({content:[]})});
   await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),/plain array/);
+});
+
+test("paged masters refuse envelopes missing required pagination evidence",async()=>{
+  const fetchImpl=async()=>({ok:true,status:200,text:async()=>JSON.stringify({content:[],number:0,size:2,numberOfElements:0,totalElements:0,last:true})});
+  await assert.rejects(fetchPagedMaster("/customers",{},"hidden",{fetchImpl,pauseMs:0}),/missing totalPages/);
 });
 
 test("plain-array non-JSON 4xx preserves wire status and is not retried",async()=>{
@@ -123,6 +128,12 @@ test("terminal master failures produce a failed run and alert without payload da
   const error=Object.assign(new Error("synthetic failure"),{httpStatus:503,bodyStatus:91,requestParams:{active:"N",divisionCode:"SD001",page:2,size:2000}});
   const sql=masterFailureSql({endpoint:"/customers",companyCode:"SYNCO",requestedBy:"test",error});
   assert.match(sql,/coldlion\.sync_run/i); assert.match(sql,/'failed'/); assert.match(sql,/active.*N.*divisionCode.*SD001.*page.*2.*size.*2000/); assert.match(sql,/503, 91/); assert.match(sql,/pg_notify\('coldlion_sync_alert'/i);
+});
+
+test("requested company, division, and active scope are positively checked",()=>{
+  const spec=MASTER_SPECS.season;
+  assert.doesNotThrow(()=>assertRequestedScope(spec,[{companyCode:"SYNCO",divisionCode:"SD001",active:"Y"}],{companyCode:"SYNCO",divisionCode:"SD001",active:"Y"}));
+  assert.throws(()=>assertRequestedScope(spec,[{companyCode:"SYNCO",divisionCode:"WRONG",active:"Y"}],{companyCode:"SYNCO",divisionCode:"SD001",active:"Y"}),/another division/);
 });
 
 test("target guard accepts exact host or pool-user identity and rejects refs hidden elsewhere",()=>{

@@ -27,10 +27,25 @@ function makeGate(pauseMs = 3000) {
 }
 
 async function fetchVariants(spec, baseParams, apiKey, options) {
-  if (!spec.active) return fetchMasterSpec(spec, baseParams, apiKey, options);
+  if (!spec.active) {
+    const rows=await fetchMasterSpec(spec, baseParams, apiKey, options);
+    assertRequestedScope(spec,rows,baseParams);
+    return rows;
+  }
   const rows = [];
-  for (const active of ["Y","N"]) rows.push(...await fetchMasterSpec(spec, { ...baseParams, active }, apiKey, options));
+  for (const active of ["Y","N"]) {
+    const params={...baseParams,active}; const variant=await fetchMasterSpec(spec,params,apiKey,options);
+    assertRequestedScope(spec,variant,params); rows.push(...variant);
+  }
   return rows;
+}
+
+export function assertRequestedScope(spec, rows, params) {
+  for (const row of rows) {
+    if (params.companyCode && String(row.companyCode).trim()!==String(params.companyCode).trim()) throw Object.assign(new Error(`${spec.endpoint} returned a row for another company`),{endpoint:spec.endpoint,requestParams:params});
+    if (params.divisionCode && String(row.divisionCode).trim()!==String(params.divisionCode).trim()) throw Object.assign(new Error(`${spec.endpoint} returned a row for another division`),{endpoint:spec.endpoint,requestParams:params});
+    if (params.active && "active" in row && String(row.active).trim().toUpperCase()!==params.active) throw Object.assign(new Error(`${spec.endpoint} returned a row for another active status`),{endpoint:spec.endpoint,requestParams:params});
+  }
 }
 
 function makeLoad(table, spec, sourceRows, requestedBy, startedAt, finishedAt, companyCode, requestEvidence) {
@@ -64,6 +79,8 @@ export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOp
   source.merch_group_detail = await fetchVariants(MASTER_SPECS.merch_group_detail, { companyCode }, apiKey, options);
   source.item_header = await fetchMasterSpec(ITEM_SPECS.item_header, { companyCode }, apiKey, options);
   source.item_detail = await fetchMasterSpec(ITEM_SPECS.item_detail, { companyCode }, apiKey, options);
+  assertRequestedScope(ITEM_SPECS.item_header,source.item_header,{companyCode});
+  assertRequestedScope(ITEM_SPECS.item_detail,source.item_detail,{companyCode});
 
   const finishedAt = new Date().toISOString();
   const loads = [];

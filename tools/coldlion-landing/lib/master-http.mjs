@@ -23,6 +23,9 @@ export async function fetchPagedMaster(endpoint, params, apiKey, options = {}) {
     const { payload, httpStatus, bodyStatus } = response;
     options.onResponse?.({ endpoint, params: requestParams, httpStatus, bodyStatus });
     if (!payload || Array.isArray(payload) || !Array.isArray(payload.content)) throw new Error(`${endpoint} did not return a paged envelope`);
+    for (const field of ["number","size","numberOfElements","totalElements","totalPages","last"]) {
+      if (!(field in payload)) throw new Error(`${endpoint} page is missing ${field}`);
+    }
     if (payload.number !== page || payload.numberOfElements !== payload.content.length) throw new Error(`${endpoint} returned inconsistent page ${page}`);
     if (payload.size > size) throw new Error(`${endpoint} returned an impossible page size`);
     if (expectedTotal === null) expectedTotal = payload.totalElements;
