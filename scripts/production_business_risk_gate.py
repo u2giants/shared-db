@@ -566,6 +566,10 @@ PREVIEW_PRODUCER_PATHS = (
     # rehearsal to proceed at all. Unpinned, a doctored copy could accept ANY
     # tip -- which is the whole gate.
     "scripts/check-main-tip-freshness.mjs",
+    # Static import of both the manager and the freshness check (#2758). It
+    # decides tip acceptance and whether two heads carry the same pull request
+    # diff, so an unpinned copy could wave any tip or any refresh through.
+    "scripts/lib/pr-content-equivalence.mjs",
     # Invoked by the manager before preview preparation to prove the live sole
     # orchestrator identity. Its result gates whether preparation may proceed.
     "scripts/check-orchestrator-marker.mjs",
@@ -846,9 +850,72 @@ def authored_merge(merge_sha: str) -> ProvedTarget:
     return ProvedTarget("authored-merge", merge_sha)
 
 
+SIDECAR_PATH = re.compile(r"^scripts/production-verification-sidecars/(\d{14})\.json$")
+# Each part is a quoted identifier (any characters, "" escaping a quote) or a
+# bare one. Quoted names are case-folded with the rest of the text, which can
+# only merge two names into one overlap, never hide one.
+_IDENT = r'(?:"((?:[^"]|"")+)"|([a-z_][a-z0-9_$]*))'
+_QUALIFIED_OBJECT = re.compile(_IDENT + r'\s*\.\s*' + _IDENT)
+_SYSTEM_SCHEMAS = {"pg_catalog", "information_schema"}
+
+
+def migration_objects(sql: str) -> set[str]:
+    """Schema-qualified names a migration mentions, comments removed.
+
+    Deliberately over-inclusive: any shared name counts as an overlap, so the
+    only error it can make is a refusal, never a pass.
+    """
+    text = re.sub(r"/\*.*?\*/", " ", sql, flags=re.S)
+    text = re.sub(r"--[^\n]*", " ", text).lower()
+    names = set()
+    for quoted_schema, bare_schema, quoted_name, bare_name in _QUALIFIED_OBJECT.findall(text):
+        schema = quoted_schema.replace('""', '"') if quoted_schema else bare_schema
+        name = quoted_name.replace('""', '"') if quoted_name else bare_name
+        if schema not in _SYSTEM_SCHEMAS:
+            names.add(f"{schema}.{name}")
+    return names
+
+
+def independent_sidecar_paths(
+    promoted_versions: list[str] | None, repo_root: Path | None
+) -> frozenset:
+    """Sidecars of OTHER versions whose migrations share no object with this promotion.
+
+    Such a sidecar may be added or changed on main after the preview ran without
+    making the preview proof stale (#2758). A sidecar of a promoted version, one
+    whose migration cannot be read exactly once, or one whose migration names
+    any object a promoted migration names, is not independent and stays pinned
+    byte for byte. With no promotion context nothing is independent.
+    """
+    if not promoted_versions or repo_root is None:
+        return frozenset()
+    promoted = set(promoted_versions)
+    promoted_objects: set[str] = set()
+    for version in promoted:
+        matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
+        if len(matches) != 1:
+            return frozenset()
+        promoted_objects |= migration_objects(matches[0].read_text(encoding="utf-8"))
+    if not promoted_objects:
+        return frozenset()
+    independent = set()
+    for path in PREVIEW_PRODUCER_PATHS:
+        match = SIDECAR_PATH.fullmatch(path)
+        if not match or match.group(1) in promoted:
+            continue
+        matches = list(repo_root.glob(f"supabase/migrations/{match.group(1)}_*.sql"))
+        if len(matches) != 1:
+            continue
+        if migration_objects(matches[0].read_text(encoding="utf-8")) & promoted_objects:
+            continue
+        independent.add(path)
+    return frozenset(independent)
+
+
 def prove_preview_producer_matches_main(
     ref: str, target: ProvedTarget, main_sha: str, api: Callable[[str], Any], *,
     what: str = "preview run", against: str = "exact main",
+    promoted_versions: list[str] | None = None, repo_root: Path | None = None,
 ) -> None:
     """Refuse a rehearsal produced by code that exact main does not carry.
 
@@ -920,6 +987,7 @@ def prove_preview_producer_matches_main(
         prove_applied_commit_is_main_line(target.sha, main_sha, api)
     if ref == target.sha:
         return
+    independent = independent_sidecar_paths(promoted_versions, repo_root)
     entries_at_ref = tracked_tree_at(ref, api)
     entries_at_target = tracked_tree_at(target.sha, api)
     present_at_ref, present_at_target = entries_at_ref.keys(), entries_at_target.keys()
@@ -927,6 +995,17 @@ def prove_preview_producer_matches_main(
     for path in PREVIEW_PRODUCER_PATHS:
         at_ref, at_target = path in present_at_ref, path in present_at_target
         if not at_ref and not at_target:
+            continue
+        if path in independent and (
+            at_ref != at_target
+            or blob_sha_from_tree(path, ref, entries_at_ref)
+            != blob_sha_from_tree(path, target.sha, entries_at_target)
+        ):
+            # A LATER MAIN COMMIT ADDED OR CHANGED ANOTHER VERSION'S SIDECAR
+            # (#2758). #2703 was refused twice because #2748 merged its own
+            # sidecar between the preview and the promotion. That sidecar
+            # verifies a different migration touching different objects, so the
+            # preview proof is still valid. Not counted as a comparison.
             continue
         if at_ref != at_target:
             raise PreviewProducerMismatch(
@@ -1610,6 +1689,7 @@ def prove_preview(
     prove_preview_producer_matches_main(
         applied_commit, exact_main(main_sha), main_sha, api,
         what="preview run checked out at " + applied_commit,
+        promoted_versions=allowlist, repo_root=repo_root,
     )
     # THE WORKFLOW THAT EXECUTED. The artifact name is what the job CHOSE to
     # advertise as its checkout; the dispatch ref is what GitHub read the
@@ -1624,6 +1704,7 @@ def prove_preview(
     prove_preview_producer_matches_main(
         run_head, exact_main(main_sha), main_sha, api,
         what="preview run dispatched at " + run_head,
+        promoted_versions=allowlist, repo_root=repo_root,
     )
     if artifact.get("digest") != digest:
         raise RiskGateError("preview artifact digest does not match the pinned digest")
