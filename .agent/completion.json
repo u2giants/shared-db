@@ -8,6 +8,8 @@
   "contract_sha256": "61a538d14c86a6a6291cf3c7b75eb460a3ae20d386143edc32e8ef023770051a",
   "head_sha": "4b7e418658e24070ee80c767f132ca2d170ea5c4",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "scripts/historical-migration-restorations.mjs",
     "scripts/historical-migration-restorations.test.mjs"
   ],
