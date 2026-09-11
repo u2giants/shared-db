@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2724,
-  "generation": 4,
+  "generation": 5,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Make plm.\"FactoryTime\" a named, described, tagged lead-time template and add plm.product_type_factory_time so DesignFlow Production Tracking can assign one template per product type (mgCategory, MG01, MG02), matching the object names the consuming app already uses.",
-  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
+  "base_sha": "e420cd8619f57933de5b35aa5065f7d9ea3cc9de",
   "dispatcher": "claude shared-db orchestrator marker #2758",
   "worker": "claude issue-2724 migration author lane (claim #2803)",
   "branch": "claude/issue-2724-factory-time",
@@ -54,7 +54,7 @@
     "plm.\"FactoryTime\" holds zero rows in production, so name NOT NULL can be added without inventing names; the migration raises rather than guessing if that has changed.",
     "Version 20260911214438 is the version reserved by author claim #2803.",
     "popcre/designflow-tracking#55 and popcre/designflow-frontend#182 are already aligned to these exact names.",
-    "Generation 4 changes no scope. It refreshes onto main 26d9345b by MERGING main, not rebasing: a rebase rewrites history and voids the governed APPROVE, which is exactly what cost generation 2 its verdict. Main's advance touched only the two .agent evidence files, which every lane overwrites; all three implementation files are untouched, so the pull request's own diff is byte-identical at the approved head b5a98122 and the merge head, and the approval carries forward under the rule merged in PR #2780."
+    "Generation 5 changes no scope. Main advanced again to e420cd86 while generation 4 was in the merge queue, and its .agent evidence files genuinely conflicted, so the branch was refreshed by MERGING main again (never rebasing, which would void the approval). Main touched none of the three implementation files, so the pull request's own diff is still byte-identical to the approved head b5a98122 and the APPROVE carries forward under the PR #2780 rule."
   ],
   "stop_conditions": [
     "Stop if plm.\"FactoryTime\" is found to hold rows in preview or production.",

@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911214438"
   ],
-  "contract_ref": "refs/db-contracts/2724/4",
-  "contract_sha256": "4fffe12b339656cce02eca7a0780f1a9f0d8e674a0947f3e74f113f0f91854db",
-  "head_sha": "35aa1d34fc4e52626a7e0922a4138a547613825d",
+  "contract_ref": "refs/db-contracts/2724/5",
+  "contract_sha256": "31a3a3c38dc86816d7e95e46e305d19f16e374d8fd79d8686c0e76f21750d2aa",
+  "head_sha": "58b492ba0055b4df1162b4747b9f97758b522a73",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -56,5 +56,5 @@
     "Main then advanced again to 26d9345b. This time the branch was refreshed by MERGING main rather than rebasing, so the approved head b5a98122 remains an ancestor of the merge head 35aa1d34 and the pull request's own diff is byte-identical at both (.agent evidence aside). The b5a98122 APPROVE therefore carries forward under the PR #2780 rule and no third review was run. No reviewer was drawn at the merge head, because a head carrying reviewer records of its own is judged on those alone and that would have forfeited the carry."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Structural change refreshed onto main 26d9345b by merging main, not rebasing, so the governed APPROVE at b5a98122 survives. The three implementation files are unchanged in content across every refresh; main's advance touched only the two .agent evidence files. Head 35aa1d34; only the two .agent evidence files follow it. Ready for guarded merge on the carried approval, with the preview rehearsal after merge and production after that."
+  "evidence_note": "Structural change refreshed onto main e420cd86 by merging main, not rebasing, so the governed APPROVE at b5a98122 survives. The three implementation files are unchanged in content across every refresh. Head 58b492ba; only the two .agent evidence files follow it. Ready for guarded merge on the carried approval, with the preview rehearsal after merge and production after that."
 }
