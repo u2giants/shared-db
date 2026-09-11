@@ -139,4 +139,40 @@ test('the shipped manifest passes its own shape and covers the migration catalog
   const tables = catalogFromMigrations(dir)
   assert.ok(tables.length > 200, `expected a real catalog, got ${tables.length}`)
   assert.deepEqual(checkCatalog(manifest, tables), [])
+  // Exactly the invocation CI runs: the non-empty-family rule is enforced on the
+  // derived path too, so a manifest family matching no table is refused there.
+  assert.deepEqual(
+    checkCatalog(manifest, tables, { requireNonEmptyFamilies: true, derived: true }), [])
+})
+
+test('on the derived path an undeclared empty family is refused', () => {
+  const m = ok()
+  const f = checkCatalog(m, ['alpha_property'],
+    { requireNonEmptyFamilies: true, derived: true })
+  assert.equal(f.length, 1)
+  assert.match(f[0], /^beta matches no table in the catalog derived from/)
+})
+
+test('on the live path an empty family is refused even when it declares the exemption', () => {
+  const m = ok()
+  m.families[1].absent_from_repo_migrations = 'predates this repository'
+  const f = checkCatalog(m, ['alpha_property'], { requireNonEmptyFamilies: true })
+  assert.equal(f.length, 1)
+  assert.match(f[0], /^beta matches no table in the live catalog/)
+})
+
+test('the derived-path exemption must record a reason, and goes stale loudly', () => {
+  const blank = ok()
+  blank.families[1].absent_from_repo_migrations = '   '
+  const f = checkCatalog(blank, ['alpha_property'],
+    { requireNonEmptyFamilies: true, derived: true })
+  assert.equal(f.length, 1)
+  assert.match(f[0], /absent_from_repo_migrations must record why/)
+
+  const stale = ok()
+  stale.families[1].absent_from_repo_migrations = 'predates this repository'
+  const g = checkCatalog(stale, ['alpha_property', 'beta_asset'],
+    { requireNonEmptyFamilies: true, derived: true })
+  assert.equal(g.length, 1)
+  assert.match(g[0], /drop the declaration/)
 })

@@ -79,6 +79,10 @@ begin
   -- ------------------------------------------------------------------
   -- B. Begin: idempotent on identical evidence, refused on different evidence.
   -- ------------------------------------------------------------------
+  -- Every refusal below catches SQLSTATE 'P0001' ONLY -- the errcode the loader
+  -- functions raise deliberately. A bare `when others` would also be satisfied by
+  -- a missing function (42883), a bad argument, or any unrelated error, so the
+  -- test would pass without the refusal ever happening.
   v_rows := jsonb_build_array(
     jsonb_build_object('exact_label', 'ZZTEST Property Alpha', 'ordinal', 0),
     jsonb_build_object('exact_label', 'ZZTEST Property Beta', 'ordinal', 1),
@@ -109,7 +113,7 @@ begin
       'ZZTEST-trackerplus-0001', 'example.invalid/zztest-source',
       repeat('c', 40), repeat('b', 64), timestamptz '2026-09-10 00:00:00+00',
       3, v_manifest, 'ZZTEST loader');
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'B FAILED: a capture_key was reopened with different source evidence';
@@ -131,7 +135,7 @@ begin
     perform plm.load_pmt_trackerplus_submission_capture_chunk(v_capture, 0,
       jsonb_build_array(
         jsonb_build_object('exact_label', 'ZZTEST Property Delta', 'ordinal', 9)));
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'C FAILED: a changed chunk for an already loaded index was accepted';
@@ -142,7 +146,7 @@ begin
     perform plm.load_pmt_trackerplus_submission_capture_chunk(v_capture, 1,
       jsonb_build_array(
         jsonb_build_object('exact_label', 'ZZTEST Property Alpha', 'ordinal', 7)));
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'C FAILED: a duplicate exact-label local key was accepted';
@@ -154,7 +158,7 @@ begin
       jsonb_build_array(jsonb_build_object(
         'exact_label', 'ZZTEST Property Epsilon', 'ordinal', 8,
         'property_source_id', 'ZZTEST-999')));
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'C FAILED: a fabricated portal source ID was accepted at the top level';
@@ -166,7 +170,7 @@ begin
       jsonb_build_array(jsonb_build_object(
         'exact_label', 'ZZTEST Property Zeta', 'ordinal', 10,
         'raw', jsonb_build_object('portal_record_id', 'ZZTEST-1000'))));
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'C FAILED: a fabricated portal source ID was accepted inside raw';
@@ -176,7 +180,7 @@ begin
   begin
     perform plm.load_pmt_trackerplus_submission_capture_chunk(v_capture, 4,
       jsonb_build_array(jsonb_build_object('exact_label', '   ', 'ordinal', 11)));
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'C FAILED: a row without an exact label was accepted';
@@ -188,7 +192,7 @@ begin
       jsonb_build_array(jsonb_build_object(
         'exact_label', 'ZZTEST Property Eta', 'ordinal', 12,
         'property_local_key', repeat('f', 64))));
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'C FAILED: a local key that is not the exact-label SHA-256 was accepted';
@@ -245,7 +249,7 @@ begin
     perform plm.load_pmt_trackerplus_submission_capture_chunk(v_capture, 6,
       jsonb_build_array(
         jsonb_build_object('exact_label', 'ZZTEST Property Iota', 'ordinal', 20)));
-  exception when others then v_refused := true;
+  exception when sqlstate 'P0001' then v_refused := true;
   end;
   if not v_refused then
     raise exception 'E FAILED: a complete capture still accepted rows';

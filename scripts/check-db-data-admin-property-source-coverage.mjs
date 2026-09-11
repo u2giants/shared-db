@@ -94,7 +94,15 @@ export function checkManifestShape(manifest) {
   return failures
 }
 
-export function checkCatalog(manifest, tables, { requireNonEmptyFamilies = false } = {}) {
+// `derived` says the catalog came from this repository's own migrations rather
+// than from the live database. The derived catalog cannot see a table that was
+// created before this repository's migration history began, so a family may
+// declare `absent_from_repo_migrations: "<reason>"` to be exempt on THAT path
+// only. The declaration is not a way out of the rule: the family must still
+// match a table on the live path, the reason must be recorded, and a
+// declaration that turns out to be stale (the family does match a derived
+// table) is itself a failure.
+export function checkCatalog(manifest, tables, { requireNonEmptyFamilies = false, derived = false } = {}) {
   const failures = []
   const used = new Set()
   for (const t of tables) {
@@ -108,8 +116,22 @@ export function checkCatalog(manifest, tables, { requireNonEmptyFamilies = false
     }
   }
   if (requireNonEmptyFamilies) {
+    const where = derived ? 'the catalog derived from this repository’s migrations' : 'the live catalog'
     for (const f of manifest.families) {
-      if (!used.has(f.family)) failures.push(`${f.family} matches no table in the live catalog`)
+      const declared = f.absent_from_repo_migrations
+      if (declared && used.has(f.family)) {
+        failures.push(
+          `${f.family} declares absent_from_repo_migrations but this repository's migrations do create a table it claims: drop the declaration`)
+        continue
+      }
+      if (used.has(f.family)) continue
+      if (derived && declared) {
+        if (typeof declared !== 'string' || !declared.trim()) {
+          failures.push(`${f.family}: absent_from_repo_migrations must record why, as a non-empty string`)
+        }
+        continue
+      }
+      failures.push(`${f.family} matches no table in ${where}`)
     }
   }
   return failures
@@ -204,7 +226,14 @@ export function run() {
   } else {
     tables = catalogFromMigrations(path.join(ROOT, 'supabase/migrations'))
   }
-  failures = failures.concat(checkCatalog(manifest, tables, { requireNonEmptyFamilies: live }))
+  // The non-empty-family requirement is not a live-catalog luxury: CI runs this
+  // script with the derived catalog, so gating the rule on --catalog/--inventory
+  // meant the "refuse an unclassified family" rule never ran where the gate
+  // actually runs. It is enforced on every path now; the derived path's one
+  // blind spot -- a table older than this repository's migration history -- is
+  // handled by an explicit, recorded per-family declaration, not by skipping.
+  failures = failures.concat(
+    checkCatalog(manifest, tables, { requireNonEmptyFamilies: true, derived: !live }))
 
   if (inventoryFile) {
     failures = failures.concat(

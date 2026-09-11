@@ -20,8 +20,12 @@ create table plm.pmt_trackerplus_submission_capture (
   source_captured_at timestamptz not null,
   load_started_at timestamptz not null default now(),
   load_completed_at timestamptz,
+  -- loading -> complete | rejected, and nothing else. Sibling landing tables
+  -- also permit 'abandoned', which no function has ever written; this table does
+  -- not repeat that, so the CHECK names exactly the states the loaders produce
+  -- and the terminal refusal on re-begin is about states that really occur.
   status text not null default 'loading'
-    check (status in ('loading','complete','rejected','abandoned')),
+    check (status in ('loading','complete','rejected')),
   expected_property_count integer not null check (expected_property_count >= 0),
   expected_property_manifest_sha256 text not null
     check (expected_property_manifest_sha256 ~ '^[0-9a-f]{64}$'),
@@ -661,7 +665,7 @@ select
       'No complete Paramount TrackerPlus submission capture exists; latest-complete count is unknown, not zero.'
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id) then
-      'Latest complete Paramount TrackerPlus submission capture; loading, rejected and abandoned captures excluded.'
+      'Latest complete Paramount TrackerPlus submission capture; loading and rejected captures excluded.'
     when relname like 'pmt\_%' and (relname = 'pmt_capture' or has_capture_id)
          and pmt_capture_id is null then
       'No complete full Paramount capture exists; latest-complete count is unknown, not zero.'
@@ -906,7 +910,7 @@ select
       'No complete Paramount TrackerPlus submission capture exists; latest-complete count is unknown, not zero.'
     when relname like 'pmt\_trackerplus\_%'
          and (relname = 'pmt_trackerplus_submission_capture' or has_capture_id) then
-      'Latest complete Paramount TrackerPlus submission capture; loading, rejected and abandoned captures excluded.'
+      'Latest complete Paramount TrackerPlus submission capture; loading and rejected captures excluded.'
     when relname like 'pmt\_%' and (relname = 'pmt_capture' or has_capture_id)
          and pmt_capture_id is null then
       'No complete full Paramount capture exists; latest-complete count is unknown, not zero.'
@@ -990,6 +994,8 @@ do $migration$
 declare
   v_definition text;
   v_updated text;
+  v_anchor text;
+  v_hits integer;
   v_ranked_old text := $patch$  ), sega_ranked as (
     select p.*,
       row_number() over (
@@ -1103,6 +1109,22 @@ begin
       errcode = 'P0001',
       message = 'db_data_admin_scraped_properties differs from the reviewed #2579 definition';
   end if;
+
+  -- replace() rewrites EVERY copy. A missing anchor is already refused above, but
+  -- a DUPLICATE anchor would be rewritten in both places and still satisfy the
+  -- "new text present" checks below, while the production-verification sidecar
+  -- asserts each anchor is unique. Count them, and refuse anything but exactly one.
+  foreach v_anchor in array array[v_ranked_old, v_arms_old, v_purpose_old] loop
+    v_hits := (length(v_definition) - length(replace(v_definition, v_anchor, '')))
+              / length(v_anchor);
+    if v_hits <> 1 then
+      raise exception using
+        errcode = 'P0001',
+        message = format(
+          'db_data_admin_scraped_properties #2579 anchor is not unique: %s occurrence(s), expected exactly 1',
+          v_hits);
+    end if;
+  end loop;
 
   v_updated := replace(v_definition, v_ranked_old, v_ranked_new);
   v_updated := replace(v_updated, v_arms_old, v_arms_new);
