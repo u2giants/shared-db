@@ -1,63 +1,63 @@
 {
   "schema_version": 1,
-  "work_issue": 2501,
-  "generation": 3,
+  "work_issue": 2493,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Recover inherited tag-filtered facet and exact list-total optimization after the separate replay-provenance repair lands, preserving count parity, access control and the existing viewer timeout.",
-  "base_sha": "a671cd47aaf7608c07a9db31822d3c708fda85b3",
-  "dispatcher": "Codex orchestrator marker2714",
-  "worker": "Codex issue2501 successor",
-  "branch": "codex/issue-2501-popdam-tag-totals",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2501-successor-2714",
+  "goal": "Recover inherited PR2526 under enforced contract governance, preserving its four-file implementation and adding six-kind helper and role runtime tests. This records prospective recovery authority; original implementation predates publication.",
+  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
+  "dispatcher": "codex shared-db orchestrator marker2714",
+  "worker": "codex finish_2493 successor",
+  "branch": "codex/issue-2493-source-resolution-new-kinds",
+  "worktree": "C:/repos/shared-db-worktrees/finish-2493-2714",
   "allowed_paths": [
+    "scripts/production-verification-sidecars/20260911045438.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+    ".agent/completion.json"
   ],
   "file_writes": [
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
-    "supabase/tests/popdam_effective_count_performance_contracts.sql"
+    "scripts/production-verification-sidecars/20260911045438.json",
+    "scripts/production_business_risk_gate.py",
+    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
+    "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "db_reads": [
-    "table public.assets",
-    "table public.style_groups",
-    "table public.asset_effective_tags",
-    "function public.get_effective_filter_counts_unchecked_1703",
-    "function public.require_dam_access",
-    "function public.assets_thumbnail_min_date"
+    "table core.property",
+    "table core.character",
+    "table core.style_guide",
+    "table dam.asset",
+    "table core.licensor",
+    "table core.franchise",
+    "table plm.source_resolution",
+    "function plm.set_source_resolution",
+    "function api.set_source_resolution"
   ],
   "db_writes": [
-    "function public.get_filter_counts",
-    "function public.get_effective_filter_counts",
-    "function public.filter_effective_assets"
+    "function plm.source_resolution_target_missing",
+    "view api.source_resolution"
   ],
   "prohibited_actions": [
-    "Do not rewrite applied migration bytes, raise timeouts, weaken RLS, quarantine assertions or remove fast/warm search capability.",
-    "Do not bypass the independent governed review or replay-provenance guards.",
-    "Do not push before coordinator release or claim local proof as preview/production acceptance."
+    "Do not edit applied migration bytes.",
+    "Do not rewrite or retire either existing setter or five-argument helper.",
+    "No production or preview writes outside governed coordinator gates.",
+    "No merge or preview/production write by worker; parent orchestrator serializes those stages."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "PYTHONPATH=scripts python3 -m unittest scripts.test_check_pass2_routine_supersession scripts.test_migration_derivation scripts.test_production_catalog_verification",
-    "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs"
+    "git diff --check",
+    "node scripts/check-production-verification-sidecars.mjs",
+    "psql -X -v ON_ERROR_STOP=1 -d case2493runtime -f supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "assumptions": [
-    "This adopts pre-contract work transparently; no claim that publication predates existing implementation.",
-    "Replay-provenance repair2537 landed as PR2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3; scoped real-SQL regression verifies the old restoration failure and repaired helper preservation.",
-    "Claim2525 retains original owner, branch, remote worktree and immutable version.",
-    "Independent exact-head review, representative authenticated cold/warm preview and production acceptance remain separate gates.",
-    "Successor preserves remote PR ancestry at 99f3d4ed713ae9dd0bd471ffa05cfe7b4c7b9900 by merging into current-main worktree. This generation only repairs stale evidence and reserved-version references; existing claim2525 identity is retained and remains active.",
-    "Current main2638 integrated without SQL conflicts. Manager superseded never-applied20260910223429 to20260911045353; migration body remains byte-identical."
+    "Inherited implementation and earlier test patch predate this recovery contract; no retrospective publication claim.",
+    "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record.",
+    "Generation 3 binds supported unapplied version supersession to 20260911045438 and final main reconciliation after PR2527. SQL bytes unchanged. Fresh hosted CI and one governed exact-head reviewer required."
   ],
   "stop_conditions": [
-    "Stop before final evidence if current main is not an ancestor of implementation.",
-    "Stop on a new coordinator push or merge hold.",
-    "Stop on active worker ownership, unexpected claim changes, applied migration versions or expanded structural scope."
-  ]
+    "Stop if migration bytes or setter definitions change.",
+    "Stop if test assertions fail.",
+    "Stop if scope extends beyond the four implementation files."
+  ],
+  "generation": 3
 }
