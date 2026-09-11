@@ -350,6 +350,7 @@ begin
         when r.contract_asserted_studio_code is not null
           and o.opa_studio_code is not null
           and r.contract_asserted_studio_code <> o.opa_studio_code
+          and not (r.contract_asserted_studio_code = 'marvel' and o.opa_studio_code = 'disney')
           then 'contract_opa_conflict'
         when r.contract_asserted_studio_code is not null and mc.member_count > 0
           then 'direct_' || r.contract_asserted_studio_code
@@ -527,7 +528,8 @@ begin
         when s.source_table = 'plm.wwe_property' then 'Submissions'
         else 'Creative' end::text as source_purpose,
       case
-        when s.source_status in ('authority_conflict','contract_opa_conflict','opa_scope_conflict') and s.source_table in ('plm.dcp_property','plm.lucasfilm_dcp_property','plm.twentieth_century_dcp_property') then 'Authoritative signed-contract and direct captured OPA assertions disagree, or mapped OPA IDs have conflicting direct scopes; Licensing must review the concrete assertions and named style guides.'
+        when s.source_status = 'authority_conflict' then 'Retained copies of this stable DCP identity carry conflicting approved mappings or signed studio assertions; Licensing must review those exact decisions.'
+        when s.source_status in ('contract_opa_conflict','opa_scope_conflict') and s.source_table in ('plm.dcp_property','plm.lucasfilm_dcp_property','plm.twentieth_century_dcp_property') then 'Authoritative signed-contract and direct captured OPA assertions disagree, or mapped OPA IDs have conflicting direct scopes; Licensing must review the concrete assertions and named style guides.'
         when s.source_status = 'scope_conflict' then 'Direct approved OPA route memberships place this Property in both Disney and Lucasfilm scope; Licensing must resolve whether both memberships are intentional.'
         when s.source_status = 'ambiguous_crossover' then 'Approved OPA studio evidence is ambiguous or names multiple studios; Licensing must resolve the direct source scope.'
         when s.source_status in ('unresolved') or s.source_status is null then case
@@ -538,7 +540,8 @@ begin
         else null::text
       end::text as review_reason,
       case
-        when s.source_status in ('authority_conflict','contract_opa_conflict','opa_scope_conflict') and s.source_table in ('plm.dcp_property','plm.lucasfilm_dcp_property','plm.twentieth_century_dcp_property') then 'authoritative signed-contract assertion compared independently with direct latest captured OPA scope through exact OPA Property IDs'
+        when s.source_status = 'authority_conflict' then 'latest terminal decisions across retained copies of the exact stable DCP identity'
+        when s.source_status in ('contract_opa_conflict','opa_scope_conflict') and s.source_table in ('plm.dcp_property','plm.lucasfilm_dcp_property','plm.twentieth_century_dcp_property') then 'authoritative signed-contract assertion compared independently with direct latest captured OPA scope through exact OPA Property IDs'
         when s.source_status = 'scope_conflict' then 'approved direct OPA route memberships'
         when s.source_status = 'ambiguous_crossover' then 'approved OPA studio-resolution records'
         when s.source_status = 'unresolved' or s.source_status is null then case

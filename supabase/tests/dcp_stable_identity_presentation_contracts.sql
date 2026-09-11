@@ -121,5 +121,30 @@ begin
     end if;
   end loop;
   if copies<>3 then raise exception '#2706 conflict hid retained Creative copies'; end if;
+
+  -- Disney OPA cannot distinguish Marvel studio placement. The signed studio
+  -- assertion must win identically in Disney and Lucasfilm retained copies.
+  insert into plm.dcp_property(source_system,source_id,display_name)
+  values('disney_dcpvault',k||'-studio',k||' studio A');
+  insert into plm.lucasfilm_dcp_property(source_system,source_id,display_name)
+  values('lucasfilm_dcpvault',k||'-studio',k||' studio B');
+  insert into plm.dcp_opa_property_resolution(source_system,source_table,source_property_id,
+    decision_version,approval_status,evidence_reference,evidence_sha256,decision_reason,
+    contract_asserted_studio_code,contract_evidence_reference,contract_evidence_sha256,approved_at,approved_by)
+  values('disney_dcpvault','plm.dcp_property',k||'-studio',1,'approved','synthetic-2706-studio',
+    repeat('a',64),'synthetic signed studio assertion','marvel','synthetic-contract',repeat('b',64),now(),'contract')
+  returning resolution_id into mapped_id;
+  insert into plm.dcp_opa_property_resolution_member(resolution_id,licensed_property_id,
+    member_ordinal,submission_source_system,submission_source_table,submission_source_id)
+  values(mapped_id,a,1,'disney_opa','plm.opa_property',a::text);
+  page := api.db_data_admin_scraped_properties(k||'-studio',null,100);
+  if jsonb_array_length(page->'rows')<>2 then raise exception '#2706 signed studio fixture missing'; end if;
+  for row_value in select value from jsonb_array_elements(page->'rows') loop
+    if row_value->>'source_status' is distinct from 'direct_marvel'
+      or row_value->>'presentation_licensor_key' is distinct from 'marvel'
+      or row_value->>'review_reason' is not null then
+      raise exception '#2706 signed studio placement differs between retained copies';
+    end if;
+  end loop;
 end $$;
 rollback;
