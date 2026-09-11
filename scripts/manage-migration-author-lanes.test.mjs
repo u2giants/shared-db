@@ -7092,3 +7092,24 @@ test('#2694 cutover activation backfills assignment-keyed leases for a provider 
   ].sort())
   for(const row of result.backfilled)assert.ok(io.refs.has(row.ref))
 })
+
+test('#2694 releasing a slot 2 failure is refused when the lease at that ref names slot 1',()=>{
+  // The inline lease-match check in `releaseFailedReviewer` compared issue, PR,
+  // head, sequence and reviewer but NOT the slot. It only ever agreed with
+  // `leaseMatchesAssignment` because one global sequence cursor keeps sequences
+  // unique across slots. Here the slot-2 assignment's lease ref holds a lease
+  // that names slot 1, and every other field matches: PRE-FIX the release
+  // proceeded and deleted a lease belonging to another slot.
+  const io=withAtomicRefs(reviewIo()),request={issue:2694,pr:2694,headSha:'c7'.repeat(20)}
+  io.getPr=()=>({number:request.pr,state:'open',head:{sha:request.headSha,ref:'codex/x'}})
+  assignNextReviewer(request,io)
+  const second=assignNextReviewer({...request,slot:2},io)
+  const leaseRef=[...io.refs.keys()].find((ref)=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)&&String(io.getCommit(io.refs.get(ref))?.message??'').includes(`sequence=${second.sequence} `))
+  assert.ok(leaseRef,'the fixture must start from a real slot 2 lease')
+  const original=String(io.getCommit(io.refs.get(leaseRef)).message)
+  assert.ok(/ slot=2(|$)/.test(original),'the slot 2 lease must carry its slot')
+  // Same tuple, slot 1 instead of slot 2 (a cursor-form lease with no slot token
+  // IS slot 1).
+  io.refs.set(leaseRef,io.makeOwnerCommit(original.replace(/ slot=2(?=s|$)/,'')))
+  assert.throws(()=>releaseFailedReviewer({issue:request.issue,pr:request.pr,headSha:request.headSha,failedSequence:second.sequence,slot:2,failureCode:'provider_unavailable',confirmNoVerdict:true,confirmNoArtifact:true},io),/active lease does not match the terminal failure evidence/)
+})

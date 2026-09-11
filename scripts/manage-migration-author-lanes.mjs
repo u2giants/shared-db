@@ -2170,9 +2170,6 @@ export function recordReviewVerdict(options,io=githubIo){
   // Prefer the assignment-keyed lease introduced by #2694.  The legacy
   // one-provider ref remains valid only for reviews created before this
   // cutover, so an in-flight old review can still finish without being moved.
-  // Prefer the assignment-keyed lease introduced by #2694.  The legacy
-  // one-provider ref remains valid only for reviews created before this
-  // cutover, so an in-flight old review can still finish without being moved.
   const parallelActiveRef=reviewLeaseRefForAssignment({...assignment,slot},Boolean(io.requiresExactReviewHeadSha))
   const parallelLeaseSha=io.readRef(parallelActiveRef)
   const legacyActiveRef=reviewActiveRef(assignment.reviewer)
@@ -3774,6 +3771,11 @@ export function describeMovedAssignmentHead(request,recorded){
   return `the durable reviewer assignment is NOT missing: sequence=${recorded.sequence} reviewer=${recorded.reviewer} for issue #${request.issue} PR #${request.pr} is recorded under head ${recorded.headSha}, and this request names head ${request.headSha}. The PR head moved after that reviewer was assigned, so the exact code that reviewer was given is no longer this PR's head. A replacement would bind a new reviewer -- and later a verdict -- to a commit the failed reviewer never saw, so it is refused. Assign a reviewer to the current code instead: --assign-reviewer --issue ${request.issue} --pr ${request.pr} --head-sha <the PR's current head>. Nothing was lost and nothing needs reconstructing.`
 }
 
+// PRE-CONCURRENCY SERIAL HELPER -- it has NO production caller in this tree (tests
+// only). It treats ANY busy provider as taken, which is the serial-lease rule. The
+// live draw path has a concurrent-mode branch (`concurrentLeases`) plus failed-name,
+// exclusion and excluded-provider filtering that this helper does not have, so it
+// must NOT be reused for a draw without that branch and those filters.
 export function pickReviewer(sequence,io){
   const busy=findBusyReviewers(io)
   const eligible=reviewersForOrchestrator(io.resolveOrchestratorEngine?.())
@@ -4500,7 +4502,7 @@ export function releaseFailedReviewer(options,io=githubIo){
   return withReviewRequestBudget(()=>{
     io=reviewOperationIo(io)
     const request=validateTerminalReviewerFailure(options,'reviewer release'),failureRef=reviewerFailureRef(request)
-    const original=resolveFailedReviewRecord(request,io),failedLeaseRef=reviewLeaseRefForAssignment({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha)),priorFailureSha=io.readRef(failureRef)
+    const original=resolveFailedReviewRecord(request,io),priorFailureSha=io.readRef(failureRef)
     if(priorFailureSha){
       const prior=parseReviewRelease(io.getCommit(priorFailureSha))
       if(prior.issue!==request.issue||prior.pr!==request.pr||prior.headSha!==request.headSha||prior.failedSequence!==request.failedSequence||prior.reviewer!==original.reviewer||prior.failureCode!==String(options.failureCode))throw new LaneError('immutable reviewer release evidence does not match this request')
@@ -4513,7 +4515,11 @@ export function releaseFailedReviewer(options,io=githubIo){
     if(!reviewIssueEligible(issueRow,prRow,io)||!reviewTargetEligible(prRow,io)||prRow?.head?.sha!==request.headSha)throw new LaneError('reviewer release requires the exact eligible PR head')
     if(hasVerdictForHead(request.issue,request.pr,request.headSha,io,{slot:request.slot}))throw new LaneError('an existing verdict for the exact head forbids reviewer release')
     const cached=activeLeaseRecordForAssignment(preflightBusy,{...original,slot:request.slot}),leaseRefForRelease=resolveAssignmentLeaseRef({...original,slot:request.slot},Boolean(io.requiresExactReviewHeadSha),io,preflightBusy),failedLeaseSha=cached?.sha??io.readRef(leaseRefForRelease),failedLease=failedLeaseSha?(cached?.sha===failedLeaseSha?cached.lease:parseReviewLease(io.getCommit(failedLeaseSha))):null
-    if(!failedLease||![failedLease.issue,failedLease.pr,failedLease.headSha,failedLease.sequence,failedLease.reviewer].every((value,index)=>value===[request.issue,request.pr,request.headSha,request.failedSequence,original.reviewer][index]))throw new LaneError('failed reviewer active lease does not match the terminal failure evidence')
+    // State the SLOT explicitly (#2694 review). The tuple compared here omitted the
+    // slot, and was only safe because the single global sequence cursor keeps
+    // sequences unique across slots. `leaseMatchesAssignment` already compares the
+    // slot, so reuse it rather than depend on that invariant.
+    if(!failedLease||!leaseMatchesAssignment(failedLease,{issue:request.issue,pr:request.pr,headSha:request.headSha,sequence:request.failedSequence,reviewer:original.reviewer,slot:request.slot}))throw new LaneError('failed reviewer active lease does not match the terminal failure evidence')
     if(typeof io.atomicReviewRefs!=='function'||typeof io.readReviewRefs!=='function')throw new LaneError('reviewer release requires atomic compare-and-swap ref support')
     const checkNote=String(options.failingCheck??'').trim()?` failing-check=${String(options.failingCheck).trim().replace(/\s+/g,'_')}`:''
     const failureSha=io.makeOwnerCommit(`db-coordination reviewer-failure-release reviewer=${original.reviewer} issue=${request.issue} pr=${request.pr} head=${request.headSha} failed-sequence=${request.failedSequence} code=${String(options.failureCode)}${checkNote} verdict=none artifact=none replacement=none`)
@@ -4724,7 +4730,9 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     // replacement byte-for-byte. What is NOT relaxed: a lease that matches this
     // failure is still released exactly as before, and nothing about the failure
     // evidence, the verdict gate or the cursor is weakened.
-    const failedLeaseMatches=Boolean(liveFailedLease)&&[liveFailedLease.issue,liveFailedLease.pr,liveFailedLease.headSha,liveFailedLease.sequence,liveFailedLease.reviewer].every((value,index)=>value===[request.issue,request.pr,request.headSha,request.failedSequence,original.reviewer][index])
+    // The SLOT is part of the tuple (#2694 review): without it this match relied on
+    // the single global sequence cursor keeping sequences unique across slots.
+    const failedLeaseMatches=Boolean(liveFailedLease)&&leaseMatchesAssignment(liveFailedLease,{issue:request.issue,pr:request.pr,headSha:request.headSha,sequence:request.failedSequence,reviewer:original.reviewer,slot:request.slot})
     const unrelatedFailedLeaseSha=liveFailedLease&&!failedLeaseMatches?liveFailedLeaseSha:null
     const failedLeaseSha=failedLeaseMatches?liveFailedLeaseSha:null
     const failedLease=failedLeaseMatches?liveFailedLease:null
