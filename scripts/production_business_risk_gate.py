@@ -1919,9 +1919,428 @@ def decide_business_risk(
     return {"automaticPromotionAllowed": not ordered, "ownerDecisionReasons": ordered}
 
 
+# ---------------------------------------------------------------------------
+# PRODUCTION WITHOUT A SHARED-PREVIEW APPLY (orchestrator marker #2758).
+#
+# OWNER REQUEST: a merged migration may go to production without a preview
+# rehearsal when the exact merged SQL already passed the ephemeral database CI
+# run on the source PR head -- a throwaway Postgres that applies every
+# migration and then runs the contract tests. Preview stays MANDATORY for SQL
+# that is high-risk to live data: table rewrites, long locks on existing
+# tables, destructive drops, and data backfills.
+#
+# The classifier below is an ALLOWLIST, not a denylist. A statement skips
+# preview only if it matches a shape known to be metadata-only or confined to a
+# table created in the same migration. Anything unrecognised, unparseable, or
+# ambiguous requires preview. A false "high-risk" costs one preview rehearsal;
+# a false "low-risk" costs production data, so every doubt resolves to preview.
+#
+# NOTHING ELSE IS RELAXED ON THIS ROUTE: exact-main pinning, the merged PR and
+# its required exact-head checks, immutable independent review evidence, the
+# production project-ref proof, the production lane lock and post-apply
+# verification are all unchanged -- they live outside this function.
+# ---------------------------------------------------------------------------
+EPHEMERAL_CHECK_NAME = "supabase/tests against an ephemeral database"
+EPHEMERAL_WORKFLOW = ".github/workflows/database-contract-tests.yml"
+EPHEMERAL_ARTIFACT = "supabase-contract-test-logs"
+EPHEMERAL_APPLIED_RECORD = "applied-migrations.txt"
+EPHEMERAL_FAILED_RECORD = "failed-migrations-pass2.txt"
+# The machinery that writes the applied/failed records. A pull_request run
+# executes the SOURCE PR's copy of these, so a PR could keep the job title and
+# write every basename by hand; each must be byte-identical to exact main.
+EPHEMERAL_PRODUCER_PATHS = (
+    EPHEMERAL_WORKFLOW,
+    "scripts/check_pass2_routine_supersession.py",
+)
+
+_IDENT = r'(?:"[^"]+"|[a-z_][a-z0-9_$]*)'
+_NAME = rf"{_IDENT}(?:\.{_IDENT})?"
+
+
+def sql_top_level_statements(raw: str) -> list[str] | None:
+    """Split SQL into top-level statements with literal CONTENTS neutralised.
+
+    Comments are removed, string literals become '', and dollar-quoted bodies
+    become $$ $$, so a keyword or semicolon inside a function body or a string
+    can neither hide a statement nor invent one. Returns None when the text
+    cannot be tokenised (an unterminated quote or comment): the caller treats
+    that as high-risk rather than guessing.
+    """
+    out: list[str] = []
+    current: list[str] = []
+    i, n = 0, len(raw)
+    while i < n:
+        ch = raw[i]
+        if raw.startswith("--", i):
+            end = raw.find("\n", i)
+            i = n if end == -1 else end
+            current.append(" ")
+            continue
+        if raw.startswith("/*", i):
+            depth, j = 1, i + 2
+            while j < n and depth:
+                if raw.startswith("/*", j):
+                    depth, j = depth + 1, j + 2
+                elif raw.startswith("*/", j):
+                    depth, j = depth - 1, j + 2
+                else:
+                    j += 1
+            if depth:
+                return None
+            i = j
+            current.append(" ")
+            continue
+        if ch == "'":
+            escape = i > 0 and raw[i - 1] in "eE" and (i < 2 or not (raw[i - 2].isalnum() or raw[i - 2] == "_"))
+            j = i + 1
+            while True:
+                if j >= n:
+                    return None
+                if escape and raw[j] == "\\":
+                    j += 2
+                    continue
+                if raw[j] == "'":
+                    if j + 1 < n and raw[j + 1] == "'":
+                        j += 2
+                        continue
+                    break
+                j += 1
+            current.append("''")
+            i = j + 1
+            continue
+        if ch == '"':
+            end = raw.find('"', i + 1)
+            if end == -1:
+                return None
+            current.append(raw[i:end + 1])
+            i = end + 1
+            continue
+        if ch == "$":
+            tag = re.match(r"\$(?:[A-Za-z_][A-Za-z0-9_]*)?\$", raw[i:])
+            if tag and not (i > 0 and (raw[i - 1].isalnum() or raw[i - 1] == "_")):
+                end = raw.find(tag.group(0), i + len(tag.group(0)))
+                if end == -1:
+                    return None
+                current.append(" $$ $$ ")
+                i = end + len(tag.group(0))
+                continue
+        if ch == ";":
+            out.append("".join(current))
+            current = []
+            i += 1
+            continue
+        current.append(ch)
+        i += 1
+    out.append("".join(current))
+    normalised = [_normalise_outside_identifiers(s) for s in out]
+    return [s for s in normalised if s]
+
+
+def _normalise_outside_identifiers(statement: str) -> str:
+    """Lower-case and collapse whitespace, leaving "quoted identifiers" byte-exact.
+
+    PostgreSQL folds unquoted names to lower case but keeps a quoted name's
+    case (and any dot inside it) as part of the name, so "Item" and item are
+    different tables; lower-casing the quoted form would merge them (#2771).
+    """
+    parts = re.split(r'("[^"]*")', statement)
+    folded = "".join(part if index % 2 else re.sub(r"\s+", " ", part.lower())
+                     for index, part in enumerate(parts))
+    return folded.strip()
+
+
+def _canonical_name(name: str) -> tuple[str, ...]:
+    """PostgreSQL identity of a (possibly schema-qualified) name.
+
+    Unquoted parts are already folded to lower case; quoted parts keep their
+    exact text, so "core.item" is ONE part and never equals core.item.
+    """
+    return tuple(m.group(1) if m.group(1) is not None else m.group(2)
+                 for m in re.finditer(r'"([^"]*)"|([^."]+)', name))
+
+
+# Column types whose ADD COLUMN (nullable, no default) is catalog-only. A type
+# outside this list may be a domain carrying a DEFAULT or NOT NULL, or a
+# serial pseudo-type that implies NOT NULL DEFAULT nextval(), which rewrites or
+# scans the table, so it is refused (#2771).
+_BUILTIN_COLUMN_TYPE = (
+    r"(?:text|citext|uuid|jsonb?|bytea|boolean|bool|date|interval|inet|cidr|macaddr|money|xml|tsvector"
+    r"|smallint|integer|int|int2|int4|int8|bigint|real|float4|float8|double precision"
+    r"|(?:numeric|decimal)(?: ?\( ?\d+ ?(?:, ?\d+ ?)?\))?"
+    r"|(?:varchar|character varying|char|character|bit|bit varying|varbit)(?: ?\( ?\d+ ?\))?"
+    r"|(?:timestamp|time)(?: ?\( ?\d ?\))?(?: with(?:out)? time zone)?|timestamptz|timetz)"
+    r"(?: ?\[ ?\])*"
+)
+
+
+def _binds_on(statement: str, pattern: str) -> tuple[tuple[str, ...], tuple[str, ...]] | None:
+    m = re.match(pattern, statement)
+    return (_canonical_name(m.group(1)), _canonical_name(m.group(2))) if m else None
+
+
+def _split_top_level_commas(text: str) -> list[str]:
+    parts, depth, start = [], 0, 0
+    for index, ch in enumerate(text):
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        elif ch == "," and depth == 0:
+            parts.append(text[start:index].strip())
+            start = index + 1
+    parts.append(text[start:].strip())
+    return parts
+
+
+def _alter_table_action_is_low_risk(action: str, types_trusted: bool = True) -> bool:
+    """One ALTER TABLE action on an EXISTING table, metadata-only or refused.
+
+    ``types_trusted`` is False after a search_path change: ``set search_path =
+    public, pg_catalog`` lets a user domain named ``text`` shadow the built-in,
+    so an unqualified type spelling no longer proves there is no hidden default.
+    """
+    if re.fullmatch(r"(?:enable|force) row level security", action):
+        return True
+    if re.fullmatch(rf"owner to {_IDENT}", action):
+        return True
+    if re.fullmatch(rf"alter (?:column )?{_IDENT} (?:set default .+|drop default)", action):
+        return True
+    if action.startswith("add constraint "):
+        # NOT VALID skips the scan of existing rows; anything else validates
+        # (a long lock) or builds an index (unique / primary key / exclude).
+        return action.endswith(" not valid") and not re.search(
+            r"\b(?:unique|primary key|exclude)\b", action)
+    column = re.fullmatch(rf"add (?:column )?(?:if not exists )?{_IDENT} (.+)", action)
+    if column and not action.startswith("add constraint"):
+        # Only a nullable column of a built-in type with no default is a
+        # catalog-only change. A default, NOT NULL, generated/identity, inline
+        # constraint, serial pseudo-type, or domain/user type (which can carry
+        # a hidden default or NOT NULL) can rewrite or scan the table.
+        return types_trusted and bool(re.fullmatch(
+            rf"{_BUILTIN_COLUMN_TYPE}(?: collate {_NAME})?(?: null)?", column.group(1)))
+    return False
+
+
+LOW_RISK_STATEMENT = re.compile(
+    r"^(?:"
+    r"create (?:or replace )?(?:function|procedure|view|trigger|constraint trigger|type|domain"
+    r"|schema|sequence|policy|aggregate|cast|operator)\b"
+    r"|comment on\b|grant\b|revoke\b|alter default privileges\b"
+    rf"|alter (?:function|procedure|policy|view|sequence|schema) "
+    rf"|alter type {_NAME} (?:add value|owner to|rename value)\b"
+    r"|set\b|reset\b|begin\b|start transaction\b|commit\b|notify\b"
+    r")"
+)
+
+
+def preview_required_reasons(repo_root: Path, allowlist: list[str]) -> list[str]:
+    """Why preview CANNOT be skipped for this allowlist. Empty means it can.
+
+    Each reason names the migration version, the risk class, and the statement
+    prefix that triggered it, so a refusal is actionable without reading SQL.
+    """
+    reasons: list[str] = []
+    for version in allowlist:
+        matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
+        if len(matches) != 1:
+            raise RiskGateError(f"expected one migration for {version}, found {len(matches)}")
+        statements = sql_top_level_statements(matches[0].read_text(encoding="utf-8"))
+        if statements is None:
+            reasons.append(f"{version}: unparseable SQL (unterminated quote or comment)")
+            continue
+        if not statements:
+            reasons.append(f"{version}: empty migration")
+            continue
+        # A search_path change makes an unqualified name resolve differently
+        # from one statement to the next, so only qualified names are excused.
+        path_changes = any(re.match(r"^(?:set|reset)\b", s) and "search_path" in s
+                           or "set_config" in s for s in statements)
+        new_tables = {
+            name for s in statements
+            if (m := re.match(rf"^create (?:unlogged )?table ({_NAME}) ?\(", s))
+            and (len(name := _canonical_name(m.group(1))) == 2 or not path_changes)
+        }
+        # Recreate drops are excused only for the SAME (name, table) pair.
+        created_triggers = {
+            pair for s in statements
+            if (pair := _binds_on(s, rf"^create (?:or replace )?(?:constraint )?trigger ({_IDENT}) .*? on ({_NAME})(?: |$)"))
+        }
+        created_policies = {
+            pair for s in statements
+            if (pair := _binds_on(s, rf"^create policy ({_IDENT}) on ({_NAME})(?: |$)"))
+        }
+        for statement in statements:
+            risk = _statement_preview_risk(
+                statement, new_tables, created_triggers, created_policies, path_changes)
+            if risk:
+                reasons.append(f"{version}: {risk}: {statement[:80]}")
+    return reasons
+
+
+def _statement_preview_risk(
+    s: str, new_tables: set, created_triggers: set, created_policies: set,
+    path_changes: bool = False,
+) -> str | None:
+    if re.match(r"^(?:insert|update|delete|truncate|copy|merge|with)\b", s):
+        return "data backfill or rewrite"
+    if re.match(r"^drop\b", s):
+        recreate = re.fullmatch(rf"drop (trigger|policy) if exists ({_IDENT}) on ({_NAME})", s)
+        if recreate and (_canonical_name(recreate.group(2)), _canonical_name(recreate.group(3))) in (
+                created_triggers if recreate.group(1) == "trigger" else created_policies):
+            return None
+        return "destructive drop"
+    if re.match(r"^(?:lock|cluster|vacuum|reindex|refresh materialized view)\b", s):
+        return "table rewrite or long lock"
+    if re.match(r"^create materialized view\b", s) or re.match(
+            rf"^create (?:temp |temporary |unlogged )?table (?:if not exists )?{_NAME} as\b", s):
+        return "data backfill"
+    index = re.match(rf"^create (?:unique )?index (concurrently )?(?:if not exists )?(?:{_IDENT} )?on (?:only )?({_NAME})(?=[ (]|$)", s)
+    if index:
+        if index.group(1) or _canonical_name(index.group(2)) in new_tables:
+            return None
+        return "index build locks an existing table"
+    if re.match(r"^create (?:unique )?index\b", s):
+        return "index build locks an existing table"
+    if re.match(rf"^create (?:unlogged )?table (?:if not exists )?{_NAME} ?\(", s):
+        return None
+    alter = re.fullmatch(rf"alter table (?:if exists )?(?:only )?({_NAME}) (.+)", s)
+    if alter:
+        if _canonical_name(alter.group(1)) in new_tables:
+            return None
+        if all(_alter_table_action_is_low_risk(a, types_trusted=not path_changes)
+               for a in _split_top_level_commas(alter.group(2))):
+            return None
+        return "table rewrite or long lock on an existing table"
+    if re.match(r"^(?:do|select|call|perform|execute)\b", s):
+        return "code with an unclassifiable data effect"
+    if LOW_RISK_STATEMENT.match(s):
+        return None
+    return "statement not recognised as low-risk"
+
+
+def git_blob_sha(path: Path) -> str:
+    data = path.read_bytes()
+    return hashlib.sha1(b"blob %d\0" % len(data) + data).hexdigest()
+
+
+def prove_ephemeral_ci_evidence(
+    *, check_run_id_text: str, pr_head: str, allowlist: list[str],
+    api: Callable[[str], Any], downloader: Callable[[int, Path], None], repo_root: Path,
+) -> dict[str, Any]:
+    """Prove the exact bytes being promoted applied cleanly in ephemeral CI.
+
+    Binds, in order: the named check job is the successful ephemeral contract
+    job ON THE SOURCE PR HEAD; its run is the contract-test workflow's
+    pull_request run for that head and succeeded; that run's single unexpired
+    log artifact downloads to its recorded digest; every allowlisted migration
+    is POSITIVELY on the run's applied record and not on its still-failing
+    record (the job tolerates non-replaying migrations, so a green check alone
+    proves nothing about one file); and each migration's blob at the PR head
+    equals the blob being promoted from exact main.
+    """
+    if not re.fullmatch(r"[1-9][0-9]*", check_run_id_text or ""):
+        raise RiskGateError("ephemeral check run ID must be a positive decimal integer")
+    job_id = int(check_run_id_text)
+    job_endpoint = f"repos/{REPOSITORY}/actions/jobs/{job_id}"
+    job = api_object(api, job_endpoint)
+    expected_job = {"id": job_id, "name": EPHEMERAL_CHECK_NAME, "status": "completed",
+                    "conclusion": "success", "head_sha": pr_head}
+    for key, value in expected_job.items():
+        if job.get(key) != value:
+            raise RiskGateError(f"ephemeral CI job has wrong {key}: expected {value!r}")
+    run_id = job.get("run_id")
+    if type(run_id) is not int or run_id < 1:
+        raise RiskGateError("ephemeral CI job names no workflow run")
+    run = api_object(api, f"repos/{REPOSITORY}/actions/runs/{run_id}")
+    expected_run = {"id": run_id, "path": EPHEMERAL_WORKFLOW, "event": "pull_request",
+                    "status": "completed", "conclusion": "success", "head_sha": pr_head}
+    for key, value in expected_run.items():
+        if run.get(key) != value:
+            raise RiskGateError(f"ephemeral CI run has wrong {key}: expected {value!r}")
+    repository = run.get("repository")
+    if not isinstance(repository, dict) or repository.get("full_name") != REPOSITORY:
+        raise RiskGateError("ephemeral CI run belongs to the wrong repository")
+    artifacts_endpoint = f"repos/{REPOSITORY}/actions/runs/{run_id}/artifacts?per_page=100"
+    artifacts = api_sublist(api_object(api, artifacts_endpoint), "artifacts", artifacts_endpoint)
+    named = [a for a in artifacts if isinstance(a, dict) and a.get("name") == EPHEMERAL_ARTIFACT]
+    if len(named) != 1:
+        raise RiskGateError(f"expected exactly one {EPHEMERAL_ARTIFACT} artifact, found {len(named)}")
+    artifact = named[0]
+    digest = artifact.get("digest")
+    if (artifact.get("expired") is not False or not isinstance(artifact.get("id"), int)
+            or not isinstance(digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", digest)
+            or not isinstance(artifact.get("workflow_run"), dict)
+            or artifact["workflow_run"].get("id") != run_id):
+        raise RiskGateError("ephemeral CI artifact is expired, unpinned, or belongs to another run")
+    with tempfile.TemporaryDirectory(prefix="production-risk-ephemeral-") as temp:
+        zip_path = Path(temp, "ephemeral.zip")
+        downloader(artifact["id"], zip_path)
+        if "sha256:" + sha256_file(zip_path) != digest:
+            raise RiskGateError("downloaded ephemeral CI artifact bytes do not match its digest")
+        with zipfile.ZipFile(zip_path) as archive:
+            names = set(archive.namelist())
+            if EPHEMERAL_APPLIED_RECORD not in names:
+                raise RiskGateError(
+                    f"ephemeral CI artifact has no {EPHEMERAL_APPLIED_RECORD}; this run predates "
+                    "the positive applied record, so preview is still required")
+            applied = set(archive.read(EPHEMERAL_APPLIED_RECORD).decode("utf-8").split())
+            failed = (set(archive.read(EPHEMERAL_FAILED_RECORD).decode("utf-8").split())
+                      if EPHEMERAL_FAILED_RECORD in names else None)
+    if failed is None:
+        raise RiskGateError(f"ephemeral CI artifact has no {EPHEMERAL_FAILED_RECORD}")
+    head_tree = tracked_tree_at(pr_head, api)
+    # PIN THE PRODUCER. repo_root is the exact-main checkout; the tested head
+    # must carry the same bytes for every file that writes the records above,
+    # or the records prove only what a doctored workflow chose to write.
+    for path in EPHEMERAL_PRODUCER_PATHS:
+        on_main = repo_root / path
+        entry = head_tree.get(path)
+        if not on_main.is_file() or not isinstance(entry, dict) or entry.get("type") != "blob":
+            raise RiskGateError(
+                f"ephemeral CI producer {path} is absent from exact main or the source PR head {pr_head}")
+        if entry.get("sha") != git_blob_sha(on_main):
+            raise RiskGateError(
+                f"ephemeral CI producer {path} at {pr_head} differs from exact main, so its "
+                "applied record is not evidence")
+    bound: dict[str, str] = {}
+    for version in allowlist:
+        matches = list(repo_root.glob(f"supabase/migrations/{version}_*.sql"))
+        if len(matches) != 1:
+            raise RiskGateError(f"expected one migration for {version}, found {len(matches)}")
+        base = matches[0].name
+        if base not in applied or base in failed:
+            raise RiskGateError(f"ephemeral CI did not prove {base} applied cleanly")
+        path = f"supabase/migrations/{base}"
+        entry = head_tree.get(path)
+        if not isinstance(entry, dict) or entry.get("type") != "blob":
+            raise RiskGateError(f"{path} is absent from the source PR head {pr_head}")
+        main_blob = git_blob_sha(matches[0])
+        if entry.get("sha") != main_blob:
+            raise RiskGateError(
+                f"{path} at exact main differs from the bytes ephemeral CI tested at {pr_head}")
+        bound[version] = main_blob
+    return {"checkRunId": job_id, "runId": run_id, "artifactId": artifact["id"],
+            "artifactDigest": digest, "migrationBlobs": bound}
+
+
+def optional_text(value: Any) -> str | None:
+    """GitHub Actions passes an omitted optional input as an empty string."""
+    if value is None:
+        return None
+    text = str(value).strip()
+    return text or None
+
+
 def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifact) -> dict[str, Any]:
     repo_root = args.repo.resolve()
     allowlist = normalize_review_allowlist(args.allowlist)
+    preview_run_text = optional_text(getattr(args, "preview_run_id", None))
+    preview_digest = optional_text(getattr(args, "preview_digest", None))
+    ephemeral_text = optional_text(getattr(args, "ephemeral_check_run_id", None))
+    if ephemeral_text and (preview_run_text or preview_digest):
+        raise RiskGateError("choose ONE promotion route: preview evidence or ephemeral CI evidence, not both")
+    if not ephemeral_text and not (preview_run_text and preview_digest):
+        raise RiskGateError("promotion needs preview run + digest, or an ephemeral CI check run ID")
     activation = load_activation(args.activation)
     prove_activation(activation, main_sha=args.main_sha, api=api, repo_root=repo_root)
     pr_head, pr_merge_commit = prove_pr_and_checks(args.pr, args.main_sha, allowlist, api, repo_root)
@@ -1934,12 +2353,26 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         review = json.loads(review_path.read_text(encoding="utf-8"))
     if review.get("verdict") != "APPROVE":
         return {"automaticPromotionAllowed": False, "ownerDecisionReasons": [RISK_TEXT["unresolved_material_objection"]]}
-    prove_preview(
-        run_id=args.preview_run_id, digest=args.preview_digest, pr_head=pr_head,
-        main_sha=args.main_sha, source_pr=args.pr, allowlist=allowlist,
-        preview_project_ref=args.preview_project_ref, merge_commit_sha=pr_merge_commit,
-        api=api, downloader=downloader, repo_root=repo_root,
-    )
+    ephemeral_evidence = None
+    if ephemeral_text:
+        high_risk = preview_required_reasons(repo_root, allowlist)
+        if high_risk:
+            raise RiskGateError(
+                "preview required: this migration is high-risk to live data, so the ephemeral CI "
+                "route cannot promote it -- " + "; ".join(high_risk))
+        ephemeral_evidence = prove_ephemeral_ci_evidence(
+            check_run_id_text=ephemeral_text, pr_head=pr_head, allowlist=allowlist,
+            api=api, downloader=downloader, repo_root=repo_root,
+        )
+    else:
+        if not optional_text(getattr(args, "preview_project_ref", None)):
+            raise RiskGateError("the preview route needs --preview-project-ref")
+        prove_preview(
+            run_id=int(preview_run_text), digest=preview_digest, pr_head=pr_head,
+            main_sha=args.main_sha, source_pr=args.pr, allowlist=allowlist,
+            preview_project_ref=args.preview_project_ref, merge_commit_sha=pr_merge_commit,
+            api=api, downloader=downloader, repo_root=repo_root,
+        )
     decision = decide_business_risk(classify_sql(repo_root, allowlist), recovery_proven=True, review_approved=True)
     # OWNER RULING 2026-08-18: the machine-readable owner-decision block is RETIRED
     # as a blocking requirement. It is still verified when supplied, and the
@@ -1985,8 +2418,11 @@ def assess(args: argparse.Namespace, *, api=gh_json, downloader=download_artifac
         "disclosedRisks": decision["ownerDecisionReasons"],
         "governedEvidence": {
             "mainSha": args.main_sha, "sourcePr": args.pr, "sourcePrHead": pr_head,
-            "reviewRun": args.review_run_id, "previewRun": args.preview_run_id,
-            "previewProjectRef": args.preview_project_ref,
+            "reviewRun": args.review_run_id,
+            "promotionRoute": "ephemeral-ci" if ephemeral_evidence else "preview",
+            "previewRun": None if ephemeral_evidence else int(preview_run_text),
+            "previewProjectRef": None if ephemeral_evidence else args.preview_project_ref,
+            "ephemeralCi": ephemeral_evidence,
             "allowlist": allowlist,
             "ownerDecision": owner_evidence,
         },
@@ -2002,13 +2438,18 @@ def main() -> int:
     parser.add_argument("--pr", type=int, required=True)
     parser.add_argument("--review-run-id", type=int, required=True)
     parser.add_argument("--review-digest", required=True)
-    parser.add_argument("--preview-run-id", type=int, required=True)
-    parser.add_argument("--preview-digest", required=True)
+    # EXACTLY ONE ROUTE (#2758): preview evidence (--preview-run-id, --preview-digest,
+    # --preview-project-ref) OR --ephemeral-check-run-id, the Actions job ID of the
+    # required "supabase/tests against an ephemeral database" check on the source
+    # PR head. The ephemeral route is refused for any high-risk migration.
+    parser.add_argument("--preview-run-id")
+    parser.add_argument("--preview-digest")
+    parser.add_argument("--ephemeral-check-run-id")
     # NOT DEFAULTED, EVER. Preview is rebuilt from time to time and its project
     # ref changes when it is; a literal in this file is what stranded the lane on
     # 2026-08-18. The workflow passes the repository variable PREVIEW_PROJECT_REF,
     # which is the same value the preview job writes to.
-    parser.add_argument("--preview-project-ref", required=True)
+    parser.add_argument("--preview-project-ref")
     # GitHub Actions supplies an omitted optional workflow input as an empty
     # string.  Keep it as text so the established no-risk automatic path can
     # reach assess(); a material-risk path still rejects the missing value.
