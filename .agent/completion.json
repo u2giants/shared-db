@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2767,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2766/3",
-  "contract_sha256": "c21c476080d151a860f6e2803068826655fc485bafa7a6c9f127105054279a9c",
-  "head_sha": "451575a558f8d566f7776a64ad3a8b77b8cfd0f2",
+  "contract_ref": "refs/db-contracts/2766/4",
+  "contract_sha256": "a96e23951e428dac5b67e408a9a379749d4d7ec73e31e351c05596cc53fbfd07",
+  "head_sha": "d9ded06b779df6847c934f6d3c23a27bb42229cd",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
