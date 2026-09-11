@@ -9,7 +9,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict } from './manage-migration-author-lanes.mjs'
+import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict, markReviewRefListingRefusal, isReviewRefListingRefusal } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -6776,7 +6776,7 @@ test('#2311 a verdict refused on the active lease names the assignment the lease
   io.commits.set(other,{message:'db-coordination reviewer-cursor sequence=8 reviewer=muse-spark-1.2-contributor issue=2320 pr=2415 head='+'a'.repeat(40)+' slot=1'})
   let error=null
   assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
-  assert.match(error.message,/active lease holds the assignment for issue #2320, PR #2415/)
+  assert.match(error.message,/active lease \(refs\/db-review-active\/muse-spark-1\.2-contributor\) holds the assignment for issue #2320, PR #2415/)
   assert.match(error.message,/this verdict is for issue #2355, PR #2415/)
   assert.match(error.message,/an orchestrator marker is not the work issue/)
 })
@@ -6903,4 +6903,155 @@ test('#2694 a replacement retry repairs the failed job even when its reviewer ho
   assert.deepEqual(replaceFailedReviewer(request,io),replacement)
   assert.equal(io.refs.get(failedLeaseRef),undefined,'the failed job lease is released by the retry')
   assert.equal(io.refs.get(other.ref),other.sha,'the reviewer independent concurrent job is untouched')
+})
+
+// #2694 REVIEW ROUND 2 (REVISE at 2e4cc55a) -- THE PROOF SET FOR FINDINGS 2,5,6,7,8,9,10.
+
+// CRITICAL 2. Nothing released a reviewer lease after a verdict. Pre-cutover the
+// reviewer-keyed ref was implicitly reclaimed by that reviewer's NEXT draw; a
+// tuple-keyed v2 ref is never wanted again, so it leaks forever and the
+// namespace grows without bound until the listing ceiling refuses everything.
+function verdictLeaseIo(){
+  const refs=new Map()
+  const head='a'.repeat(40)
+  const leaseRef=`refs/db-review-active-v2/muse-spark-1.2-contributor/2355-2415-${head}`
+  refs.set(`refs/db-review-assignments/2355-2415-${head}`,'c'.repeat(40))
+  refs.set(leaseRef,'c'.repeat(40))
+  const io=verdictIo({readRef:(ref)=>refs.get(ref)??null})
+  io.requiresExactReviewHeadSha=true
+  io.refs=refs
+  io.leaseRef=leaseRef
+  io.createRef=(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true}
+  io.deleteRef=(ref)=>{refs.delete(ref)}
+  io.readReviewRefs=(names)=>new Map(names.map((ref)=>[ref,refs.get(ref)??null]))
+  io.atomicReviewRefs=(changes)=>{
+    for(const change of changes)if((refs.get(change.ref)??null)!==(change.expected??null))throw new LaneError(`atomic reviewer ref transition failed: ${change.ref}`)
+    for(const change of changes){if(change.sha)refs.set(change.ref,change.sha);else refs.delete(change.ref)}
+  }
+  return io
+}
+
+test('#2694 a recorded verdict releases its own assignment-keyed lease',()=>{
+  const io=verdictLeaseIo()
+  const result=recordReviewVerdict(VERDICT_OPTS,io)
+  assert.equal(result.verdict,'APPROVE')
+  assert.equal(result.lease_ref,io.leaseRef)
+  assert.equal(result.lease_released,true,'the verdict must reclaim the tuple-keyed lease nothing else will ever want again')
+  assert.equal(io.refs.has(io.leaseRef),false,'the v2 lease ref must be gone once the verdict is durable')
+})
+
+test('#2694 a verdict never fails because its lease could not be released',()=>{
+  const io=verdictLeaseIo()
+  io.atomicReviewRefs=()=>{throw new LaneError('transport down')}
+  io.deleteRef=()=>{throw new LaneError('transport down')}
+  const result=recordReviewVerdict(VERDICT_OPTS,io)
+  assert.equal(result.verdict,'APPROVE','a release failure must never void a durable verdict artifact')
+  assert.equal(result.lease_released,false)
+})
+
+// HIGH 5. The listing ceiling is a REFUSAL, not a truncation, and
+// `findBusyReviewers` swallowed it into a fail-open `null` that every caller
+// then reported as "active reviewer leases are unreadable" -- naming the wrong
+// cause for a total outage of every draw, release and capacity report.
+function leaseListingIo(thrown){
+  return {readActiveReviewLeases:()=>{throw thrown},listRefs:()=>[],readRef:(ref)=>ref===REVIEW_ACTIVE_CUTOVER_REF?'cutover-complete':null,getCommit:()=>null}
+}
+
+test('#2694 a determinate lease-listing refusal names its real cause instead of "unreadable"',()=>{
+  const refusal=markReviewRefListingRefusal(new LaneError(`refs/db-review-active-v2/ returned 1000 refs, at or past the ${REVIEW_REF_ROW_LIMIT}-ref ceiling; refusing a possibly truncated reviewer audit. Retire refs rather than raising the ceiling (#2152)`),{reason:'ceiling'})
+  assert.equal(isReviewRefListingRefusal(refusal),true)
+  let error=null
+  assert.throws(()=>{try{findBusyReviewers(leaseListingIo(refusal))}catch(caught){error=caught;throw caught}},LaneError)
+  assert.match(error.message,/at or past the 1000-ref ceiling/)
+  assert.match(error.message,/Retire refs rather than raising the ceiling/)
+  assert.doesNotMatch(error.message,/unreadable/,'a ceiling refusal is determinate, not an unreadable namespace')
+})
+
+test('#2694 a transient lease-listing failure still fails open rather than stopping the lane',()=>{
+  const transient=new LaneError('HTTP 502: bad gateway')
+  assert.equal(isReviewRefListingRefusal(transient),false)
+  assert.equal(findBusyReviewers(leaseListingIo(transient)),null)
+})
+
+// MEDIUM-HIGH 6. The capacity report read the lossy reviewer-keyed Map, so two
+// live jobs held by one provider collapsed into a single row and the second job
+// was invisible to the operator deciding whether the pool had room.
+test('#2694 the capacity report shows one row per live lease, not one per reviewer',()=>{
+  const io=withAtomicRefs(reviewIo()),heads=new Map()
+  io.requiresExactReviewHeadSha=true
+  io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr)),ref:'codex/x'}})
+  const assigned=[]
+  for(let n=0;n<=ACTIVE_REVIEWERS.length;n++){
+    const request={issue:2694+n,pr:3894+n,headSha:n.toString(16).padStart(40,'a')}
+    heads.set(request.pr,request.headSha)
+    assigned.push(assignNextReviewer(request,io))
+  }
+  const doubled=assigned[0].reviewer
+  assert.equal(assigned.at(-1).reviewer,doubled,'round-robin must hand the same provider a second concurrent job')
+  io.readActiveReviewLeases=()=>new Map([...io.refs].filter(([ref])=>ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)||ref.startsWith('refs/db-review-active-v2')).map(([ref,sha])=>[ref,{sha,commit:{...io.getCommit(sha),committedDate:'2026-09-02T11:00:00Z'}}]))
+  const rows=reviewerCapacityReport(io).reviewers.filter((row)=>row.reviewer===doubled&&row.held)
+  assert.equal(rows.length,2,'both live jobs for one provider must be reported')
+  assert.deepEqual(rows.map((row)=>row.leaseRef).sort(),[reviewActiveRef(doubled,assigned[0]),reviewActiveRef(doubled,assigned.at(-1))].sort())
+})
+
+// MEDIUM 7. The exclusion scan charged one uncached `readRef` per candidate
+// lease ref against the 25-request wire budget; `readReviewRefs` costs one for
+// the whole set and the proxy already offers it.
+test('#2694 the exclusion scan batches its lease reads instead of paying per ref',()=>{
+  const head='f'.repeat(40),{io,first,evidenceSha}=returnScenario(1999,2011,head)
+  let perRefReads=0
+  const inner=io.readRef
+  io.readRef=(ref)=>{if(ref.startsWith(REVIEW_ACTIVE_REF_PREFIX)||ref.startsWith('refs/db-review-active-v2'))perRefReads++;return inner(ref)}
+  excludeReviewerForPr({issue:1999,pr:2011,reviewer:first.reviewer,reason:'already-reviewed',evidenceSha},io)
+  assert.equal(perRefReads,0,'every candidate lease ref must be read through the single batched request')
+})
+
+// MEDIUM 8. The refusal was built from the LEGACY ref's contents while the v2
+// ref held the conflicting lease, so it reported "holds no active lease at all"
+// about a reviewer that demonstrably held one -- defeating #2311's guarantee
+// that a refusal names the assignment the lease actually holds.
+test('#2694 a verdict refused on a parallel lease names that lease, not the empty legacy ref',()=>{
+  const other='e'.repeat(40)
+  const io=verdictIo({readRef(ref){
+    if(ref.startsWith('refs/db-review-assignments/'))return 'c'.repeat(40)
+    if(ref.startsWith('refs/db-review-active-v2/'))return other
+    return null
+  }})
+  io.requiresExactReviewHeadSha=true
+  io.commits.set(other,{message:'db-coordination reviewer-cursor sequence=8 reviewer=muse-spark-1.2-contributor issue=2320 pr=2415 head='+'a'.repeat(40)+' slot=1'})
+  let error=null
+  assert.throws(()=>{try{recordReviewVerdict(VERDICT_OPTS,io)}catch(caught){error=caught;throw caught}},/exact active lease/)
+  assert.match(error.message,/refs\/db-review-active-v2\/muse-spark-1\.2-contributor\//)
+  assert.match(error.message,/holds the assignment for issue #2320, PR #2415/)
+  assert.doesNotMatch(error.message,/holds no active lease at all/,'the parallel lease is held, so the refusal must not claim there is none')
+})
+
+// MEDIUM 9. The exhaustion message named "is already assigned to this exact
+// head" as a cause, which `notTaken` does not implement at all. The message now
+// states, per provider, the reason that provider was actually refused.
+test('#2694 the exhaustion refusal states the reason each provider was refused',()=>{
+  const {io}=busyIo()
+  let error=null
+  assert.throws(()=>{try{assignNextReviewer({issue:9,pr:119,headSha:'abcdef9'},io)}catch(caught){error=caught;throw caught}},/no reviewer is available/)
+  for(const row of ACTIVE_REVIEWERS)assert.ok(error.message.includes(row.name),`the refusal must account for ${row.name}`)
+  assert.match(error.message,/already holds a live review lease \(serial-lease protocol\)/)
+  assert.doesNotMatch(error.message,/is already assigned to this exact head/,'no code path implements that cause')
+})
+
+// LOW 10. Cutover activation backfilled reviewer-keyed refs, so a provider that
+// legitimately held two live pre-cutover reviews was refused as a corruption.
+test('#2694 cutover activation backfills assignment-keyed leases for a provider holding two live reviews',()=>{
+  const io=withAtomicRefs(freshCutoverIo()),headA='a'.repeat(40),headB='b'.repeat(40)
+  io.requiresExactReviewHeadSha=true
+  io.openPulls=()=>[{number:510,head:{sha:headA}},{number:511,head:{sha:headB}}]
+  seedAssignment(io,{issue:51,pr:510,headSha:headA,reviewer:'glm-5.3'})
+  seedAssignment(io,{issue:52,pr:511,headSha:headB,reviewer:'glm-5.3',sequence:2})
+  const result=activateReviewCutover(io)
+  assert.equal(result.activated,true)
+  assert.equal(result.backfilled.length,2)
+  assert.deepEqual(result.backfilled.map((row)=>row.ref).sort(),[
+    reviewActiveRef('glm-5.3',{issue:51,pr:510,headSha:headA,slot:1}),
+    reviewActiveRef('glm-5.3',{issue:52,pr:511,headSha:headB,slot:1}),
+  ].sort())
+  for(const row of result.backfilled)assert.ok(io.refs.has(row.ref))
 })
