@@ -41,8 +41,12 @@ def main():
         require("do $$begin if not exists(select 1 from pg_roles where rolname='anon') then create role anon;end if;if not exists(select 1 from pg_roles where rolname='authenticated') then create role authenticated;end if;if not exists(select 1 from pg_roles where rolname='service_role') then create role service_role;end if;end$$;create schema auth;create type public.app_name as enum('styleguides');create function auth.role() returns text language sql as $$select 'service_role'::text$$;create function auth.uid() returns uuid language sql as $$select null::uuid$$;create function public.has_app_access(uuid,public.app_name) returns boolean language sql as $$select true$$;")
         require(FIXTURE.replace('217193','80') if options.parity_only else FIXTURE)
         require("alter table public.style_guide_files add column padding text; alter table public.style_guide_files alter column padding set storage plain; update public.style_guide_files set padding=repeat(md5(id::text),25),thumbnail_url=case when thumbnail_url is not null then thumbnail_url||repeat('u',70) end,thumbnail_error=case when thumbnail_error is not null then repeat('e',809) end;vacuum analyze public.style_guide_files;")
+        # Model the existing production function ACL before CREATE OR REPLACE.
+        require((ROOT/'supabase/migrations/20260907131610_popsg_search_style_guide_library_v2.sql').read_text())
         require(BASE.read_text().replace('search_style_guide_library_v2','search_style_guide_library_v2_baseline'))
         require(FORWARD.read_text())
+        acl_ok=require("select not has_function_privilege('anon',p.oid,'EXECUTE') and has_function_privilege('authenticated',p.oid,'EXECUTE') and has_function_privilege('service_role',p.oid,'EXECUTE') from pg_proc p where p.oid=to_regprocedure('public.search_style_guide_library_v2(text,text,text[],text[],text[],text[],text[],text[],text[],text[],timestamptz,timestamptz,text,integer,integer)');")
+        if acl_ok!='t':raise RuntimeError('Existing RPC execution permissions changed')
         for mode in ([] if options.parity_only else ['files','guides']):
             for label,suffix in [('baseline','_baseline'),('forward','')]:
                 start=time.monotonic()
