@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2506,
-  "generation": 34,
+  "generation": 35,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Repair production search performance without reducing exact facets, filters, live-state accuracy, authorization or the eight-second request budget.",
-  "base_sha": "72c299b86ac68555fc66276302fb901df8bb8c6e",
+  "base_sha": "9ea5c664443f5c3fcdf43c5c40ca355450d0d394",
   "dispatcher": "Claude orchestrator marker2758",
   "worker": "Claude issue2506 refresh worker",
   "branch": "codex/issue-2506-production-performance-2714",
@@ -78,7 +78,8 @@
     "Generation 31 rebases on main f13a77dc (#2771) and records the lane-tool supersession of migration 20260911170219 to 20260911205753 past main's newer 20260911170650; SQL bytes unchanged, benchmark and catalog test repointed at implementation head e900bd6d.",
     "Generation 32 rebases the contract on main f938f36f with no scope change.",
     "Generation 33 rebases the contract on main 72c299b8 with no scope change.",
-    "Generation 34 rebases on main 72c299b8 and records the lane-tool supersession of migration 20260911205753 to 20260911213429 past main's newer 20260911210709; SQL bytes unchanged, benchmark and catalog binding test repointed, no scope change."
+    "Generation 34 rebases on main 72c299b8 and records the lane-tool supersession of migration 20260911205753 to 20260911213429 past main's newer 20260911210709; SQL bytes unchanged, benchmark and catalog binding test repointed, no scope change.",
+    "Generation 35 rebases the contract on main 9ea5c664 with no scope change."
   ],
   "stop_conditions": [
     "Unexpected ownership or scope collision.",
