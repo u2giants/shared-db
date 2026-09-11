@@ -5542,12 +5542,9 @@ export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
           if(!history.valid)throw new LaneError(`dispatch readback is invalid; claim ${url} remains protected for explicit recovery: ${history.problems.join('; ')}`)
           if(history.events.some((event)=>event.event_id===expectedDispatch.event_id))return { version:reservation.version,claim:url,expiresAt:expiresAt.toISOString(),requestId }
         }
+        throw new LaneError(`dispatch readback remained ambiguous after bounded retries; claim ${url} remains protected for explicit recovery: ${error.message}`)
       }
-      const number=/\/(\d+)\/?$/.exec(String(url))?.[1]
-      if(!number)throw new LaneError(`lost mutex ownership after claim creation and could not identify the claim to close: ${error.message}`)
-      requireOwnedRef(MUTEX_REF,ownerSha,io)
-      io.closeClaim(number, CLAIM_CLOSE_REASONS.acquisitionRollback)
-      throw error
+      throw new LaneError(`claim ${url} remains protected for explicit recovery: ${error.message}`)
     }
     return { version: reservation.version, claim: url, expiresAt: expiresAt.toISOString(), requestId }
   } finally {

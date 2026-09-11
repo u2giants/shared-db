@@ -300,6 +300,22 @@ test('lost dispatched-comment response tolerates delayed exact-event visibility 
   assert.equal(closed,0);assert.equal(waits,2);assert.equal(outcomeHistory(comments,41).state,'dispatched')
 })
 
+test('exhausted dispatch visibility remains ambiguous and never closes the claim',()=>{
+  const comments=[],refs=new Map();let closed=0,hiddenReads=100,message=''
+  const io={
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>hiddenReads>0?comments.filter((comment)=>parseEventComment(comment.body)[0]?.event_type!=='dispatched'):comments,
+    makeOwnerCommit:()=> 'claim-owner',readRef:(ref)=>refs.get(ref)??null,
+    createRef:(ref,sha)=>{if(refs.has(ref))return false;refs.set(ref,sha);return true},deleteRef:(ref)=>refs.delete(ref),
+    openClaims:()=>[],prSources:()=>[],reserveVersion:()=>({version:'20260911133801'}),wait:()=>{},
+    createClaim:()=> 'https://github.com/u2giants/shared-db/issues/99',closeClaim:()=>{closed++},
+    commentIssue:(_n,body)=>{comments.push(ownerComment(body));if(parseEventComment(body)[0]?.event_type==='dispatched')throw new Error('response lost')},
+  }
+  const old=console.error;console.error=(value)=>{message=String(value)}
+  try{assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.example'],new Date('2026-09-11T00:00:00Z'),io),2)}finally{console.error=old}
+  assert.match(message,/readback remained ambiguous.*remains protected/);assert.equal(closed,0)
+  hiddenReads=0;assert.equal(outcomeHistory(comments,41).state,'dispatched')
+})
+
 test('lost mutex ownership never closes the newly created claim',()=>{
   const comments=[],refs=new Map();let closed=0,message=''
   const io={
