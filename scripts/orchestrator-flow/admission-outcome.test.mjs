@@ -192,8 +192,8 @@ test('a merge-closed admitted issue reopens only for a merged linked PR', () => 
   assert.equal(state,'open')
 })
 
-test('reviewer and shared-stage capacity revalidate admission after taking the author mutex',()=>{
-  for(const operation of ['reviewer','preview']){
+test('shared-stage capacity revalidates admission after taking the author mutex',()=>{
+  for(const operation of ['preview']){
     let state='open';const refs=new Map(),created=[]
     const io={
       enforceAdmission:true,makeOwnerCommit:()=>`${operation}-owner`,readRef:(ref)=>refs.get(ref)??null,
@@ -203,9 +203,7 @@ test('reviewer and shared-stage capacity revalidate admission after taking the a
     }
     const old=console.error;console.error=()=>{}
     try{
-      const args=operation==='reviewer'
-        ?['--assign-reviewer','--admit-issue','41','--issue','41','--pr','7','--head-sha','a'.repeat(40)]
-        :['--acquire-preview','--admit-issue','41','--owner','test','--pr','7','--head-sha','a'.repeat(40)]
+      const args=['--acquire-preview','--admit-issue','41','--owner','test','--pr','7','--head-sha','a'.repeat(40)]
       assert.equal(managerMain(args,new Date(),io),2)
     }finally{console.error=old}
     assert.deepEqual(created,[MUTEX_REF]);assert.equal(refs.has(EXCLUSIVE_REFS.preview),false)

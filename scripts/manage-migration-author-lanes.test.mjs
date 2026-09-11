@@ -554,6 +554,32 @@ function reviewIo(){
   return io
 }
 
+function admittedReviewIo({closeOnMutex=false}={}){
+  const io=reviewIo(),headSha='a'.repeat(40);let issueState='open',mutexCreates=0
+  const body=['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','service_class: standard-application','change_type: migration','application_return_to: u2giants/example-app','live_assertion: authenticated create-and-read succeeds','generated_types: not-applicable','outcome_stage: entered','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n')
+  io.enforceAdmission=true
+  io.getIssue=()=>({number:41,state:issueState,title:'review admission',body,createdAt:'2026-09-11T00:00:00Z'})
+  io.closingIssuesForPr=()=>[{number:41,state:issueState}]
+  io.getPr=(number)=>({number:Number(number),state:'open',merged_at:null,head:{sha:headSha,ref:'codex/x'}})
+  io.getPrFiles=()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'create table core.example(id bigint);'}]
+  io.getFileAt=()=> 'create table core.example(id bigint);'
+  const create=io.createRef
+  io.createRef=(ref,sha)=>{if(ref===MUTEX_REF){mutexCreates++;if(closeOnMutex)issueState='closed'}return create(ref,sha)}
+  return {io,headSha,mutexCreates:()=>mutexCreates}
+}
+
+test('reviewer admission shares one mutex interval on the green path',()=>{
+  const {io,headSha,mutexCreates}=admittedReviewIo()
+  const result=assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{admitIssue:41,pr:7}},io)
+  assert.ok(result.reviewer);assert.equal(mutexCreates(),1);assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('reviewer admission revalidates after its mutex is acquired',()=>{
+  const {io,headSha,mutexCreates}=admittedReviewIo({closeOnMutex:true})
+  assert.throws(()=>assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{admitIssue:41,pr:7}},io),/closed and cannot be admitted/)
+  assert.equal(mutexCreates(),1);assert.equal(io.refs.has(MUTEX_REF),false);assert.equal(io.refs.has(REVIEW_CURSOR_REF),false)
+})
+
 test('#2705 reviewer assignment skips a provider that reconciled preflight says is unusable',()=>{
   const io=reviewIo(), skipped=ACTIVE_REVIEWERS[0]
   io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.name===skipped.name?'quarantined':'ready',failure_class:row.name===skipped.name?'live-qualification-required':null,usable:row.name!==skipped.name}]))

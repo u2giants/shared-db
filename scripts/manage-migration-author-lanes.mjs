@@ -1971,13 +1971,13 @@ export const githubIo = {
   resolveOrchestratorEngine(){
     return orchestratorEngineFromResolution(readOrchestratorResolution(()=>runOrchestratorResolver()))
   },
-  orchestratorFlowAdapter(claimNumber){ return githubFlowAdapter(this,claimNumber) },
+  orchestratorFlowAdapter(claimNumber,admissionOptions=null){ return githubFlowAdapter(this,claimNumber,admissionOptions) },
   flowSnapshot(){
     return {issues:this.openClaims().map((claim)=>{const lease=parseAuthorLease(claim.body),issue=claimWorkIssue(claim),work=this.getIssue(issue),declared=/^blocked_on:\s*(issue:#\d+|artifact:[^\s]+)\s*$/m.exec(work?.body??'')?.[1]??null,reference=declared??lease.blockedOn,resolved=reference?.startsWith('issue:#')?this.getIssue(Number(reference.slice(7)))?.state==='closed':false;let preview_edge_satisfied=false,preview_error=null;try{deriveLivePreviewCandidate(issue,this);preview_edge_satisfied=true}catch(error){preview_error=error.message}return{issue,claim:claim.number,owner:lease.owner,capacity_state:lease.capacityState,blocker:reference?{durable:true,resolved,reference}:null,preview_edge_satisfied,preview_error}})}
   },
 }
 
-function githubFlowAdapter(io,claimNumber=null){
+function githubFlowAdapter(io,claimNumber=null,admissionOptions=null){
   const payload=(sha)=>{const message=io.getCommit(sha)?.message??'';const match=/^db-preview-(?:ready|outcome) ([\s\S]+)$/.exec(message);if(!match)throw new LaneError('preview coordination ref does not point to a recognized immutable payload');return JSON.parse(match[1])}
   return {
     // Same defect as `resolveOrchestratorEngine` (issue #2127): every non-zero
@@ -2000,7 +2000,7 @@ function githubFlowAdapter(io,claimNumber=null){
     relinquishCapacity(row){return relinquishAuthorLease({claim:row.claim,owner:row.owner,blockedOn:row.blocker.reference},new Date(),io)},
     resumeCapacity(row){return resumeAuthorLease({claim:row.claim,owner:row.owner,leaseHours:DEFAULT_LEASE_HOURS},new Date(),io)},
     persistReady(row){return persistInitialReady(deriveLivePreviewCandidate(Number(row.issue),io),this)},
-    withMutex(fn){const ownerSha=io.makeOwnerCommit(`db-coordination preview-ready-preparation issue=0`);acquireMutex(ownerSha,io);try{return fn()}finally{if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}},
+    withMutex(fn){const ownerSha=io.makeOwnerCommit(`db-coordination preview-ready-preparation issue=0`);acquireMutex(ownerSha,io);try{if(admissionOptions)requireAdmission(admissionOptions,io,{pr:admissionOptions.pr??null,mutexOwner:ownerSha});return fn()}finally{if(io.readRef(MUTEX_REF)===ownerSha)releaseOwnedRef(MUTEX_REF,ownerSha,io)}},
     events(issue){return (io.issueComments(issue)??[]).flatMap((comment)=>parseEventComment(comment.body??comment))},
   }
 }
@@ -4218,7 +4218,7 @@ function finishReviewerQueueTurn(ticket,io){
   if(io.readRef(ticket.ref)!==null)throw new LaneError('reviewer assignment succeeded but its queue ticket could not be cleared')
 }
 
-function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
+function assignNextReviewerOperation({issue,pr,headSha,slot=1,admissionOptions=null},io){
   const headPattern=io?.requiresExactReviewHeadSha?/^[0-9a-f]{40}$/i:/^[0-9a-f]{7,40}$/i
   if(!Number.isInteger(Number(issue))||!Number.isInteger(Number(pr))||!headPattern.test(String(headSha??'')))throw new LaneError('review assignment requires issue, PR, and exact 40-character head SHA')
   if(!Number.isInteger(Number(slot))||Number(slot)<1)throw new LaneError('review assignment slot must be a positive integer (1 = first reviewer, 2 = second independent reviewer)')
@@ -4243,6 +4243,7 @@ function assignNextReviewerOperation({issue,pr,headSha,slot=1},io){
   requireReviewWireCapacity(REVIEW_MUTEX_SECTION_RESERVE)
   acquireReviewMutex(ownerSha,io)
   try{
+    if(admissionOptions)requireAdmission(admissionOptions,io,{pr,mutexOwner:ownerSha})
     const exclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
     // Slot 1 keeps the original, unsuffixed ref namespace so every existing
     // caller and every already-recorded assignment/replacement is untouched.
@@ -4753,7 +4754,7 @@ export function releaseFailedReviewer(options,io=githubIo){
   })
 }
 
-function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot=1},io){
+function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failureCode,failingCheck,confirmLocalDependencyUnfixable,confirmNoVerdict,confirmNoArtifact,slot=1,admissionOptions=null},io){
   io=reviewOperationIo(io)
   const silenceReplacement=String(failureCode)==='silent_worker_observed'
   const request=silenceReplacement
@@ -4811,6 +4812,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
       if(liveReplacement&&liveReplacement.sha!==priorReplacement&&!staleReplacement)throw new LaneError(`reviewer ${parsed.reviewer} has an unrelated live lease; idempotent replacement repair refused`)
       ownerSha=io.makeOwnerCommit(`db-coordination reviewer-replacement-lock issue=${request.issue} pr=${request.pr} head=${request.headSha}${request.slot!==1?` slot=${request.slot}`:''}`)
       requireReviewWireCapacity(11);acquireReviewMutex(ownerSha,io);mutexAcquired=true
+      if(admissionOptions)requireAdmission(admissionOptions,io,{pr,mutexOwner:ownerSha})
       const freshStates=io.readReviewStates?.([parsed,...(staleReplacement?[staleReplacement.assignment]:[])])
       const freshExclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
       // Same deliberate refusal as the assignment paths: only --exclude-reviewer
@@ -5000,6 +5002,7 @@ function replaceFailedReviewerOperation({issue,pr,headSha,failedSequence,failure
     let failureCreated=false, cursorUpdated=false,failedLeaseReleased=false,replacementStaleReleased=false,replacementLeaseCreated=false
     requireReviewWireCapacity(12);acquireReviewMutex(ownerSha,io);mutexAcquired=true
     try{
+      if(admissionOptions)requireAdmission(admissionOptions,io,{pr,mutexOwner:ownerSha})
       const freshExclusions=reviewerExclusions(request.issue,request.pr,io,{fresh:true})
       if(freshExclusions.has(reviewer.name))throw new LaneError(`selected replacement reviewer ${reviewer.name} became excluded for this PR before mutex acquisition; retry to select from the fresh roster`)
       if(io.atomicReviewRefs){
@@ -5502,12 +5505,6 @@ function requireAdmission(options, io, { pr = null, timestamp, mutexOwner = null
     if(requested.length!==authorized.length||requested.some((value,index)=>value!==authorized[index]))throw new LaneError(`--claim objects must exactly match admitted issue #${options.admitIssue} writes`)
   }
   return admitted
-}
-
-function withAdmissionOperation(options,io,{pr=null}={},operation){
-  if(io.enforceAdmission!==true)return operation(null)
-  requireAdmissionArguments(options,io,{pr})
-  return withAuthorMutex('admission-operation',io,options,(ownerSha)=>{requireAdmission(options,io,{pr,mutexOwner:ownerSha});return operation(ownerSha)})
 }
 
 export function acquireAuthorLane(options, now = new Date(), io = githubIo) {
@@ -6513,7 +6510,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     const o = parseArgs(argv)
     if(o.authorizeRepositoryMaintenanceStatus){console.log(JSON.stringify(authorizeRepositoryMaintenanceStatus(o,io),null,2));return 0}
     if(o.resolveAdmittedIssueForPr){console.log(JSON.stringify(resolveAdmittedIssueForPr(o.resolveAdmittedIssueForPr,io),null,2));return 0}
-    const admissionOnly=o.admitIssue&&!o.claim&&!o.assignReviewer&&!o.acquireExclusive&&!o.replaceFailedReviewer&&!o.completeOutcome&&!o.outcomeStatus&&!o.advanceOutcome
+    const admissionOnly=o.admitIssue&&!o.claim&&!o.assignReviewer&&!o.acquireExclusive&&!o.replaceFailedReviewer&&!o.preparePreviewDispatch&&!o.completeOutcome&&!o.outcomeStatus&&!o.advanceOutcome
     if(admissionOnly){console.log(JSON.stringify(admitIssueSerialized(o.admitIssue,io,{pr:o.pr??null}),null,2));return 0}
     if(o.outcomeStatus){console.log(JSON.stringify(outcomeHistory(io.issueComments(o.outcomeStatus),Number(o.outcomeStatus)),null,2));return 0}
     if(o.advanceOutcome){
@@ -6541,7 +6538,8 @@ export function main(argv, now = new Date(), io = githubIo) {
     }
     if(o.preparePreviewDispatch){
       if(typeof io.orchestratorFlowAdapter!=='function')throw new LaneError('preview preparation runtime adapter is unavailable')
-      const result=withAdmissionOperation(o,io,{pr:o.pr},()=>preparePreviewDispatch(o.preparePreviewDispatch,io.orchestratorFlowAdapter(o.claimNumber)))
+      requireAdmissionArguments(o,io,{pr:o.pr})
+      const result=preparePreviewDispatch(o.preparePreviewDispatch,io.orchestratorFlowAdapter(o.claimNumber,io.enforceAdmission===true?o:null))
       console.log(JSON.stringify(result,null,2));return 0
     }
     if(o.repairPreviewReady){
@@ -6568,7 +6566,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.resumeAuthorLease){console.log(JSON.stringify(resumeAuthorLease({...o,claim:o.claimNumber??o.claim},now,io),null,2));return 0}
     if(o.reissueMergedClaim){console.log(JSON.stringify(reissueMergedStrandedClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
     if(o.reversionClaim){console.log(JSON.stringify(reversionActiveClaim({...o,claim:o.claimNumber},now,io),null,2));return 0}
-    if(o.replaceFailedReviewer){const result=withAdmissionOperation(o,io,{pr:o.pr},()=>replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io));console.log(JSON.stringify(result,null,2));return 0}
+    if(o.replaceFailedReviewer){requireAdmissionArguments(o,io,{pr:o.pr});const result=replaceFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1,admissionOptions:io.enforceAdmission===true?o:null},io);console.log(JSON.stringify(result,null,2));return 0}
     if(o.releaseFailedReviewer){console.log(JSON.stringify(releaseFailedReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io),null,2));return 0}
     if(o.probeSilentReviewer){console.log(JSON.stringify(probeSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
     if(o.reclaimSilentReviewer){console.log(JSON.stringify(reclaimSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
@@ -6576,7 +6574,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.excludeReviewer){console.log(JSON.stringify(excludeReviewerForPr(o,io),null,2));return 0}
     if(o.reinstateReviewerExclusion){console.log(JSON.stringify(reinstateReviewerExclusion(o,io),null,2));return 0}
     if(o.reviewerPreflight){console.log(JSON.stringify(reviewerExecutionPreflight(o,io),null,2));return 0}
-    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);const result=withAdmissionOperation(o,io,{pr:o.pr},()=>{assertReviewerDrawIsWarranted(o.pr,io);return assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},io)});console.log(JSON.stringify(result,null,2));return 0}
+    if(o.assignReviewer){assertReviewerDrawIsWarranted(o.pr,io);requireAdmissionArguments(o,io,{pr:o.pr});const result=assignNextReviewer({issue:o.issue,pr:o.pr,headSha:o.headSha,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1,admissionOptions:io.enforceAdmission===true?o:null},io);console.log(JSON.stringify(result,null,2));return 0}
     if(o.activateReviewCutover){console.log(JSON.stringify(activateReviewCutover(io),null,2));return 0}
     if (o.acquireExclusive) { requireAdmissionArguments(o,io,{pr:o.pr??null});console.log(JSON.stringify(acquireExclusive(o.acquireExclusive, { owner:o.owner, pr:o.pr, headSha:o.headSha, versions:o.versions, versionPrMap:o.versionPrMap, admissionOptions:o }, io), null, 2)); return 0 }
     if (o.releaseExclusive) { if (!o.ownerSha) throw new LaneError('--owner-sha is required for safe release'); releaseOwnedRef(EXCLUSIVE_REFS[o.releaseExclusive], o.ownerSha, io); return 0 }
