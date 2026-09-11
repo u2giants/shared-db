@@ -1,24 +1,16 @@
 {
   "schema_version": 1,
-  "work_issue": 2715,
+  "work_issue": 2766,
   "outcome": "ready-for-merge",
-  "pr": 2737,
+  "pr": 2767,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2715/4",
-  "contract_sha256": "ebd03a0ed9437413447d0382b41bbc36fa27294374110ba6b55b65854ba3f871",
-  "head_sha": "8f26ff60f0366f7ff76f323db769ba8d6094dc45",
+  "contract_ref": "refs/db-contracts/2766/1",
+  "contract_sha256": "0907da5c9c7d83472c40dc1d37939baa9a64396792d0c41e4e833924b27f4479",
+  "head_sha": "5a9c2e54fae177040884f4d7f03a52a1d52c3174",
   "files_changed": [
-    ".github/workflows/documents-only-merge-authorization.yml",
-    "AGENTS.md",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-documents-only-merge-authorization.mjs",
-    "scripts/check-documents-only-merge-authorization.test.mjs",
-    "scripts/check-documents-only-pull-request.mjs",
-    "scripts/documents-only-merge-authorization.test.mjs",
-    "scripts/lib/documents-only-change.mjs",
+    "docs/agents/section-4-anti-collision-rules.md",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/repository-maintenance-authorization.test.mjs"
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -26,33 +18,27 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on the exact rebased implementation diff."
+      "evidence": "No whitespace errors."
     },
     {
-      "command": "node --test scripts/lib/documents-only-change.test.mjs scripts/check-documents-only-pull-request.test.mjs scripts/check-documents-only-merge-authorization.test.mjs scripts/documents-only-merge-authorization.test.mjs scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
       "exit_code": 0,
-      "evidence": "562 tests passed with zero failures, cancellations, skips, or todos on main 84a1a1d7."
+      "evidence": "524 tests passed, 0 failed, 0 skipped."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Truth audit passed with 275 semantically bound call sites."
+      "evidence": "truth audit OK: call_sites=275"
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "All GitHub calls in 212 scanned files use the governed transport."
+      "evidence": "212 files scanned, all calls governed."
     }
   ],
   "assumptions_resolved": [
-    "Live issue, pull request, branch, worktree, and Codex task inventory found no prior owner for issue 2715.",
-    "The implementation changes no migration and performs no database or production write.",
-    "The command uses only the global mutex, proves production absent, and cannot consume author, reviewer, preview, merge, or production capacity.",
-    "Plans and bounded declarative pointer hunks qualify; behavior-changing rulebooks and every executable or unreadable change fail closed.",
-    "Eight independent review rounds found and resolved permissions, grammar, race, retarget, trust-boundary, link-target, recovery, live-base, and stale-status defects.",
-    "The ninth review found that a truncated instruction-file patch could hide additional changed lines; the classifier now proves API line totals and every hunk count before accepting a pointer.",
-    "The final implementation was rebuilt as the identical net feature diff directly on current main 84a1a1d7, removing obsolete evidence-only history before this immutable evidence pair."
+    "The legacy queue code stays tested behind enableReviewerQueue; live githubIo disables it."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Implementation is ready for final exact-head independent reviewer-safety review, required CI, guarded merge, and a live prose-only acceptance pull request."
+  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
 }
