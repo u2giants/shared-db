@@ -1,52 +1,70 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
+  "work_issue": 2506,
   "outcome": "ready-for-merge",
-  "pr": 2746,
+  "pr": 2726,
   "migration_versions": [
-    "20260911212849"
+    "20260911213429"
   ],
-  "contract_ref": "refs/db-contracts/2478/4",
-  "contract_sha256": "433e32594d69874c2cae511acec319c749d96af1334a8fbae6581a8f792f7d84",
-  "head_sha": "462d5ee4765c575c043d9708a30bf6b626c09df5",
+  "contract_ref": "refs/db-contracts/2506/37",
+  "contract_sha256": "beb5102231ceb894bcad2edb12da7c7670d92bc4abc8beb87623a852e98c8994",
+  "head_sha": "feb3a45710dd05b7e541797c6c93fc92abe5cc90",
   "files_changed": [
-    "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/benchmark_popsg_search_v2_production.py",
+    "scripts/production-verification-sidecars/20260911213429.json",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
+    "scripts/test_production_catalog_verification.py",
+    "supabase/migrations/20260911213429_popsg_search_v2_production_performance.sql"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "table public.style_guide_search_documents",
+    "table public.style_guide_render_queue"
+  ],
   "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
+    "function public.search_style_guide_library_v2",
+    "index public.idx_sgf_live_preview_ids",
+    "index public.idx_sgf_live_missing_clean_ids",
+    "index public.idx_sgf_live_missing_error_ids",
+    "table public.style_guide_files"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
+      "evidence": "SQL guards pass at aad19862 after supersession to 20260911170219 (backdated guard clear against main 5761bc5e)."
     },
     {
-      "command": "local PostgreSQL helper parity contracts",
+      "command": "python scripts/benchmark_popsg_search_v2_production.py --parity-only",
       "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
+      "evidence": "PASS: authorization boundary identical for baseline and forward (deny authenticated-without-access, deny anon, allow authorized). PASS: 160 exact full-JSON parity cases; 0 skipped. Fresh disposable loopback PostgreSQL at aad19862."
     },
     {
-      "command": "git diff --check",
+      "command": "python -m unittest scripts.test_production_catalog_verification",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
-    },
-    {
-      "command": "python -m unittest scripts.test_migration_derivation",
-      "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
+      "evidence": "Ran 189 tests, OK, including the new binding of the production-performance catalog md5 to the 20260911170219 function body."
     }
   ],
   "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
+    "Full production-width synthetic benchmark217193 docs and11660 queue rows: files6469→3315ms; guides4520→3292ms, identical complete-result hashes. Eight-second timeout unchanged.",
+    "No shared database writes performed.",
+    "Main39ee46b2 merged without SQL changes.188 verifier tests and complete sidecar inventory pass on this integration.",
+    "Existing160 exact JSON parity cases, production-width benchmark and dirty visibility-map proof retained; no unchanged benchmark rerun.",
+    "One governed external review, required CI, parent preview and actual production runtime acceptance remain separate delivery gates.",
+    "Exact-PR supported expansion added the CREATE INDEX parent table to claim2722; no structural SQL changed. Contract16 immutable ref readback confirmed after transient GitHub visibility delay.",
+    "Main8e81462f integration preserves SQL and benchmarks; 188 catalog tests and 275-site truth audit pass again. Contract17 published for refreshed exact-head review.",
+    "Main5af3fafa maintenance integration changes no migration or benchmark bytes. Prior GLM approval remains historical only; new exact-head review required.",
+    "Main208ba30d integration preserves SQL/benchmark bytes; contract19 replaces metadata authority, fresh exact-head CI and review pending.",
+    "Main5eaebe7c integrated; supersession re-reserved 20260911051552 as 20260911124016 (rename only, SQL bytes unchanged). Contract20 published; Grok assignment2323 stays bound to superseded head84e9bd0c, fresh exact-head review pending.",
+    "Contract21 binds both evidence files after implementation head967d6349.",
+    "Refreshed on main b68a1900 at implementation head 8bde76f5 (merge commit; only the two .agent evidence files conflicted). Contract generation 22 records the new base; both evidence files follow that head together.",
+    "Refreshed on main 9da98ede at implementation head f721c5d0 (merge commit; only the two .agent evidence files conflicted). Contract generation 23 records the new base; both evidence files follow that head together.",
+    "Refreshed on main 9b02ad48 at implementation head a2b58746 (merge commit; only the two .agent evidence files conflicted). Contract generation 24 records the new base; both evidence files follow that head together.",
+    "Grok REVISE 6a1d4ad7 findings 1-4 addressed at aad19862 (contract 25): migration lock/statement bounds, asserted full-width hash equality, authorization boundary in the parity run, catalog md5 unit binding; version superseded to 20260911170219 by the lane tool."
   ],
   "stop_conditions_hit": []
 }
