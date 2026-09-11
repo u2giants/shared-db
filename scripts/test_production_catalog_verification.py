@@ -1636,7 +1636,7 @@ class BehavioralSidecarTests(unittest.TestCase):
         temp, root, migration = self.fixture(change)
         with temp:
             sql = build_behavior_sql(self.load(root, migration))
-        forward = Path(__file__).resolve().parents[1] / "supabase/migrations/20260911205753_popsg_search_v2_production_performance.sql"
+        forward = Path(__file__).resolve().parents[1] / "supabase/migrations/20260911213429_popsg_search_v2_production_performance.sql"
         import hashlib
         body = forward.read_bytes().replace(b"\r\n", b"\n").decode().split("$function$")
         self.assertEqual(len(body), 3, "forward migration must define exactly one $function$ body")
