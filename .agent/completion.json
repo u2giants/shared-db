@@ -4,21 +4,22 @@
   "outcome": "ready-for-merge",
   "pr": 2726,
   "migration_versions": [
-    "20260911124016"
+    "20260911170219"
   ],
-  "contract_ref": "refs/db-contracts/2506/24",
-  "contract_sha256": "5b0b8e147cdbbf0d3c09e929b7831b640f53fb651bdff7ade804625d4868b2b5",
-  "head_sha": "a2b587468fbec78813a78c03f1bc9262b9366a2f",
+  "contract_ref": "refs/db-contracts/2506/25",
+  "contract_sha256": "80b0a254ebda7516641c39895b209aab986dd28a6d4b38868a445e2c8c21fdaa",
+  "head_sha": "aad198622834b6827dfda4e591d9b89ab6101294",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/benchmark_popsg_search_v2_production.py",
-    "scripts/production-verification-sidecars/20260911124016.json",
+    "scripts/production-verification-sidecars/20260911170219.json",
     "scripts/production_business_risk_gate.py",
     "scripts/production_catalog_verification.py",
-    "supabase/migrations/20260911124016_popsg_search_v2_production_performance.sql"
+    "scripts/test_production_catalog_verification.py",
+    "supabase/migrations/20260911170219_popsg_search_v2_production_performance.sql"
   ],
   "db_reads": [
     "table public.style_guide_search_documents",
@@ -33,24 +34,19 @@
   ],
   "checks": [
     {
+      "command": "bash scripts/check-sql.sh",
+      "exit_code": 0,
+      "evidence": "SQL guards pass at aad19862 after supersession to 20260911170219 (backdated guard clear against main 5761bc5e)."
+    },
+    {
       "command": "python scripts/benchmark_popsg_search_v2_production.py --parity-only",
       "exit_code": 0,
-      "evidence": "PASS: 160 exact full-JSON parity cases, 0 skipped, on a disposable local PostgreSQL after the benchmark was pointed at 20260911124016."
+      "evidence": "PASS: authorization boundary identical for baseline and forward (deny authenticated-without-access, deny anon, allow authorized). PASS: 160 exact full-JSON parity cases; 0 skipped. Fresh disposable loopback PostgreSQL at aad19862."
     },
     {
       "command": "python -m unittest scripts.test_production_catalog_verification",
       "exit_code": 0,
-      "evidence": "Ran 188 tests, OK, on the refreshed head."
-    },
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards passed on main5eaebe7c integration after supported supersession to 20260911124016."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "truth audit OK: 276 semantically bound call sites after main5eaebe7c merge; digest recomputed, no disposition changed."
+      "evidence": "Ran 189 tests, OK, including the new binding of the production-performance catalog md5 to the 20260911170219 function body."
     }
   ],
   "assumptions_resolved": [
@@ -67,7 +63,8 @@
     "Contract21 binds both evidence files after implementation head967d6349.",
     "Refreshed on main b68a1900 at implementation head 8bde76f5 (merge commit; only the two .agent evidence files conflicted). Contract generation 22 records the new base; both evidence files follow that head together.",
     "Refreshed on main 9da98ede at implementation head f721c5d0 (merge commit; only the two .agent evidence files conflicted). Contract generation 23 records the new base; both evidence files follow that head together.",
-    "Refreshed on main 9b02ad48 at implementation head a2b58746 (merge commit; only the two .agent evidence files conflicted). Contract generation 24 records the new base; both evidence files follow that head together."
+    "Refreshed on main 9b02ad48 at implementation head a2b58746 (merge commit; only the two .agent evidence files conflicted). Contract generation 24 records the new base; both evidence files follow that head together.",
+    "Grok REVISE 6a1d4ad7 findings 1-4 addressed at aad19862 (contract 25): migration lock/statement bounds, asserted full-width hash equality, authorization boundary in the parity run, catalog md5 unit binding; version superseded to 20260911170219 by the lane tool."
   ],
   "stop_conditions_hit": []
 }
