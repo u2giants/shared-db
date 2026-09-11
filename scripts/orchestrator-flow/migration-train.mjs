@@ -8,6 +8,25 @@ const VERSION=/^\d{14}$/, SHA=/^[0-9a-f]{40}$/i, DIGEST=/^[0-9a-f]{64}$/i
 const trainRef=(record)=>`${TRAIN_REF_PREFIX}/${record.train_id}/${String(record.generation).padStart(6,'0')}-${record.state}`
 const recordDigest=(record)=>sha256(canonicalJson(record))
 const sameRecord=(left,right)=>canonicalJson(left)===canonicalJson(right)
+const PREDECESSOR_STATES=Object.freeze({authorized:['proposed'],dispatched:['authorized','failed'],failed:['dispatched'],closed:['dispatched']})
+
+function assertLifecycleChain(record,io,seen=new Set()){
+  if(!Number.isSafeInteger(record?.generation)||record.generation<1||!TRAIN_STATES.includes(record?.state))throw new MigrationTrainError('train lifecycle state or generation is malformed')
+  const ref=trainRef(record)
+  if(seen.has(ref))throw new MigrationTrainError('train lifecycle contains a predecessor cycle')
+  seen.add(ref)
+  if(record.generation===1){
+    if(record.state!=='proposed'||record.previous_ref!==undefined||record.previous_digest!==undefined)throw new MigrationTrainError('train generation 1 must be the canonical proposal with no predecessor')
+    if(!sameRecord(record,proposeTrain(record)))throw new MigrationTrainError('train generation 1 does not match its canonical manifest digest')
+    return true
+  }
+  if(record.state==='proposed'||typeof record.previous_ref!=='string'||!DIGEST.test(String(record.previous_digest??'')))throw new MigrationTrainError('later train generation requires an exact predecessor ref and digest')
+  const match=new RegExp(`^${TRAIN_REF_PREFIX}/${record.train_id}/(\\d{6})-(${TRAIN_STATES.join('|')})$`).exec(record.previous_ref)
+  if(!match||Number(match[1])!==record.generation-1||!PREDECESSOR_STATES[record.state]?.includes(match[2]))throw new MigrationTrainError('train predecessor state or generation is not an allowed exact prior generation')
+  const prior=io.readImmutable(record.previous_ref)
+  if(!prior||prior.digest!==record.previous_digest||recordDigest(prior.record)!==record.previous_digest||trainRef(prior.record)!==record.previous_ref)throw new MigrationTrainError('train predecessor durable readback does not match its ref and digest')
+  return assertLifecycleChain(prior.record,io,seen)
+}
 
 function requireExactEntries(entries){
   if(!Array.isArray(entries)||!entries.length)throw new MigrationTrainError('train requires a nonempty exact migration list')
@@ -75,6 +94,7 @@ export function transitionTrain(manifest,next,io,{authorization_digest=null,curr
   const persistedManifest=Object.fromEntries(Object.entries(manifest).filter(([key])=>!runtimeKeys.has(key)))
   const persistedDigest=recordDigest(persistedManifest)
   if(!predecessor||predecessor.digest!==persistedDigest||!sameRecord(predecessor.record,persistedManifest))throw new MigrationTrainError('exact immutable predecessor is missing or changed')
+  assertLifecycleChain(persistedManifest,io)
   if(next==='authorized'&&(manifest.validated!==true||!DIGEST.test(String(authorization_digest??''))||current_main_sha!==manifest.base_main_sha||target_identity!==manifest.target_identity))throw new MigrationTrainError('authorization requires a validated manifest, exact current main and target, and policy-evidence digest')
   if(next==='dispatched'&&(current_main_sha!==manifest.base_main_sha||target_identity!==manifest.target_identity))throw new MigrationTrainError('dispatch requires the authorization\'s exact current main and target')
   const exact=manifest.entries.map((e)=>e.version),prefix=[...applied_prefix].map(String)
