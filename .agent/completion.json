@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2771,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2772/8",
-  "contract_sha256": "be7fd9520519ecab3bc884c378beeb7132df27893cc3ad189fbbfd174d973aae",
-  "head_sha": "c8433d938e1c94d550b20c22c4daec69da8d636c",
+  "contract_ref": "refs/db-contracts/2772/9",
+  "contract_sha256": "a17a4523c3e99e05629b6a3baa8cc2d6c99f2ebd72c6d0142028b0e1bce9e630",
+  "head_sha": "ff60001946c4bafdf23c8649a4107563dba56fb0",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -20,7 +20,7 @@
   "db_writes": [],
   "checks": [
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."},
-    {"command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py", "exit_code": 0, "evidence": "178 passed, 153 subtests passed (adds hidden-default, PostgreSQL identity, search_path, and same-table recreate cases from the #2771 review)."}
+    {"command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py", "exit_code": 0, "evidence": "188 passed, 162 subtests passed with scripts/test_production_review_source_pr_preflight.py included (adds producer-pin, type-shadowing after search_path, and CREATE TABLE IF NOT EXISTS cases from the #2771 grok review; the new cases fail against the pre-fix gate)."}
   ],
   "assumptions_resolved": [
     "The contract-test workflow now uploads applied-migrations.txt; runs from before this merge are refused, so preview stays required for them."

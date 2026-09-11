@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2772,
-  "generation": 8,
+  "generation": 9,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Let a merged low-risk migration promote to production on exact-head ephemeral database CI evidence instead of a shared-preview apply, keeping preview mandatory for high-risk SQL.",
