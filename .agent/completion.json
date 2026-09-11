@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/46",
-  "contract_sha256": "d572aac5138498fdafdd1bd7398224dc07bfbaecdc10a1a787f685f45c2b6eec",
-  "head_sha": "249180aa410f977937c4e2a29d2c356ee4686382",
+  "contract_ref": "refs/db-contracts/2727/47",
+  "contract_sha256": "507fbe1ca127f4177d873d9a9f21616f6499a6fa4eb46d14cd6545f14c40e935",
+  "head_sha": "c0d79b622d6bda97a10fa561a38009a786abaa5f",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -36,37 +36,37 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check e420cd86 249180aa reports no whitespace errors."
+      "evidence": "git diff --check 485a0ba5 c0d79b62 reports no whitespace errors."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at 249180aa."
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at c0d79b62."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "736 tests, 736 pass, 0 fail, 0 skipped at 249180aa."
+      "evidence": "736 tests, 736 pass, 0 fail, 0 skipped at c0d79b62."
     },
     {
       "command": "python -m unittest scripts.test_production_owner_decision_evidence",
       "exit_code": 0,
-      "evidence": "9 tests passed at 249180aa, including effective production job permission coverage."
+      "evidence": "9 tests passed at c0d79b62, including effective production job permission coverage."
     },
     {
       "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "242 tests passed at 249180aa, including effective job-level permission and guarded-operation routing coverage."
+      "evidence": "242 tests passed at c0d79b62, including effective job-level permission and guarded-operation routing coverage."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=280 at 249180aa."
+      "evidence": "truth audit OK: call_sites=280 at c0d79b62."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "221 files scanned at 249180aa; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "221 files scanned at c0d79b62; every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
@@ -89,7 +89,7 @@
     "Current main 9ea5c664 is integrated; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
     "The existing production owner decision regression now parses inline permission comments and requires effective issues write for production-apply while retaining issues read for production-apply-review.",
     "The shared workflow defaults to issues read; only preview and production-apply override to issues write, while validate, production-dry-run, and production-apply-review remain effectively read-only for issues.",
-    "Current main e420cd86 is integrated. Guarded merge and reviewer assignment now rederive structural versus deterministic repository-maintenance routing from the exact live pull request and linked issue inside the held mutex; no caller-controlled bypass exists, and ambiguous or mixed routing refuses."
+    "Current main 485a0ba5 is integrated. Guarded merge and reviewer assignment now rederive structural versus deterministic repository-maintenance routing from the exact live pull request and linked issue inside the held mutex; no caller-controlled bypass exists, and ambiguous or mixed routing refuses."
   ],
   "stop_conditions_hit": []
 }
