@@ -11,6 +11,8 @@
   "head_sha": "7cddf1eca0ff855a7eb103978cb2296a88ac1823",
   "evidence_note": "Successor refresh preserves prior implementation ancestry and unchanged SQL/tests. Current implementation head merges current main; only the two evidence files follow. Prior hosted tests remain historical proof; new head CI will be checked separately.",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260909162929_popsg_pdf_terminal_outcomes.sql",
     "supabase/tests/popsg_pdf_terminal_outcome_contracts.sql"
   ],
