@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange } from './admission.mjs'
 import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
 import { formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
-import { buildDynamicQueues, claimBody, main as managerMain, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
+import { buildDynamicQueues, claimBody, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
 import { findCompletionRecord } from '../lib/work-dependencies.mjs'
 
 const issue = (body, number = 41) => ({ number, state: 'open', title: 'structural outcome', body, createdAt: '2026-09-11T00:00:00Z' })
@@ -41,7 +41,9 @@ test('all four urgent impacts qualify only with environment, evidence, and appli
 
 test('actual pull request files must contain a migration before reviewer or shared-stage admission', () => {
   assert.throws(()=>assertPrCarriesStructuralChange([{filename:'scripts/tool.mjs',status:'modified'}]),/no added or modified migration/)
-  assert.deepEqual(assertPrCarriesStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}]),['supabase/migrations/20260911120000_example.sql'])
+  assert.deepEqual(assertPrCarriesStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'create table core.example(id bigint);'}]),['supabase/migrations/20260911120000_example.sql'])
+  assert.throws(()=>assertPrCarriesStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'insert into core.example values (1);'}]),/actual change is not structural/)
+  assert.throws(()=>assertPrCarriesStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'alter widget core.example frobnicate;'}]),/unmodelled DDL/)
 })
 
 test('finish-first queue order is service class, nearest-live stage, transitive impact, creation time, then issue', () => {
@@ -106,11 +108,20 @@ test('source PR resolves exactly one linked open issue and independently admits 
   const comments=[]
   const io={
     closingIssuesForPr:()=>[{number:41,state:'open'}],getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body}),
-    getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],
+    getPr:()=>({head:{sha:'a'.repeat(40)}}),getFileAt:()=> 'create table core.example(id bigint);',getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],
   }
   assert.deepEqual(resolveAdmittedIssueForPr(7,io),{issue:41,pr:7,admission:'admitted'})
   io.closingIssuesForPr=()=>[{number:41,state:'open'},{number:42,state:'open'}]
   assert.throws(()=>resolveAdmittedIssueForPr(7,io),/exactly one open/)
+})
+
+test('downloaded proof contents bind live assertion and generated types to exact issue and app head',()=>{
+  const evidence={work_issue:41,application_commit_sha:'a'.repeat(40),live_assertion:'create works',environment:'production',generated_types_output_digest:`sha256:${'b'.repeat(64)}`}
+  const live={schema_version:1,work_issue:41,application_commit_sha:'a'.repeat(40),live_assertion:'create works',environment:'production',result:'passed',observed_at:'2026-09-11T01:00:00Z'}
+  const types={schema_version:1,work_issue:41,application_commit_sha:'a'.repeat(40),result:'passed',generated_types_sha256:`sha256:${'b'.repeat(64)}`}
+  assert.equal(matchesLiveProof(live,evidence),true);assert.equal(matchesGeneratedTypesProof(types,evidence),true)
+  assert.equal(matchesLiveProof({...live,live_assertion:'something else'},evidence),false)
+  assert.equal(matchesGeneratedTypesProof({...types,application_commit_sha:'c'.repeat(40)},evidence),false)
 })
 
 test('full capacity records urgent waiting without revoking active work', () => {
@@ -143,12 +154,12 @@ test('every linear outcome transition records exactly once and every skip refuse
 function completionFixture({through='production_applied',generated='not-applicable'}={}) {
   const comments=eventComments(through), merge='a'.repeat(40), app='b'.repeat(40)
   let issueState='open'
-  const evidence={schema_version:1,work_issue:41,merge_pr:7,merge_sha:merge,application_repository:'u2giants/example-app',application_commit_sha:app,live_assertion:'authenticated create-and-read succeeds',live_evidence:'https://github.com/u2giants/example-app/actions/runs/99',live_artifact_id:123,live_artifact_digest:`sha256:${'c'.repeat(64)}`,environment:'production',verified_at:'2026-09-11T01:00:00Z',...(generated==='required'?{generated_types_evidence:'artifact:generated-types/99'}:{})}
+  const evidence={schema_version:1,work_issue:41,merge_pr:7,merge_sha:merge,application_repository:'u2giants/example-app',application_commit_sha:app,live_assertion:'authenticated create-and-read succeeds',live_evidence:'https://github.com/u2giants/example-app/actions/runs/99',live_artifact_id:123,live_artifact_digest:`sha256:${'c'.repeat(64)}`,environment:'production',verified_at:'2026-09-11T01:00:00Z',...(generated==='required'?{generated_types_evidence:'https://github.com/u2giants/example-app/actions/runs/98',generated_types_artifact_id:122,generated_types_artifact_digest:`sha256:${'d'.repeat(64)}`,generated_types_output_digest:`sha256:${'e'.repeat(64)}`}:{})}
   const io={
     getIssue:()=>({...issue(scopeBody({generated})),state:issueState}),updateIssue:(_n,fields)=>{issueState=fields.state},parseScope:parseQueueScope,issueComments:()=>comments,
     readOutcomeEvidence:()=>['```db-outcome-evidence',JSON.stringify(evidence),'```'].join('\n'),
     getPr:()=>({merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:merge}),mergeCommitInMain:()=>true,
-    applicationCommitInDefaultBranch:()=>true,verifyLiveAssertion:()=>true,
+    applicationCommitInDefaultBranch:()=>true,verifyLiveAssertion:()=>true,verifyGeneratedTypes:()=>true,
     commentIssue:(_n,body)=>comments.push({body}),
   }
   return {io,comments}
@@ -162,9 +173,33 @@ test('completion re-derives merge, application, generated types, and live assert
   assert.equal(findCompletionRecord(comments).outcome,'live_verified')
 })
 
+test('completion resumes after the live event when a later write lost its response',()=>{
+  const {io,comments}=completionFixture()
+  const normal=io.commentIssue;let failed=false
+  io.commentIssue=(number,body)=>{
+    if(body.includes('Authoritative outcome completion')&&!failed){failed=true;throw new Error('response lost')}
+    normal(number,body)
+  }
+  assert.throws(()=>completeOutcome({issue:41,evidenceRef:'https://github.com/u2giants/shared-db/issues/41#issuecomment-9',actor:'test',timestamp:'2026-09-11T02:00:00Z'},io),/response lost/)
+  assert.equal(outcomeHistory(comments).state,'live_verified')
+  assert.equal(completeOutcome({issue:41,evidenceRef:'https://github.com/u2giants/shared-db/issues/41#issuecomment-9',actor:'test',timestamp:'2026-09-11T02:01:00Z'},io).completed,true)
+  assert.equal(comments.filter((row)=>row.body.includes('Authoritative outcome completion')).length,1)
+})
+
+test('completion retries safely after completion-comment or close response loss',()=>{
+  for(const boundary of ['completion-comment','close']){
+    const {io,comments}=completionFixture();const normalComment=io.commentIssue,normalUpdate=io.updateIssue;let failed=false
+    if(boundary==='completion-comment')io.commentIssue=(number,body)=>{normalComment(number,body);if(body.includes('Authoritative outcome completion')&&!failed){failed=true;throw new Error('completion response lost')}}
+    else io.updateIssue=(number,fields)=>{normalUpdate(number,fields);if(!failed){failed=true;throw new Error('close response lost')}}
+    assert.throws(()=>completeOutcome({issue:41,evidenceRef:'https://github.com/u2giants/shared-db/issues/41#issuecomment-9',actor:'test'},io),/response lost/)
+    assert.equal(completeOutcome({issue:41,evidenceRef:'https://github.com/u2giants/shared-db/issues/41#issuecomment-9',actor:'test'},io).completed,true,boundary)
+    assert.equal(comments.filter((row)=>row.body.includes('Authoritative outcome completion')).length,1,boundary)
+  }
+})
+
 test('completion refuses preview-only, merge-only, missing generated types, missing return address, and mismatched live assertion', () => {
   for(const through of ['preview_verified','merged']){const {io}=completionFixture({through});assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/not production_applied/)}
-  {const {io}=completionFixture({generated:'required'});const base=io.readOutcomeEvidence;io.readOutcomeEvidence=()=>base().replace(',"generated_types_evidence":"artifact:generated-types/99"','');assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/generated types/)}
+  {const {io}=completionFixture({generated:'required'});const base=io.readOutcomeEvidence;io.readOutcomeEvidence=()=>base().replace(/,"generated_types_evidence":"[^"]+"/,'');assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/generated types/)}
   {const {io}=completionFixture();io.getIssue=()=>issue(scopeBody({returnTo:''}));assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/application_return_to|return address/)}
   {const {io}=completionFixture();const base=io.readOutcomeEvidence;io.readOutcomeEvidence=()=>base().replace('authenticated create-and-read succeeds','different assertion');assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/live_assertion/)}
 })

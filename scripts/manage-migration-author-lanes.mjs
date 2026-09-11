@@ -4,7 +4,8 @@ import { execFileSync } from 'node:child_process'
 import { runGitHubCommand as sharedRunGitHubCommand, isTransientGitHubTransport } from './lib/github-transport.mjs'
 import { createTreeReader } from './lib/github-tree.mjs'
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { gatherOpenPrObjects, normalizeObject, parseClaimBlock } from './check-dispatch-collision.mjs'
@@ -1362,6 +1363,13 @@ function requireClaimCloseReason(reason) {
   return reason
 }
 
+export function matchesLiveProof(proof,evidence){
+  return proof?.schema_version===1&&proof.work_issue===evidence.work_issue&&proof.application_commit_sha===evidence.application_commit_sha&&proof.live_assertion===evidence.live_assertion&&proof.environment===evidence.environment&&proof.result==='passed'&&typeof proof.observed_at==='string'&&!Number.isNaN(Date.parse(proof.observed_at))
+}
+export function matchesGeneratedTypesProof(proof,evidence){
+  return proof?.schema_version===1&&proof.work_issue===evidence.work_issue&&proof.application_commit_sha===evidence.application_commit_sha&&proof.result==='passed'&&proof.generated_types_sha256===evidence.generated_types_output_digest
+}
+
 export const githubIo = {
   enforceAdmission:true,
   enableReviewerQueue:true,
@@ -1797,7 +1805,32 @@ export const githubIo = {
     if(!Array.isArray(artifacts))return false
     const artifact=artifacts.find((row)=>Number(row.id)===Number(evidence.live_artifact_id))
     const expectedName=`shared-db-live-proof-${evidence.work_issue}-${String(evidence.application_commit_sha).toLowerCase()}`
-    return artifact?.name===expectedName&&artifact.expired===false&&String(artifact.digest??'').toLowerCase()===String(evidence.live_artifact_digest).toLowerCase()
+    if(!(artifact?.name===expectedName&&artifact.expired===false&&String(artifact.digest??'').toLowerCase()===String(evidence.live_artifact_digest).toLowerCase()))return false
+    const proof=this.readArtifactJson(match[1],artifact.id,'db-live-proof.json')
+    return matchesLiveProof(proof,evidence)
+  },
+  verifyGeneratedTypes(evidence){
+    const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)$/.exec(String(evidence?.generated_types_evidence??''))
+    if(!match)return false
+    const run=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}`])
+    if(run?.conclusion!=='success'||String(run?.head_sha??'').toLowerCase()!==String(evidence.application_commit_sha).toLowerCase())return false
+    const artifacts=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}/artifacts`])?.artifacts
+    const artifact=Array.isArray(artifacts)?artifacts.find((row)=>Number(row.id)===Number(evidence.generated_types_artifact_id)):null
+    const expectedName=`shared-db-generated-types-${evidence.work_issue}-${String(evidence.application_commit_sha).toLowerCase()}`
+    if(!(artifact?.name===expectedName&&artifact.expired===false&&String(artifact.digest??'').toLowerCase()===String(evidence.generated_types_artifact_digest).toLowerCase()))return false
+    const proof=this.readArtifactJson(match[1],artifact.id,'db-generated-types-proof.json')
+    return matchesGeneratedTypesProof(proof,evidence)
+  },
+  readArtifactJson(repository,id,expectedFile){
+    const directory=mkdtempSync(path.join(tmpdir(),'shared-db-proof-')),archive=path.join(directory,'proof.zip')
+    try{
+      const bytes=execFileSync('gh',['api',`repos/${repository}/actions/artifacts/${Number(id)}/zip`],{encoding:null,maxBuffer:20*1024*1024,stdio:['ignore','pipe','pipe']})
+      writeFileSync(archive,bytes)
+      const entries=execFileSync('tar',['-tf',archive],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).split(/\r?\n/).filter(Boolean)
+      if(entries.length!==1||entries[0]!==expectedFile)throw new LaneError(`proof artifact must contain exactly ${expectedFile}`)
+      execFileSync('tar',['-xf',archive,'-C',directory],{stdio:'ignore'})
+      return JSON.parse(readFileSync(path.join(directory,expectedFile),'utf8'))
+    }finally{rmSync(directory,{recursive:true,force:true})}
   },
   closeIssue(number) { gh(['issue','close',String(number),'--repo',REPO]) },
   closeClaim(number, reason) { gh(['issue', 'close', String(number), '--repo', REPO, '--comment', requireClaimCloseReason(reason)]) },
@@ -5327,7 +5360,13 @@ export function admitIssue(number, io = githubIo, { pr = null, actor = 'manage-m
       if(issue?.state!=='open'||scope.workType!=='structural'||scope.route!=='shared-db-orchestrator'||scope.status!=='ready'||!scope.writes.length)throw new AdmissionError('legacy in-flight work is not an open ready structural issue with exact writes')
       admitted={admitted:true,issue:Number(number),legacy:true,service_class:'standard-application'}
     }else admitted = evaluateAdmission(issue, scope, parseImpactBlock(issue?.body ?? ''))
-    if (pr !== null) assertPrCarriesStructuralChange(io.getPrFiles(Number(pr)))
+    if (pr !== null) {
+      const livePr=io.getPr(Number(pr)),head=livePr?.head?.sha
+      if(!head)throw new AdmissionError('pull request exact head is unreadable')
+      const files=io.getPrFiles(Number(pr)).map((file)=>/^supabase\/migrations\/\d{14}_[^/]+\.sql$/.test(String(file?.filename??file?.path??''))&&file?.status!=='removed'
+        ?{...file,content:io.getFileAt(file.filename??file.path,head)}:file)
+      assertPrCarriesStructuralChange(files)
+    }
     if(!admitted.legacy&&io.issueComments&&io.commentIssue){
       let history=outcomeHistory(io.issueComments(Number(number)))
       if(!history.valid)throw new OutcomeError(`outcome history is invalid: ${history.problems.join('; ')}`)
