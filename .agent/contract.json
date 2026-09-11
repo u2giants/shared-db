@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generation": 3,
+  "generation": 4,
   "work_issue": 2741,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Reconcile old preview Character alias and provenance shape with final reviewed2355 behavior without rewriting curated rows.",
-  "base_sha": "8e81462f6a4809b4ad16f0671b0a7ecb75c6b5e7",
+  "base_sha": "5af3fafac265067f8ee793de229cd63bee95252b",
   "dispatcher": "Codex orchestrator #2714",
   "worker": "codex-2714-2355-forward",
   "branch": "codex/issue-2426-character-parent",

@@ -542,6 +542,7 @@ function giveVerdict(io,{issue,pr,headSha,slot=1,replacementSequence=null}){
 function reviewIo(){
   const io=memoryIo(), commits=new Map();let seq=0
   io.resolveOrchestratorEngine=()=> 'claude'
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:'ready',usable:true}]))
   io.refs.set(REVIEW_ACTIVE_CUTOVER_REF,'cutover-complete')
   io.makeOwnerCommit=(message)=>{const sha=(++seq).toString(16).padStart(40,'0');commits.set(sha,{message});return sha}
   io.getCommit=(sha)=>commits.get(sha)
@@ -552,6 +553,28 @@ function reviewIo(){
   io.getPrReviews=()=>[]
   return io
 }
+
+test('#2705 reviewer assignment skips a provider that reconciled preflight says is unusable',()=>{
+  const io=reviewIo(), skipped=ACTIVE_REVIEWERS[0]
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.name===skipped.name?'quarantined':'ready',failure_class:row.name===skipped.name?'live-qualification-required':null,usable:row.name!==skipped.name}]))
+  const assigned=assignNextReviewer({issue:2705,pr:2706,headSha:'a'.repeat(40)},io)
+  assert.notEqual(assigned.reviewer,skipped.name)
+  assert.equal(assigned.sequence,1,'skipping an unusable provider must not burn a durable sequence')
+})
+
+test('#2705 reviewer assignment refuses when reconciled preflight state is unreadable',()=>{
+  const io=reviewIo()
+  io.reviewerUsability=()=>{throw new LaneError('ai-review-preflight returned no reconciled state for gemini')}
+  assert.throws(()=>assignNextReviewer({issue:2705,pr:2706,headSha:'b'.repeat(40)},io),/no reconciled state/)
+  assert.equal(io.refs.has(REVIEW_CURSOR_REF),false,'an unreadable preflight must not consume a sequence')
+})
+
+test('#2705 reviewer assignment refuses malformed reconciled state before durable mutation',()=>{
+  const io=reviewIo(),before=[...io.refs]
+  io.reviewerUsability=()=>({usable:true})
+  assert.throws(()=>assignNextReviewer({issue:2705,pr:2706,headSha:'c'.repeat(40)},io),/malformed reconciled/)
+  assert.deepEqual([...io.refs],before)
+})
 
 // Production `githubIo` always defines the atomic compare-and-swap ref writer,
 // and the exclusion RETURN path now refuses to run without it: retiring a
@@ -7112,6 +7135,13 @@ test('#2694 releasing a slot 2 failure is refused when the lease at that ref nam
   // IS slot 1).
   io.refs.set(leaseRef,io.makeOwnerCommit(original.replace(/ slot=2(?=s|$)/,'')))
   assert.throws(()=>releaseFailedReviewer({issue:request.issue,pr:request.pr,headSha:request.headSha,failedSequence:second.sequence,slot:2,failureCode:'provider_unavailable',confirmNoVerdict:true,confirmNoArtifact:true},io),/active lease does not match the terminal failure evidence/)
+})
+
+test('#2705 replacement allocation also skips providers that reconciled preflight refuses',()=>{
+  const io=failedReviewIo(), allowed='qwen'
+  io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.provider===allowed?'ready':'quarantined',usable:row.provider===allowed}]))
+  const replacement=replaceFailedReviewer(replacementRequest,io)
+  assert.equal(replacement.reviewer,'qwen-3.8-max')
 })
 
 // ISSUE #2697. `--reclaim-silent-reviewer` was added after
