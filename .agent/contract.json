@@ -8,7 +8,7 @@
   "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
   "dispatcher": "Claude orchestrator marker 2758",
   "worker": "Claude issue 2744 migration-author lane",
-  "branch": "claude/issue-2744-narrow-asset-style",
+  "branch": "claude/issue-2744-unfiltered-perf",
   "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
     ".agent/contract.json",
@@ -49,5 +49,23 @@
     "node scripts/check-production-verification-sidecars.mjs --base origin/main",
     "supabase/tests against an ephemeral database",
     "two independent governed reviewers at the exact head"
+  ],
+  "assumptions": [
+    "Claim #2791 holds the permanent reserved version 20260911222514 and the exclusive write lock on function api.db_data_admin_scraped_properties. Its title still names a work_mem theory that this lane refuted by measurement; the version was not spent on it and the correction is recorded on the claim.",
+    "The claim lease names branch claude/issue-2744-unfiltered-perf. That branch was unused on the remote, so this work is published under the exact branch the claim already names rather than mutating the claim body or any reservation ref.",
+    "The predecessor 20260911170526 is applied to production, so pg_get_functiondef returns the text the preconditions match. The migration refuses with SQLSTATE 55000 if it does not.",
+    "Performance and parity evidence is read-only production measurement taken as role authenticated inside begin; ... rollback;. Nothing was committed to any database and no timeout, role or memory setting was changed.",
+    "Production acceptance for issue #2744 is a separate gate that has not yet been re-run after this change. Issue #2744 stays open and claim #2791 stays held until it passes.",
+    "The reported Product pipeline outage is api.pm_pipeline_page, a disjoint function. This migration cannot repair that screen and does not claim to.",
+    "Per AGENTS.md a migration needs two independent governed reviewers; the dispatching brief said one, and the rulebook is followed."
+  ],
+  "stop_conditions": [
+    "Stop and report if the applied predecessor 20260911170526 does not match the migration preconditions; the migration raises SQLSTATE 55000 rather than replacing an unexpected definition.",
+    "Stop if any acceptance run of the unfiltered default listing is not comfortably under 8 seconds as role authenticated; do not close #2744 or release claim #2791 on a marginal result.",
+    "Stop if output parity breaks: the unfiltered default page and the four targeted controls must stay byte-identical.",
+    "Stop if a fix would require changing statement_timeout, work_mem, any role, or any global setting; that is out of scope and forbidden.",
+    "Stop if the governed review draws fewer than two independent reviewers at the exact head, or if any verdict is REVISE.",
+    "Stop and re-scope rather than claim the Product pipeline screen is repaired; that outage is api.pm_pipeline_page and is outside this claim.",
+    "Stop if landing this would require --admin, a hand-written claim ref, or a synthetic reviewer verdict."
   ]
 }
