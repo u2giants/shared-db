@@ -691,10 +691,10 @@ preview rehearsal and its recovery lane:
 Read it in full before you claim a lane, author a migration, or rehearse on preview.** The five
 rules below are the operative summary.
 
-1. **Up to eight unrelated migrations may hold active-author capacity at once. Preview, merges,
-   and production promotion remain one at a time** (owner ruling implemented 2026-08-28 under
-   issue #1738). A ninth active author is refused. Protected relinquished claims remain outside
-   that capacity count but continue blocking every object/version collision.
+1. **There is no limit on how many unrelated migrations may be authored at once. Preview, merges,
+   and production promotion remain one at a time** (owner ruling 2026-09-11, marker #2758, issue
+   #2775: no limit on migration author lanes, ever). Exact object claims and version reservations
+   still refuse every object/version collision, including against protected relinquished claims.
 
    **Do not open a migration file first.** Acquire an author lane, an exact object claim, and a
    centrally reserved 14-digit version as one dispatch operation:
@@ -763,6 +763,14 @@ rules below are the operative summary.
 2. **Preview database first. Production never receives untested schema.** Apply every migration to
    the preview branch, prove it works, *then* promote to production (`qsllyeztdwjgirsysgai`).
 
+   ⚠️ **Exception, #2758: low-risk SQL may skip the preview apply.** Dispatch the production apply
+   with `ephemeral_check_run_id` (the job ID of the successful `supabase/tests against an ephemeral
+   database` check on the source PR head) instead of `preview_run_id`/`preview_artifact_digest`.
+   The gate refuses unless that job's run positively applied each migration and the merged bytes
+   equal the tested head, and it refuses outright for anything its conservative classifier does
+   not recognise as low-risk (rewrites, long locks, drops, backfills, unknown statements) — those
+   still need preview. Target proof, the lane lock and post-apply verification are unchanged.
+
    ⚠️ **The preview project ref is deliberately NOT written down here.** Preview is rebuilt from
    time to time and its ref changes when it is — `rjyboqwcdzcocqgmsyel` was deleted on 2026-08-18.
    The current ref lives in the repository variable `PREVIEW_PROJECT_REF`, every workflow that
@@ -771,6 +779,7 @@ rules below are the operative summary.
    again.
 
    ⚠️ **Merging requires an APPROVE pinned to the EXACT head being merged, and the merge gate now enforces it (#1816, 2026-08-29).** A reviewer assignment is not an approval, and an approval of an earlier head is not an approval of these bytes: answering a `REJECT` with a new commit requires a fresh exact-head review before that commit can merge. Enforced by `scripts/check-exact-head-approval.mjs`, run twice in `guarded-migration-merge` (up front, then re-proven under the merge lock). Before this it was convention only, and PR #1809 merged unapproved bytes onto `main`. Free-text verdicts are unauthorized by default and count only from GitHub's OWNER, MEMBER or COLLABORATOR associations. The gate still does **not** prove the assigned provider is the commenter, because assignment refs do not carry an identity that can be bound to GitHub authorship. Do not cite a pass as proof of who reviewed. Full limits in `docs/agents/section-4-anti-collision-rules.md`. ⚠️ **One exemption, added 2026-09-02 (#2102): a documents-only pull request draws no reviewer and the gate requires no verdict for it — see rule 18. Rulebook files are not documents.**
+   ⚠️ **Refreshing from main keeps the APPROVE (#2758, 2026-09-11).** An APPROVE recorded at head A still counts at a later head B when A is an ancestor of B and the pull request's own diff against its merge base with main is byte-identical at both, ignoring only `.agent/` evidence files (`scripts/lib/pr-content-equivalence.mjs`, used by the merge gate and the preview gate). Any change of the author's own, even whitespace in SQL, needs a new review, as does main editing a file the pull request also edits; a refusal at any equivalent head (found through its assignments, returns or verdicts) is never carried past, and a head with reviewer records of its own (an assignment, return or verdict) is judged on those alone. By the same rule, a main that moved after dispatch no longer stops the guarded merge when the pull request touches no file or migration version main changed, merges into it cleanly, and keeps its own diff; and a production promotion no longer rejects its preview proof because main later gained another migration's verification sidecar, unless that migration names an object the promoted migration names.
 
    **Merge first, then rehearse on preview from merged `main`, then promote.** A rehearsal runs
    **once** — an applied version can never be applied again, so a re-dispatch and a GitHub
@@ -1188,7 +1197,14 @@ The rule, in four parts:
    *answer* ("does this ref exist yet?"), and a gate that concludes "absent" only after
    exhausting a retry budget has made its absence proof depend on a timeout — fail-open,
    which is worse than fail-closed. Retries are for HTTP 5xx and connection or TLS failures
-   only; rate-limit responses remain semantic failures and are not retried.
+   only. The one bounded exception is a **primary quota exhaustion** ("rate limit
+   exceeded" with HTTP 403/429) on a read: it waits once for the reset GitHub states (via
+   the free `rate_limit` endpoint), only when that reset is 15 minutes away or less, then
+   re-reads. A further reset, an unreadable reset, a second exhaustion, a write, a
+   secondary rate limit, or any other 403 still fails closed. The wait is **opt-in**: only
+   a step that holds no lock sets `GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS` (at most 900).
+   Unset means no wait, so a lock-holding step never waits. Never set it on a step that
+   holds the author mutex, a merge lane, or the production lane.
 
 **This is enforced, not advised.** `scripts/check-github-transport-conformance.mjs` fails
 the build on direct Node `gh` process calls, literal shell-wrapped governed `gh` calls, a
@@ -1620,7 +1636,7 @@ have already happened in this repo, more than once.
     finishes, then release it.** This is standard practice, not an improvisation.
 
 15. **The single-orchestrator rule is scoped to STRUCTURE (owner ruling §0.0-B, 2026-08-13).**
-    Rules 1 and 2 above ("one orchestrator", "up to eight active migration authors, independently of protected blocked claims") govern changes to the
+    Rules 1 and 2 above ("one orchestrator", "unlimited concurrent migration authors, each on exact object claims") govern changes to the
     *shape* of the database. They do **not** make an application session's ordinary row writes
     into orchestrator work, and a session must not open an issue or hand over merely because its
     feature writes data. The single exception is curated Master Data under §6.4, which stays

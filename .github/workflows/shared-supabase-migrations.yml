@@ -85,6 +85,10 @@ on:
         description: "Preview recovery only (REQUIRED there): version:runId pairs naming the preview run that ORIGINALLY applied each version"
         type: string
         required: false
+      ephemeral_check_run_id:
+        description: "Activated automatic policy, instead of preview evidence: job ID of the successful 'supabase/tests against an ephemeral database' check on the source PR head. Refused for high-risk migrations."
+        type: string
+        required: false
       owner_decision_run_id:
         description: "Material-risk apply only: immutable owner-decision evidence run ID"
         type: string
@@ -203,7 +207,8 @@ jobs:
             scripts/test_production_catalog_verification.py \
             scripts/test_check_production_verification_sidecars.py \
             scripts/test_post_batch_app_verification.py \
-            scripts/test_production_apply_review_evidence.py
+            scripts/test_production_apply_review_evidence.py \
+            scripts/test_production_review_source_pr_preflight.py
           do
             if [ ! -f "$f" ]; then
               echo "::error::Expected Python test file is missing: $f" >&2
@@ -1146,6 +1151,20 @@ jobs:
           git fetch origin main
           test "$(git rev-parse HEAD)" = "$REQUESTED_SHA"
           MAIN_SHA="$REQUESTED_SHA" node scripts/check-main-tip-freshness.mjs
+      # BEFORE ANY CREDENTIAL IS USED. With the automatic risk policy active, the
+      # business-risk gate cannot run without the merged source PR. Run 34615626046
+      # was dispatched without it and died much later on a bare `test -n` that named
+      # nothing (#2789). The later checks stay; this only refuses earlier, by name.
+      - name: Refuse a missing automatic-policy source PR before credentials
+        env:
+          SOURCE_PR: ${{ inputs.source_pr }}
+        run: |
+          set -euo pipefail
+          active="$(jq -r 'if .active == true then "true" elif .active == false then "false" else error("activation must be boolean") end' config/production-risk-policy-activation.json)"
+          if [ "$active" = true ] && ! [[ "$SOURCE_PR" =~ ^[1-9][0-9]*$ ]]; then
+            echo "::error::REFUSED: the automatic production risk policy is active, so this dispatch needs input source_pr = the merged PR number that authored the allowlisted migrations (got '${SOURCE_PR}'). NO MIGRATION WAS APPLIED."
+            exit 1
+          fi
       - uses: supabase/setup-cli@v1
         with:
           version: 2.105.0
@@ -1255,23 +1274,40 @@ jobs:
           PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
           OWNER_DECISION_RUN_ID: ${{ inputs.owner_decision_run_id }}
           OWNER_DECISION_ARTIFACT_DIGEST: ${{ inputs.owner_decision_artifact_digest }}
+          EPHEMERAL_CHECK_RUN_ID: ${{ inputs.ephemeral_check_run_id }}
         run: |
           set -euo pipefail
           test -n "$SOURCE_PR"
-          test -n "$PREVIEW_RUN_ID"
-          test -n "$PREVIEW_ARTIFACT_DIGEST"
-          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
-            echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
-            exit 1
+          # EXACTLY ONE EVIDENCE ROUTE (#2758). Preview evidence, or -- for a
+          # migration the gate classifies as NOT high-risk to live data -- the
+          # successful ephemeral-database CI job on the source PR head. The gate
+          # itself refuses a mix, and refuses the ephemeral route for high-risk SQL.
+          if [ -n "$EPHEMERAL_CHECK_RUN_ID" ]; then
+            if [ -n "$PREVIEW_RUN_ID$PREVIEW_ARTIFACT_DIGEST" ]; then
+              echo "REFUSED: supply preview evidence OR ephemeral_check_run_id, not both." >&2
+              exit 1
+            fi
+            ROUTE_ARGS=(--ephemeral-check-run-id "$EPHEMERAL_CHECK_RUN_ID")
+          else
+            test -n "$PREVIEW_RUN_ID"
+            test -n "$PREVIEW_ARTIFACT_DIGEST"
+            if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+              echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
+              exit 1
+            fi
+            ROUTE_ARGS=(--preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+              --preview-project-ref "$PREVIEW_PROJECT_REF")
           fi
+          # Pre-lane only: nothing is held yet, so a GitHub quota exhaustion may
+          # wait up to 15 minutes for its reset. The lane-held run fails fast.
           python scripts/production_business_risk_gate.py \
             --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
             --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
             --review-digest "$REVIEW_ARTIFACT_DIGEST" \
-            --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
-            --preview-project-ref "$PREVIEW_PROJECT_REF" \
+            "${ROUTE_ARGS[@]}" \
             --owner-decision-run-id "$OWNER_DECISION_RUN_ID" \
             --owner-decision-digest "$OWNER_DECISION_ARTIFACT_DIGEST" \
+            --rate-limit-wait-seconds 900 \
             | tee "$RUNNER_TEMP/production-business-risk-evidence.json"
       - name: Upload pre-approval evidence
         if: always()
@@ -1408,21 +1444,35 @@ jobs:
           PREVIEW_PROJECT_REF: ${{ vars.PREVIEW_PROJECT_REF }}
           OWNER_DECISION_RUN_ID: ${{ inputs.owner_decision_run_id }}
           OWNER_DECISION_ARTIFACT_DIGEST: ${{ inputs.owner_decision_artifact_digest }}
+          EPHEMERAL_CHECK_RUN_ID: ${{ inputs.ephemeral_check_run_id }}
         run: |
           set -euo pipefail
           test -n "$SOURCE_PR"
-          test -n "$PREVIEW_RUN_ID"
-          test -n "$PREVIEW_ARTIFACT_DIGEST"
-          if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
-            echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
-            exit 1
+          # EXACTLY ONE EVIDENCE ROUTE (#2758). Preview evidence, or -- for a
+          # migration the gate classifies as NOT high-risk to live data -- the
+          # successful ephemeral-database CI job on the source PR head. The gate
+          # itself refuses a mix, and refuses the ephemeral route for high-risk SQL.
+          if [ -n "$EPHEMERAL_CHECK_RUN_ID" ]; then
+            if [ -n "$PREVIEW_RUN_ID$PREVIEW_ARTIFACT_DIGEST" ]; then
+              echo "REFUSED: supply preview evidence OR ephemeral_check_run_id, not both." >&2
+              exit 1
+            fi
+            ROUTE_ARGS=(--ephemeral-check-run-id "$EPHEMERAL_CHECK_RUN_ID")
+          else
+            test -n "$PREVIEW_RUN_ID"
+            test -n "$PREVIEW_ARTIFACT_DIGEST"
+            if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
+              echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
+              exit 1
+            fi
+            ROUTE_ARGS=(--preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
+              --preview-project-ref "$PREVIEW_PROJECT_REF")
           fi
           python scripts/production_business_risk_gate.py \
             --main-sha "$REQUESTED_SHA" --allowlist "$PRODUCTION_ALLOWLIST" \
             --pr "$SOURCE_PR" --review-run-id "$REVIEW_RUN_ID" \
             --review-digest "$REVIEW_ARTIFACT_DIGEST" \
-            --preview-run-id "$PREVIEW_RUN_ID" --preview-digest "$PREVIEW_ARTIFACT_DIGEST" \
-            --preview-project-ref "$PREVIEW_PROJECT_REF" \
+            "${ROUTE_ARGS[@]}" \
             --owner-decision-run-id "$OWNER_DECISION_RUN_ID" \
             --owner-decision-digest "$OWNER_DECISION_ARTIFACT_DIGEST" \
             | tee "$RUNNER_TEMP/production-business-risk-evidence.json"

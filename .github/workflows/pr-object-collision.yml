@@ -93,16 +93,41 @@ jobs:
       # this one job precisely so they cannot drift apart. This step adds no new
       # required status context -- the job name is unchanged.
       - name: Unit-test the dispatch-time collision checker (shares the parser)
-        run: node --test scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs
+        run: node --test scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs
+
+      - name: Check the GitHub API quota before scanning open pull requests
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
+        run: node scripts/check-actions-quota.mjs
+
+      # ONE read of every open pull request's complete file list, shared by both
+      # checks below. They used to fetch it twice, which was most of this job's
+      # quota spend. Each check still refuses an incomplete list exactly as before.
+      - name: Gather the open pull request file lists once
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
+        run: node scripts/lib/open-pr-files.mjs --out "$RUNNER_TEMP/open-pr-files.json"
 
       - name: No earlier open PR edits the same protected coordination source
         if: github.event_name == 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          OPEN_PR_FILES_SNAPSHOT: ${{ runner.temp }}/open-pr-files.json
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
         run: node scripts/check-pr-source-collisions.mjs
 
       - name: No other open PR replaces the same database object
         env:
           GH_TOKEN: ${{ github.token }}
+          OPEN_PR_FILES_SNAPSHOT: ${{ github.event_name == 'pull_request' && format('{0}/open-pr-files.json', runner.temp) || '' }}
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
         run: node scripts/check-pr-object-collisions.mjs

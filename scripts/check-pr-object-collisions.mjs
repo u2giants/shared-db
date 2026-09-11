@@ -101,6 +101,7 @@
 import { execFileSync } from 'node:child_process'
 import { runGitHubCommand } from './lib/github-transport.mjs'
 import { createTreeReader } from './lib/github-tree.mjs'
+import { loadOpenPullFiles, OpenPullFilesError } from './lib/open-pr-files.mjs'
 import { readFileSync } from 'node:fs'
 import path from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
@@ -1111,21 +1112,23 @@ function isMigration(file) {
   )
 }
 
-function fetchFiles(repo, number, ref) {
-  const pr = ghJson(['api', `repos/${repo}/pulls/${number}`])
-  const allFiles = ghJson([
-    'api',
-    '--paginate',
-    `repos/${repo}/pulls/${number}/files?per_page=100`,
-  ])
-  if (!Number.isInteger(pr?.changed_files)) throw new Skip(`PR #${number} has no trustworthy changed_files count`)
-  if (pr.changed_files >= 3000) throw new Skip(`PR #${number} reaches GitHub's 3000-file limit`)
-  if (allFiles.length !== pr.changed_files) throw new Skip(`PR #${number} returned ${allFiles.length} of ${pr.changed_files} changed files`)
-  const files = allFiles.filter(isMigration)
-  return files.map((file) => ({
+// The file list comes from the shared open pull request snapshot, which proved
+// it complete against changed_files and refused the 3000-file cap when it was
+// gathered (scripts/lib/open-pr-files.mjs).
+function migrationFiles(repo, files, ref, readSql) {
+  return files.filter(isMigration).map((file) => ({
     path: file.filename,
-    sql: sqlAtRef(repo, file.filename, ref),
+    sql: readSql(repo, file.filename, ref),
   }))
+}
+
+function asSkip(fn) {
+  try {
+    return fn()
+  } catch (error) {
+    if (error instanceof OpenPullFilesError) throw new Skip(error.message)
+    throw error
+  }
 }
 
 /**
@@ -1169,7 +1172,10 @@ function baseBranchSource(repo, number, baseRef, headSha) {
   }
 }
 
-export function gatherSources(env = process.env) {
+export function gatherSources(
+  env = process.env,
+  { load = loadOpenPullFiles, readSql = sqlAtRef, baseSource = baseBranchSource, readPull = (repo, number) => ghJson(['api', `repos/${repo}/pulls/${number}`]) } = {},
+) {
   const repo = env.GITHUB_REPOSITORY
   if (!repo) throw new Skip('GITHUB_REPOSITORY is not set')
 
@@ -1193,32 +1199,29 @@ export function gatherSources(env = process.env) {
   if (!number) throw new Skip('not running on a pull request (no PR number)')
 
   if (!baseRef || !baseSha || !headSha) {
-    const pr = ghJson(['api', `repos/${repo}/pulls/${number}`])
+    const pr = readPull(repo, number)
     baseRef ??= pr.base?.ref
     baseSha ??= pr.base?.sha
     headSha ??= pr.head?.sha
   }
 
+  const snapshot = asSkip(() => load(repo, Number(number), { env }))
+
   const sources = [
-    { label: `PR #${number} (this PR)`, files: fetchFiles(repo, number, headSha) },
+    { label: `PR #${number} (this PR)`, files: migrationFiles(repo, snapshot.current.files, headSha, readSql) },
   ]
 
-  const open = ghJson([
-    'api',
-    '--paginate',
-    `repos/${repo}/pulls?state=open&per_page=100`,
-  ])
-  for (const pr of open) {
-    if (pr.number === Number(number)) continue
-    if (pr.draft) continue // a draft is not competing to merge yet
+  for (const pr of snapshot.others) {
+    if (Number(pr.number) === Number(number)) continue
+    if (pr.listed.draft) continue // a draft is not competing to merge yet
     sources.push({
-      label: `PR #${pr.number} "${pr.title}"`,
-      files: fetchFiles(repo, pr.number, pr.head?.sha ?? pr.head?.ref),
+      label: `PR #${pr.number} "${pr.listed.title}"`,
+      files: migrationFiles(repo, pr.files, pr.listed.headSha, readSql),
     })
   }
 
   if (baseRef && headSha) {
-    const base = baseBranchSource(repo, number, baseRef, headSha)
+    const base = baseSource(repo, number, baseRef, headSha)
     if (base) sources.push(base)
   }
 

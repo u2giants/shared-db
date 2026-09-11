@@ -60,7 +60,11 @@ jobs:
           node scripts/check-main-tip-freshness.mjs --contains
           bash scripts/check-sql.sh
           node scripts/check-production-verification-sidecars.mjs --base origin/main
-          node scripts/check-pr-object-collisions.mjs
+          # The cross-PR object collision check is NOT run here any more. It ran
+          # twice per merge (here and under the lock below) and only the run under
+          # the lock can decide the merge: another pull request can merge between
+          # the two. This copy was a fast fail that cost a full scan of every open
+          # pull request against the shared Actions quota.
           node scripts/check-migration-pr-lease.mjs
           # An assignment is not an approval, and an approval of an earlier head
           # is not an approval of these bytes (#1816).
@@ -70,6 +74,14 @@ jobs:
       # mirror only from trusted `origin/main`; the checked-out pull request cannot
       # alter the list that judges it. This first mirror merge has an exact-head-bound,
       # immutable bootstrap floor. The step above fetches and proves current main.
+      # Before the lane is taken, so a low quota waits (or fails plainly) while
+      # holding nothing, instead of failing half-way through under the lock.
+      - name: Check the GitHub API quota before taking the merge lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Holds no lock: a GitHub quota exhaustion may wait up to 15 minutes.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '900'
+        run: node scripts/check-actions-quota.mjs
       - name: Pre-flight the required status checks before taking the merge lane
         env:
           GH_TOKEN: ${{ github.token }}
@@ -89,6 +101,8 @@ jobs:
         id: guarded_merge
         env:
           GH_TOKEN: ${{ github.token }}
+          # The merge lane is held: never sit on it waiting for a quota reset.
+          GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS: '0'
           PR_NUMBER: ${{ inputs.pull_request }}
           REQUESTED_SHA: ${{ inputs.head_sha }}
         run: |

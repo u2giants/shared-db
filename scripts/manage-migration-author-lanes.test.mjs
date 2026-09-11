@@ -3,13 +3,14 @@ import test from 'node:test'
 import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { REVIEW_VERDICT_REF_PREFIX } from './lib/review-verdict-artifact.mjs'
+import { assignWithMutexRetry } from './manage-migration-author-lanes.mjs'
 import { readyRecord } from './orchestrator-flow/reconcile.mjs'
 import { canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, MAX_AUTHOR_LANES, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, REVIEW_SILENT_RECLAIM_REQUEST_LIMIT, REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict, markReviewRefListingRefusal, isReviewRefListingRefusal } from './manage-migration-author-lanes.mjs'
+import { CLAIM_CLOSE_REASONS, RECOVERABLE_CLAIM_CLOSE_REASONS, LEGACY_GUARDED_CLEANUP_CLOSE_REASON, ACTIVE_REVIEWERS, OVERFLOW_REVIEWERS, reviewersForOrchestrator, findBusyReviewers, reviewerCapacityReport, reviewLeaseAgeHours, activityFingerprintForLease, probeSilentReviewer, reclaimSilentReviewer, SILENCE_MIN_AGE_HOURS, SILENCE_CONFIRM_HOURS, REVIEW_SILENCE_PROBE_REF_PREFIX, REVIEW_SILENCE_RELEASE_REF_PREFIX, REVIEW_QUEUE_REF_PREFIX, pickReviewer, addedMigrationVersions, assertMergeCommitInMainHistory, REVIEWERS, RETIRED_REVIEWERS, QUARANTINED_REVIEWERS, acquireAuthorLane, acquireExclusive, assertLaneAvailable, assignNextReviewer, assertDurableReviewApproval, buildDynamicQueues, claimBody, currentMainMaxVersion, queueExit, NON_STRUCTURAL_EXITS, OUTSIDE_ORCHESTRATOR_EXITS, conflicts, completeWork, requiresReturnAddress, returnIssueToOwner, RETURNED_MARKER, createRefWithReadback, deleteRefWithReadback, expandActiveClaimFromIssue, expandActiveClaimFromPr, EXCLUSIVE_REFS, githubIo, isConfirmedRefAbsence, LaneError, main, MUTEX_RECOVERY_ACTIVE_REF, MUTEX_REF, parseAuthorLease, parseQueueScope, parseReviewCursor, readPrAfterPush, readRefAfterWrite, recoverExpiredClaimFromPr, recoverSameOwnerSplit, recoverStaleAuthorMutex, reissueMergedStrandedClaim, releaseOwnedRef, releaseFailedReviewer, replaceFailedReviewer, failedReviewerReleaseCommand, requireOwnedRef, renewExpiredClaim, reviewerExecutionPreflight, reversionActiveClaim, runGitHubCommand, withReviewRequestBudget, supersedeActiveClaimVersion, REVIEW_CURSOR_REF, REVIEW_REPLACEMENT_REF_PREFIX, REVIEW_FAILURE_REF_PREFIX, validateClaimObjects, parseDoctorFailures, TERMINAL_FAILURE_CODES, doctorSpawnPlan, resolveCommandPath, summarizeDoctorOutput, pickExecutableCandidate, REVIEWER_DOCTOR_TIMEOUT_MS, findPrReviewAssignments, REVIEW_ASSIGNMENT_REF_PREFIX, REVIEW_ACTIVE_REF_PREFIX, REVIEW_ACTIVE_CUTOVER_REF, reviewActiveRef, parseReviewLease, EXPECTED_REF_ABSENCE, EXPECTED_REF_PRESENCE, deriveLivePreviewCandidate, validateOriginalPreviewApplyEvidence, projectReviewPr, reviewStateGraphqlFields, REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, REVIEW_SILENT_RECLAIM_REQUEST_LIMIT, REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE, inReviewReplacementNamespace, activateReviewCutover, REVIEW_REF_ROW_LIMIT, parseGhIncludeResponse, hasNextPageLink, parseLinkHeader, excludeReviewerForPr, parseReviewExclusion, REVIEW_EXCLUSION_REF_PREFIX, reinstateReviewerExclusion, parseReviewReinstatement, REVIEW_REINSTATEMENT_REF_PREFIX, REINSTATABLE_EXCLUSION_REASONS, reviewExclusionRef, reviewReinstatementRef, REVIEW_EXCLUSION_GENERATION_LIMIT, countDoctorPassLines, REVIEW_RETURN_REF_PREFIX, parseReviewReturn, readReviewReturns, reviewReturnRef, reviewRecordRefs, retiredVerdictRef, REVIEW_RETIRED_VERDICT_REF_PREFIX, reviewerReadsRepository, readReviewVerdicts, nonReadingReviewerReplacementCommand, hasVerdictForHead, headVerdictBlocksReplacement, reviewerKnownNonReading, DURABLE_VERDICT_REF_NAMESPACE, readOrchestratorResolution, orchestratorEngineFromResolution, recordReviewVerdict, markReviewRefListingRefusal, isReviewRefListingRefusal } from './manage-migration-author-lanes.mjs'
 
 function commandFailure(message){const error=new Error(message);error.stderr=message;return error}
 
@@ -160,6 +161,40 @@ test('durable preview approval requires APPROVE for every latest reviewer slot',
 test('durable preview approval rejects an older slot verdict after replacement',()=>{
   const fixture=durableApprovalFixture({includeLatestReplacementVerdict:false})
   assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,fixture.headSha,fixture.io),/review slot 2 has no durable APPROVE for its latest exact-head assignment/)
+})
+
+// APPROVAL CARRY-FORWARD AT THE PREVIEW GATE (#2758): the same rule as the merge gate.
+test('#2758: durable approval at a prior head carries to a content-identical refreshed head',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40),calls=[]
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,fixture.io))
+  const verdicts=assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,contentPreservingRefresh:(a,b)=>{calls.push([a,b]);return{ok:true}}})
+  assert.equal(verdicts.filter((row)=>row.verdict==='APPROVE').length,3)
+  assert.deepEqual(calls,[[fixture.headSha,refreshed]])
+})
+
+test('POSITIVE CONTROL #2758: a refreshed head whose PR diff changed is not carried',()=>{
+  const fixture=durableApprovalFixture()
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,'c'.repeat(40),{...fixture.io,contentPreservingRefresh:()=>({ok:false,reason:'diff changed'})}))
+})
+
+test('POSITIVE CONTROL #2758: a prior head known only by its verdict is inspected before any carry',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40),orphan=`refs/db-review-verdicts/${fixture.issue}-${fixture.pr}-${'d'.repeat(40)}`
+  const listRefs=(prefix)=>[...fixture.io.listRefs(prefix),...(orphan.startsWith(prefix)?[{ref:orphan,sha:'5'.repeat(40)}]:[])]
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,listRefs,contentPreservingRefresh:()=>({ok:true})}),/could not be read|durable reviewer refusal/)
+})
+
+test('POSITIVE CONTROL #2758: a refreshed head with an assignment of its own is never carried past',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40)
+  const listRefs=(prefix)=>prefix===`${REVIEW_ASSIGNMENT_REF_PREFIX}/${fixture.issue}-${fixture.pr}-${refreshed}`?[{ref:prefix,sha:'1'.repeat(40)}]:fixture.io.listRefs(prefix)
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,listRefs,contentPreservingRefresh:()=>({ok:true})}),/reviewer records of its own/)
+})
+
+test('POSITIVE CONTROL #2758: a refreshed head with a return of its own is never carried past',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40)
+  const returned='2'.repeat(40),returnSha='6'.repeat(40)
+  const listRefs=(prefix)=>`${REVIEW_RETURN_REF_PREFIX}/${fixture.issue}-${fixture.pr}-${refreshed}`.startsWith(prefix)&&prefix.includes(refreshed)?[{ref:`${REVIEW_RETURN_REF_PREFIX}/${fixture.issue}-${fixture.pr}-${refreshed}-${returned}`,sha:returnSha}]:fixture.io.listRefs(prefix)
+  const getCommit=(sha)=>sha===returnSha?{message:`db-coordination reviewer-return reviewer=kimi-k3 issue=${fixture.issue} pr=${fixture.pr} head=${refreshed} slot=1 assignment=${returned} sequence=1 reason=independence-conflict`}:fixture.io.getCommit(sha)
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,listRefs,getCommit,contentPreservingRefresh:()=>({ok:true})}),/reviewer records of its own/)
 })
 
 // THE MULTI-SLOT RETURN HOLE (grok-4.6 review of PR #2077, high finding 2).
@@ -483,15 +518,16 @@ test('an unclassified issue prevents proof that an empty lane is justified',()=>
   assert.deepEqual(result.unclassified,[20])
 })
 
-test('legacy claims count toward the author-lane cap and always protect objects', () => {
+test('legacy claims never hit a lane cap and always protect objects', () => {
   const legacy = (n, object) => ({ number:n, body:`\`\`\`db-claim\nversion: none\nobjects:\n  - ${object}\n\`\`\`` })
-  // Asserted against the constant, not a literal, so the cap can move without
-  // this test quietly checking the wrong number -- but the constant itself is
-  // pinned, so a change to it is a deliberate edit here.
-  assert.equal(MAX_AUTHOR_LANES, 8)
-  const full = Array.from({length:MAX_AUTHOR_LANES},(_,i)=>legacy(i+1,`table core.t${i}`))
-  assert.doesNotThrow(() => assertLaneAvailable(full.slice(0,MAX_AUTHOR_LANES-1), ['table core.d'], NOW))
-  assert.throws(() => assertLaneAvailable(full, ['table core.d'], NOW), new RegExp(`all ${MAX_AUTHOR_LANES}`))
+  // NO AUTHOR LANE CAP (owner ruling, issue #2775). Far more active claims than
+  // any former cap (3/5/8/24) never refuse unrelated work; only object overlap does.
+  const many = Array.from({length:500},(_,i)=>legacy(i+1,`table core.t${i}`))
+  const state = assertLaneAvailable(many, ['table core.d'], NOW)
+  assert.equal(state.active.length, 500)
+  assert.throws(() => assertLaneAvailable(many, ['table core.t499'], NOW), /collision with claim #500/)
+  const source = readFileSync(new URL('./manage-migration-author-lanes.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /MAX_AUTHOR_LANES|active-author leases are occupied|would exceed active-author capacity/, 'a lane cap must never be reintroduced')
   assert.throws(() => assertLaneAvailable([legacy(1,'table core.a')], ['TABLE core.a'], NOW), /collision/)
   assert.equal(parseAuthorLease(legacy(1,'table core.a').body, NOW).legacy, true)
 })
@@ -2381,6 +2417,33 @@ test('an unreadable reviewer queue does not invent a FIFO refusal',()=>{
   assert.ok(assignNextReviewer(request,io).reviewer)
 })
 
+test('live reviewer draws have no global FIFO: a later PR draws a free provider past an older ticket (marker #2758)',()=>{
+  assert.equal(githubIo.enableReviewerQueue,false)
+  const io=reviewIo(),heads=new Map([[311,'a'.repeat(40)],[312,'b'.repeat(40)]])
+  io.enableReviewerQueue=githubIo.enableReviewerQueue;io.getPr=(pr)=>({number:Number(pr),state:'open',head:{sha:heads.get(Number(pr))}})
+  const olderSha=io.makeOwnerCommit(`db-coordination reviewer-queue-ticket issue=211 pr=311 slot=1 head=${'a'.repeat(40)} requested-at=${new Date(Date.now()-3600000).toISOString()}`)
+  io.refs.set(`${REVIEW_QUEUE_REF_PREFIX}/211-311-1`,olderSha)
+  const second=assignNextReviewer({issue:212,pr:312,headSha:'b'.repeat(40)},io)
+  const first=assignNextReviewer({issue:211,pr:311,headSha:'a'.repeat(40)},io)
+  assert.ok(second.reviewer&&first.reviewer);assert.notEqual(second.reviewer,first.reviewer)
+})
+
+test('a reviewer draw retries only a briefly occupied review mutex',()=>{
+  const io=reviewIo(),request={issue:213,pr:313,headSha:'c'.repeat(40)},waits=[]
+  io.enableReviewerQueue=false;io.getPr=()=>({number:313,state:'open',head:{sha:request.headSha}})
+  const create=io.createRef.bind(io);let blocked=1
+  io.createRef=(ref,sha)=>{if(ref===MUTEX_REF&&blocked>0){blocked--;return false}return create(ref,sha)}
+  assert.ok(assignWithMutexRetry(request,io,{wait:(ms)=>waits.push(ms)}).reviewer)
+  assert.equal(waits.length,1)
+  assert.ok(waits[0]>=300000,'lock-contention retry waits at least five minutes')
+  const io2=reviewIo();io2.enableReviewerQueue=false;io2.getPr=()=>({number:313,state:'open',head:{sha:request.headSha}});io2.createRef=(ref,sha)=>ref===MUTEX_REF?false:true
+  assert.throws(()=>assignWithMutexRetry(request,io2,{attempts:3,wait:()=>{}}),/is occupied/)
+  const io3=reviewIo();io3.enableReviewerQueue=false
+  const waits3=[]
+  assert.throws(()=>assignWithMutexRetry({...request,headSha:'not-a-sha'},io3,{attempts:3,wait:(ms)=>waits3.push(ms)}),(error)=>!/is occupied/.test(error.message))
+  assert.equal(waits3.length,0,'a failure other than mutex occupation is never retried')
+})
+
 test('capacity report distinguishes an unreadable verdict from no verdict and keeps the other rows visible (issue #2157)',()=>{
   const io=reviewIo(),reviewer=ACTIVE_REVIEWERS[0],issue=2157,pr=2239,headSha='a7'.repeat(20)
   const sha=io.makeOwnerCommit(`db-coordination reviewer-cursor sequence=1 reviewer=${reviewer.name} issue=${issue} pr=${pr} head=${headSha}`)
@@ -3070,11 +3133,11 @@ test('REAL PROCESS RACE: two independent CLIs claiming one object produce exactl
   assert.equal(results.filter(x=>!x.json.ok&&/collision/.test(x.json.error)).length,1)
 })
 
-test('REAL PROCESS RACE: cap+1 independent CLIs claiming unrelated objects admit exactly the cap',async()=>{
-  const objects=Array.from({length:MAX_AUTHOR_LANES+1},(_,i)=>`table core.r${i}`)
+test('REAL PROCESS RACE: 25 independent CLIs claiming unrelated objects are all admitted (no lane cap)',async()=>{
+  const objects=Array.from({length:25},(_,i)=>`table core.r${i}`)
   const results=await raceWorkers(objects)
-  assert.equal(results.filter(x=>x.json.ok).length,MAX_AUTHOR_LANES)
-  assert.equal(results.filter(x=>!x.json.ok&&new RegExp(`all ${MAX_AUTHOR_LANES}`).test(x.json.error)).length,1)
+  assert.equal(results.filter(x=>x.json.ok).length,25)
+  assert.equal(results.filter(x=>!x.json.ok).length,0,'no unrelated author is ever refused for capacity')
 })
 
 test('GitHub 403 and rate-limit failures refuse acquisition without creating a claim',()=>{
@@ -3101,7 +3164,7 @@ test('release accepts a replacement owner that acquired immediately after the de
 
 test('101 claims and 101 open PR sources are all considered',()=>{
   const claims=Array.from({length:101},(_,i)=>({number:i+1,body:body([`table core.c${i}`],String(i+1))}))
-  const state=assertLaneAvailable(claims,[],NOW,{ignoreCapacity:true});assert.equal(state.active.length,101)
+  const state=assertLaneAvailable(claims,[],NOW);assert.equal(state.active.length,101)
   const prs=Array.from({length:101},(_,i)=>({label:`PR #${i+1}`,objects:[`table core.p${i}`]}))
   assert.throws(()=>assertLaneAvailable([],['table core.p100'],NOW,{prSources:prs}),/PR #101/)
 })

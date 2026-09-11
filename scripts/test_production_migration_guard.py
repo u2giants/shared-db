@@ -230,6 +230,9 @@ class GuardTests(unittest.TestCase):
     def test_issue_2580_historical_restoration_remains_production_eligible(self):
         self.assertEqual(parse_allowlist("20260909084253"), ["20260909084253"])
 
+    def test_issue_2535_historical_restoration_remains_production_eligible(self):
+        self.assertEqual(parse_allowlist("20260908202651"), ["20260908202651"])
+
     def test_bad_allowlists_are_blocked(self) -> None:
         values = [
             "",
@@ -258,6 +261,7 @@ class GuardTests(unittest.TestCase):
         self.assertEqual(
             HARD_BLOCKED,
             {
+                "20260906222338",
                 "20260814170749",
                 "20260726190000",
                 "20260726200000",
@@ -291,6 +295,19 @@ class GuardTests(unittest.TestCase):
         with self.assertRaisesRegex(GuardError, "20260903200951"):
             parse_allowlist("20260903200951,20260905024139")
         self.assertEqual(parse_allowlist("20260905024139"), ["20260905024139"])
+    def test_character_alias_mismatched_original_is_retired(self) -> None:
+        for allowlist in ("20260906222338", "20260906222338,20260911152203"):
+            with self.subTest(allowlist=allowlist), self.assertRaisesRegex(GuardError, "20260906222338"):
+                parse_allowlist(allowlist)
+        self.assertEqual(parse_allowlist("20260911152203"), ["20260911152203"])
+        for applied in (set(), {"20260906222338"}):
+            self.assertEqual(classify_pending_version("20260906222338", applied, REPO)["kind"], "retired")
+        self.assertEqual(classify_pending_version("20260911152203", set(), REPO)["kind"], "genuinely-pending")
+        import hashlib
+        original = REPO / "supabase/migrations/20260906222338_core_character_alias_and_source_provenance.sql"
+        self.assertEqual(hashlib.sha256(original.read_text(encoding="utf-8").encode()).hexdigest(),
+                         "cb7bf087c6fd2eb2c21faaee786bdf8103ca8cf9f7bed37af0da2367f8c9d438")
+
     def test_stranded_coldlion_division_reissue_is_byte_identical(self) -> None:
         """The reissue is only safe because it is the SAME executable SQL.
 
