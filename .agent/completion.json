@@ -36,6 +36,11 @@
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at 75f541fb."
+    },
+    {
+      "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
+      "exit_code": 0,
       "evidence": "721 tests, 721 pass, 0 fail, 0 skipped at 75f541fb."
     },
     {
