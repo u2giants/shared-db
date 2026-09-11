@@ -212,8 +212,8 @@ end
 $guard$;
 -- Apply the new version to the historical shape, then apply it again as the fresh
 -- reviewed-schema path. Both operations must preserve all independently held rows.
-\ir ../migrations/20260911063554_character_alias_provenance_forward_repair.sql
-\ir ../migrations/20260911063554_character_alias_provenance_forward_repair.sql
+\ir ../migrations/20260911152203_character_alias_provenance_forward_repair.sql
+\ir ../migrations/20260911152203_character_alias_provenance_forward_repair.sql
 DO $verify$
 BEGIN
  IF EXISTS ((SELECT * FROM forward_schema_before EXCEPT ALL SELECT * FROM forward_catalog_now)
@@ -279,7 +279,7 @@ ALTER TABLE core.taxonomy_source_ref
  DROP COLUMN first_seen_at RESTRICT,
  DROP COLUMN last_seen_at RESTRICT,
  DROP COLUMN missing_since RESTRICT;
-\ir ../migrations/20260911063554_character_alias_provenance_forward_repair.sql
+\ir ../migrations/20260911152203_character_alias_provenance_forward_repair.sql
 DO $fresh_verify$
 BEGIN
  IF EXISTS ((SELECT * FROM fresh_base_rows EXCEPT ALL
