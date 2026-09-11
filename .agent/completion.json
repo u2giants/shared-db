@@ -1,41 +1,48 @@
 {
   "schema_version": 1,
-  "work_issue": 2769,
+  "work_issue": 2775,
   "outcome": "ready-for-merge",
-  "pr": 2776,
-  "migration_versions": [
-    "20260911145659"
-  ],
-  "contract_ref": "refs/db-contracts/2769/2",
-  "contract_sha256": "cb815eaa9c2adfa9bf76d6c1098af19287d15abf115d71c6136634e1fe7dc108",
-  "head_sha": "01d2e3a0e1b78bcba212c5aac8ab6a8be0178f64",
+  "pr": 2777,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2775/5",
+  "contract_sha256": "d5b33355c1121830a481c0804bef9a649fb0c682cb6d9dba181971fbacd26dee",
+  "head_sha": "f0aad106b37f161faf66393259964c13cf0191a8",
   "files_changed": [
-    "supabase/ci-bootstrap/010_pre_adoption_baseline.sql",
-    "supabase/migrations/20260911145659_restrict_queue_nightly_rebuild_style_groups_execute.sql",
-    "supabase/tests/chain_style_group_counts_to_rebuild_completion_contracts.sql",
-    "supabase/tests/queue_nightly_rebuild_style_groups_execute_grants.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "AGENTS.md",
+    "docs/agents/section-4-anti-collision-rules.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs",
+    "scripts/orchestrator-flow/capacity-state.test.mjs"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.queue_nightly_rebuild_style_groups"
-  ],
+  "db_writes": [],
   "checks": [
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Run at c42e3673 (after merging main 25c4ca3b) in C:/repos/shared-db-worktrees/issue-2769: Static checks passed. No DATABASE_URL set locally; PR database CI (supabase/tests against an ephemeral database) remains required."
-    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check 25c4ca3b c42e3673 reported no whitespace errors."
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs scripts/orchestrator-flow/capacity-state.test.mjs",
+      "exit_code": 0,
+      "evidence": "524 tests passed, 0 failed, 0 skipped."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "truth audit OK: call_sites=275"
+    },
+    {
+      "command": "node scripts/check-github-transport-conformance.mjs",
+      "exit_code": 0,
+      "evidence": "212 files scanned, all calls governed."
     }
   ],
   "assumptions_resolved": [
-    "Read-only production check found no app caller (popdam3 included); the only caller is the nightly cron job running as postgres.",
-    "Local disposable Postgres run: the new grants contract fails on the old ACL, passes on the new ACL, and detects a re-added PUBLIC or authenticated grant.",
-    "Generation 2 adds supabase/ci-bootstrap/010_pre_adoption_baseline.sql: Database Contract Tests run 34613286780 failed the new contract ('authenticated may EXECUTE') because the CI baseline, applied after pass-1 replay, re-granted authenticated. The three baseline grant lines for this function were removed, following the #2440 precedent (27361cf3) that removed its body. CI-only; production is unaffected.",
-    "Disclosure: generation 1 was published after implementation commit dccca07b, and generation 2 after the CI failure; both describe the work claimed in #2774."
+    "Owner ruling on marker 2758 removes the lane cap outright; no replacement number was introduced."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Stacked on #2767 (b729dd3b). MAX_AUTHOR_LANES and all capacity refusals deleted; collision locks and version reservations unchanged. Ready for exact-head review, required CI, and guarded merge after #2767 lands."
 }

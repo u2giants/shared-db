@@ -691,10 +691,10 @@ preview rehearsal and its recovery lane:
 Read it in full before you claim a lane, author a migration, or rehearse on preview.** The five
 rules below are the operative summary.
 
-1. **Up to eight unrelated migrations may hold active-author capacity at once. Preview, merges,
-   and production promotion remain one at a time** (owner ruling implemented 2026-08-28 under
-   issue #1738). A ninth active author is refused. Protected relinquished claims remain outside
-   that capacity count but continue blocking every object/version collision.
+1. **There is no limit on how many unrelated migrations may be authored at once. Preview, merges,
+   and production promotion remain one at a time** (owner ruling 2026-09-11, marker #2758, issue
+   #2775: no limit on migration author lanes, ever). Exact object claims and version reservations
+   still refuse every object/version collision, including against protected relinquished claims.
 
    **Do not open a migration file first.** Acquire an author lane, an exact object claim, and a
    centrally reserved 14-digit version as one dispatch operation:
@@ -1188,7 +1188,14 @@ The rule, in four parts:
    *answer* ("does this ref exist yet?"), and a gate that concludes "absent" only after
    exhausting a retry budget has made its absence proof depend on a timeout — fail-open,
    which is worse than fail-closed. Retries are for HTTP 5xx and connection or TLS failures
-   only; rate-limit responses remain semantic failures and are not retried.
+   only. The one bounded exception is a **primary quota exhaustion** ("rate limit
+   exceeded" with HTTP 403/429) on a read: it waits once for the reset GitHub states (via
+   the free `rate_limit` endpoint), only when that reset is 15 minutes away or less, then
+   re-reads. A further reset, an unreadable reset, a second exhaustion, a write, a
+   secondary rate limit, or any other 403 still fails closed. The wait is **opt-in**: only
+   a step that holds no lock sets `GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS` (at most 900).
+   Unset means no wait, so a lock-holding step never waits. Never set it on a step that
+   holds the author mutex, a merge lane, or the production lane.
 
 **This is enforced, not advised.** `scripts/check-github-transport-conformance.mjs` fails
 the build on direct Node `gh` process calls, literal shell-wrapped governed `gh` calls, a
@@ -1620,7 +1627,7 @@ have already happened in this repo, more than once.
     finishes, then release it.** This is standard practice, not an improvisation.
 
 15. **The single-orchestrator rule is scoped to STRUCTURE (owner ruling §0.0-B, 2026-08-13).**
-    Rules 1 and 2 above ("one orchestrator", "up to eight active migration authors, independently of protected blocked claims") govern changes to the
+    Rules 1 and 2 above ("one orchestrator", "unlimited concurrent migration authors, each on exact object claims") govern changes to the
     *shape* of the database. They do **not** make an application session's ordinary row writes
     into orchestrator work, and a session must not open an issue or hand over merely because its
     feature writes data. The single exception is curated Master Data under §6.4, which stays
