@@ -6,10 +6,11 @@
   "migration_versions": [
     "20260911081204"
   ],
-  "contract_ref": "refs/db-contracts/2664/1",
-  "contract_sha256": "feb2bb30115ed8d19179e90ab079c8f48cc1f578bfa2021a53c5d3de7bc58d72",
-  "head_sha": "e03eb06923f7d9125e447fa7070caf5529b07f6b",
+  "contract_ref": "refs/db-contracts/2664/2",
+  "contract_sha256": "40b35f4afa39909e317f8a984d956578248903ff80a74dd21be0bc9d1bbc2b03",
+  "head_sha": "6fb0be6bfe08895cc27f16d572658365755875d7",
   "files_changed": [
+    ".agent/completion.json",
     ".agent/contract.json",
     "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
     "supabase/tests/dam_order_list_find_position.sql",
