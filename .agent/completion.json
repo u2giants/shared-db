@@ -10,9 +10,11 @@
   "contract_sha256": "6db07986c7204048561950bcadb2ffaf06872e6da2003ba63129887ea23d0921",
   "head_sha": "db2b97e0148bb5a3430f1adddca8b5d7b5d8f312",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260911170526_scraped_properties_page_asset_context.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql",
-    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql"
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
   "db_reads": [
     "function api.db_data_admin_scraped_properties",
@@ -40,7 +42,7 @@
     {
       "command": "hosted ephemeral migration regression suite",
       "exit_code": 0,
-      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" on a001e0ba applied every migration and passed scraped_properties_page_asset_context_contracts.sql, db_data_admin_scraped_properties.sql and _source_purpose.sql; its one failure was db_data_admin_scraped_properties_opa_groups.sql pinning the removed CTE text, updated in db2b97e0 and re-run on this head."
+      "evidence": "GitHub Actions job \"supabase/tests against an ephemeral database\" passed on 34b872e6 (run 34630156916, job 103364730068), whose supabase files are identical to implementation db2b97e0; it applied every migration and ran scraped_properties_page_asset_context_contracts.sql, db_data_admin_scraped_properties.sql, _opa_groups.sql and _source_purpose.sql."
     }
   ],
   "assumptions_resolved": [
