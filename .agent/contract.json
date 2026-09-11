@@ -1,65 +1,49 @@
 {
   "schema_version": 1,
-  "work_issue": 2781,
-  "generation": 6,
-  "work_type": "tooling",
+  "work_issue": 2753,
+  "generation": 3,
+  "work_type": "structural",
   "route": "shared-db-orchestrator",
-  "goal": "Keep reviewer approvals, guarded-merge freshness and production preview proofs valid across main refreshes that leave the pull request's own change untouched, while still refusing any overlap, conflict, version collision or change of the pull request's own diff.",
-  "base_sha": "153b7754155a22b8541349cc7fe372d14c4e4c96",
-  "dispatcher": "Claude shared-db orchestrator marker2758",
-  "worker": "Claude approval-carry-forward worker",
-  "branch": "claude/approval-carry-over-main-refresh",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
+  "goal": "Expose exact canonical ColdLion UUID and source identity for the PIM item picker without changing compatibility views.",
+  "base_sha": "d530f85bc54d2b3c1f3ac52fcb9ee8d57c17fe3e",
+  "dispatcher": "Codex orchestrator marker2714",
+  "worker": "Codex issue2753 worker",
+  "branch": "codex/issue-2753-pim-item-picker",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2753-pim-item-picker",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "config/orchestrator-global-invalidators-v1.json",
-    ".github/workflows/migration-author-lease.yml",
-    "AGENTS.md",
-    "scripts/check-exact-head-approval.mjs",
-    "scripts/check-exact-head-approval.test.mjs",
-    "scripts/check-main-tip-freshness.mjs",
-    "scripts/check-main-tip-freshness.test.mjs",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/lib/pr-content-equivalence.mjs",
-    "scripts/lib/pr-content-equivalence.test.mjs"
+    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
+    "supabase/tests/pim_item_picker_contract.sql",
+    "scripts/test_pim_item_picker.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "config/orchestrator-global-invalidators-v1.json",
-    ".github/workflows/migration-author-lease.yml",
-    "AGENTS.md",
-    "scripts/check-exact-head-approval.mjs",
-    "scripts/check-exact-head-approval.test.mjs",
-    "scripts/check-main-tip-freshness.mjs",
-    "scripts/check-main-tip-freshness.test.mjs",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_business_risk_gate.py",
-    "scripts/lib/pr-content-equivalence.mjs",
-    "scripts/lib/pr-content-equivalence.test.mjs"
+    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
+    "supabase/tests/pim_item_picker_contract.sql",
+    "scripts/test_pim_item_picker.py"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "table plm.item"
+  ],
+  "db_writes": [
+    "view api.pim_item_picker"
+  ],
   "prohibited_actions": [
-    "No shared database reads or writes, no production or preview apply, no migration files, no fabricated reviews."
+    "No shared database writes, merges, main movement or paid review until parent coordination."
   ],
   "required_checks": [
-    "node --test scripts/lib/pr-content-equivalence.test.mjs scripts/check-main-tip-freshness.test.mjs",
-    "node --test scripts/check-exact-head-approval.test.mjs",
-    "node --test scripts/manage-migration-author-lanes.test.mjs"
+    "bash scripts/check-sql.sh",
+    "python scripts/test_pim_item_picker.py"
   ],
   "assumptions": [
-    "The byte-level PR diff against its merge base, .agent evidence aside, is the right identity for an approved change.",
-    "A later sidecar of another migration version is not a producer for the promoted version unless their migrations share a schema-qualified object."
+    "Claim2754 reserves20260911170650.",
+    "Existing authenticated plm.item policy and grants are retained through security_invoker.",
+    "The legacy21column item view remains unchanged."
   ],
   "stop_conditions": [
-    "Any required check fails.",
-    "A relaxation would accept a change of the pull request's own diff, an overlapping file, a migration version collision, a merge conflict, or a shared database object."
+    "Object collision or canonical identity mismatch.",
+    "Inherited RLS or anonymous denial failure."
   ]
 }
