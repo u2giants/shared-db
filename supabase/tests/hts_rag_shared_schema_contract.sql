@@ -36,6 +36,11 @@ begin
 end
 $catalog$;
 
+-- The CI session user is not a true superuser, so it may only SET ROLE into roles it is
+-- a member of. It created these roles and therefore holds ADMIN on them; the grant is
+-- test-only and rolls back with the transaction.
+grant designflow_hts_prod_worker, designflow_hts_prod_runtime, designflow_hts_alsand_runtime to current_user;
+
 -- ---------------------------------------------------------------------------------
 -- Worker writes: A is a qualified operative precedent, B is not operative, D is
 -- operative but rejected. R1 is linked to A, R2 to B, R3 to D.
