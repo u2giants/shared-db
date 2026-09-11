@@ -1,41 +1,38 @@
 {
   "schema_version": 1,
-  "work_issue": 2753,
+  "work_issue": 2772,
   "outcome": "ready-for-merge",
-  "pr": 2755,
-  "migration_versions": [
-    "20260911170650"
-  ],
-  "contract_ref": "refs/db-contracts/2753/3",
-  "contract_sha256": "cbb90064dd60968824c5277b6597a50f2ad8fa9555193c5e88cda2af101bd943",
-  "head_sha": "aabcab8fa76a96d7f88759192a0f4f8987587449",
+  "pr": 2771,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2772/13",
+  "contract_sha256": "969c95f83eb66fb2e651bda0516c8f4ef96a0ba7603f049d3073935772c3f6ea",
+  "head_sha": "04a52ebe8d3c1bcead0f270804355cd261877d99",
   "files_changed": [
-    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
-    "supabase/tests/pim_item_picker_contract.sql",
-    "scripts/test_pim_item_picker.py"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
-  "db_reads": [
-    "table plm.item"
-  ],
-  "db_writes": [
-    "view api.pim_item_picker"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "Static SQL guards passed; live-ledger check not configured, parent owns fresh ledger.",
-      "command": "bash scripts/check-sql.sh"
+      "evidence": "No whitespace errors at 04a52ebe."
     },
     {
+      "command": "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py",
       "exit_code": 0,
-      "evidence": "Loopback disposable database: canonical identity, duplicate-number distinction, null preservation, authenticated read, inherited RLS, anonymous denial and write denial passed;0 skipped.",
-      "command": "python scripts/test_pim_item_picker.py"
+      "evidence": "189 passed, 158 subtests passed at 04a52ebe (merge of origin/main 9a62bd23); pytest -q on the three named files."
     }
   ],
   "assumptions_resolved": [
-    "Claim2754 reserves20260911170650; no overlap.",
-    "Rebound to base e11a59896b870f9b9c11c1c77f7fe0a24f50ab66 and implementation head aabcab8fa76a96d7f88759192a0f4f8987587449 (version re-reserved from 20260911093445 after main advanced). Ready for exact-head review, required CI, and guarded merge.",
-    "Preserves legacy21columnview and all existing policies."
+    "The contract-test workflow now uploads applied-migrations.txt; runs from before this merge are refused, so preview stays required for them."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
 }

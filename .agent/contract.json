@@ -1,49 +1,49 @@
 {
   "schema_version": 1,
-  "work_issue": 2753,
-  "generation": 3,
-  "work_type": "structural",
-  "route": "shared-db-orchestrator",
-  "goal": "Expose exact canonical ColdLion UUID and source identity for the PIM item picker without changing compatibility views.",
-  "base_sha": "d530f85bc54d2b3c1f3ac52fcb9ee8d57c17fe3e",
-  "dispatcher": "Codex orchestrator marker2714",
-  "worker": "Codex issue2753 worker",
-  "branch": "codex/issue-2753-pim-item-picker",
-  "worktree": "C:/repos/shared-db-worktrees/issue-2753-pim-item-picker",
+  "work_issue": 2772,
+  "generation": 13,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Let a merged low-risk migration promote to production on exact-head ephemeral database CI evidence instead of a shared-preview apply, keeping preview mandatory for high-risk SQL.",
+  "base_sha": "9a62bd23342d66fb1697e9f6965221b8dca27103",
+  "dispatcher": "shared-db.orch marker 2758 route local_ceb221ac-1746-4836-9306-6839c18dbced",
+  "worker": "Claude process-unblocking sub-agent of marker 2758",
+  "branch": "claude/production-without-preview",
+  "worktree": "C:/repos/shared-db-worktrees/preview-skip",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
-    "supabase/tests/pim_item_picker_contract.sql",
-    "scripts/test_pim_item_picker.py"
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260911170650_pim_canonical_item_picker.sql",
-    "supabase/tests/pim_item_picker_contract.sql",
-    "scripts/test_pim_item_picker.py"
+    ".github/workflows/database-contract-tests.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_preview_skip.py"
   ],
-  "db_reads": [
-    "table plm.item"
-  ],
-  "db_writes": [
-    "view api.pim_item_picker"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "No shared database writes, merges, main movement or paid review until parent coordination."
+    "Do not apply any migration or run any production or preview database write.",
+    "Do not relax exact target proof, the production lane lock, review evidence, or post-apply verification.",
+    "Do not let the ephemeral route promote SQL the classifier cannot positively recognise as low-risk."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "python scripts/test_pim_item_picker.py"
+    "git diff --check",
+    "python -m pytest -q scripts/test_production_business_risk_gate.py scripts/test_production_apply_review_evidence.py scripts/test_production_preview_skip.py"
   ],
   "assumptions": [
-    "Claim2754 reserves20260911170650.",
-    "Existing authenticated plm.item policy and grants are retained through security_invoker.",
-    "The legacy21column item view remains unchanged."
+    "The required ephemeral database contract-test job applies every migration and records which applied, so its exact-head success is evidence the merged bytes apply cleanly."
   ],
   "stop_conditions": [
-    "Object collision or canonical identity mismatch.",
-    "Inherited RLS or anonymous denial failure."
+    "Stop if the change requires a database write.",
+    "Stop if skipping preview would require weakening any production guard other than the preview-evidence input."
   ]
 }
