@@ -400,9 +400,12 @@ test('a returned slot is answered only by an assignment drawn after the returned
 // its head is B. The byte-level equivalence proof is tested against real git in
 // lib/pr-content-equivalence.test.mjs; here the gate's use of it is exercised.
 const REFRESHED_HEAD = 'b'.repeat(40)
-function refreshedInput() {
+function refreshedGithub() {
   const base = returnedSlotGithub({ redrawSequence: 9 })
-  return gatherApprovalInput({ PR_NUMBER: '1931' }, { ...base, json: (args) => /\/pulls\/\d+$/.test(args[args.length - 1]) ? { head: { sha: REFRESHED_HEAD } } : base.json(args) })
+  return { ...base, json: (args) => /\/pulls\/\d+$/.test(args[args.length - 1]) ? { head: { sha: REFRESHED_HEAD } } : base.json(args) }
+}
+function refreshedInput() {
+  return gatherApprovalInput({ PR_NUMBER: '1931' }, refreshedGithub())
 }
 
 test('#2758: a merge-only refresh keeps the APPROVE recorded at the prior head', () => {
@@ -430,6 +433,20 @@ test('POSITIVE CONTROL #2758: a refusal at an equivalent prior head is never car
   // In place: a spread copy would drop the non-enumerable validated marker.
   input.priorHeads[0].verdicts[0].verdict = 'REVISE'
   assert.throws(() => evaluateApprovalWithRefresh(input, { contentPreservingRefresh: () => ({ ok: true }) }), /carries a durable reviewer refusal/)
+})
+
+test('POSITIVE CONTROL #2758: a prior head known only by its verdict is discovered, and an unreadable one refuses the carry', () => {
+  const ORPHAN = 'd'.repeat(40)
+  const base = refreshedGithub()
+  const io = { ...base, json: (args) => {
+    const endpoint = args[args.length - 1]
+    if (endpoint.includes('/git/matching-refs/db-review-verdicts/')) return [...(base.json(args) ?? []), { ref: `refs/db-review-verdicts/1824-1931-${ORPHAN}`, object: { sha: '5'.repeat(40) } }]
+    return base.json(args)
+  } }
+  const input = gatherApprovalInput({ PR_NUMBER: '1931' }, io)
+  const orphan = input.priorHeads.find((prior) => prior.headSha === ORPHAN)
+  assert.ok(orphan?.unreadable, 'the verdict-only head must be discovered and marked unreadable')
+  assert.throws(() => evaluateApprovalWithRefresh(input, { contentPreservingRefresh: () => ({ ok: true }) }), /could not be read/)
 })
 
 test('POSITIVE CONTROL #2758: a head with an assignment of its own is never carried past', () => {

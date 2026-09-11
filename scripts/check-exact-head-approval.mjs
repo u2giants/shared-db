@@ -366,9 +366,19 @@ export function gatherApprovalInput(env = process.env, deps = { json, pages }) {
   // records are read so a merge-from-main refresh can carry an APPROVE forward
   // (see `evaluateApprovalWithRefresh`); whether any of them may is decided there,
   // against git, never here.
-  const priorHeads = [...new Set(assignments.map((row) => String(row.headSha ?? '').toLowerCase()))]
+  // Discovered from verdicts and returns as well as assignments: an exclusion
+  // clears a refused head's assignment but leaves its verdict, and that refusal
+  // must still be found (grok review of PR #2780). A head whose records cannot be
+  // read is kept, marked unreadable, so the carry step refuses rather than skips.
+  const returnHeadPattern = new RegExp('^' + REVIEW_RETURN_REF_PREFIX + '/\\d+-' + pr + '-([0-9a-f]{40})')
+  const recordHeads = [
+    ...assignments.map((row) => row.headSha),
+    ...allVerdictRows.map((row) => { const parsed = parseVerdictRef(row.ref); return parsed?.pr === pr ? parsed.headSha : null }),
+    ...allReturnRows.map((row) => returnHeadPattern.exec(String(row.ref ?? ''))?.[1]),
+  ]
+  const priorHeads = [...new Set(recordHeads.map((sha) => String(sha ?? '').toLowerCase()))]
     .filter((sha) => /^[0-9a-f]{40}$/.test(sha) && sha !== headSha.toLowerCase())
-    .map((sha) => ({ headSha: sha, ...recordsAt(sha) }))
+    .map((sha) => { try { return { headSha: sha, ...recordsAt(sha) } } catch (error) { if (!(error instanceof ApprovalCheckError)) throw error; return { headSha: sha, unreadable: error.message } } })
   const evidence = [
     ...[...issueNumbers].flatMap((number) => readPages(`repos/${REPO}/issues/${number}/comments?per_page=100`)),
     ...readPages(`repos/${REPO}/pulls/${pr}/reviews?per_page=100`),
@@ -413,9 +423,11 @@ export function evaluateApprovalWithRefresh(input, { contentPreservingRefresh })
   if (ownAssignments.length || (input.returns ?? []).length || input.verdicts.length) throw new ApprovalCheckError(`${exactError.message}; an APPROVE cannot be carried forward because this head has reviewer records of its own (assignment, return or verdict), so it is judged on those alone`)
   const equivalent = []
   for (const prior of input.priorHeads ?? []) {
-    if (!Array.isArray(prior?.verdicts) || prior.verdicts.some((row) => !isValidatedVerdictArtifact(row))) continue
-    const proof = contentPreservingRefresh(prior.headSha, input.headSha)
-    if (proof?.ok === true) equivalent.push(prior)
+    const proof = contentPreservingRefresh(prior?.headSha, input.headSha)
+    if (proof?.ok !== true) continue
+    // An equivalent head whose records cannot be trusted may hide a refusal.
+    if (prior.unreadable || !Array.isArray(prior.verdicts) || prior.verdicts.some((row) => !isValidatedVerdictArtifact(row))) throw new ApprovalCheckError(`${exactError.message}; an APPROVE cannot be carried forward because the reviewer records at head ${prior.headSha}, whose pull request diff is identical to this head, could not be read${prior.unreadable ? `: ${prior.unreadable}` : ''}`)
+    equivalent.push(prior)
   }
   const refusedPrior = equivalent.find((prior) => durableRefusalsAt(prior.verdicts, input.pr, prior.headSha).length)
   if (refusedPrior) throw new ApprovalCheckError(`${exactError.message}; an APPROVE cannot be carried forward because head ${refusedPrior.headSha}, whose pull request diff is identical to this head, carries a durable reviewer refusal`)

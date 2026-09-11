@@ -177,6 +177,12 @@ test('POSITIVE CONTROL #2758: a refreshed head whose PR diff changed is not carr
   assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,'c'.repeat(40),{...fixture.io,contentPreservingRefresh:()=>({ok:false,reason:'diff changed'})}))
 })
 
+test('POSITIVE CONTROL #2758: a prior head known only by its verdict is inspected before any carry',()=>{
+  const fixture=durableApprovalFixture(),refreshed='c'.repeat(40),orphan=`refs/db-review-verdicts/${fixture.issue}-${fixture.pr}-${'d'.repeat(40)}`
+  const listRefs=(prefix)=>[...fixture.io.listRefs(prefix),...(orphan.startsWith(prefix)?[{ref:orphan,sha:'5'.repeat(40)}]:[])]
+  assert.throws(()=>assertDurableReviewApproval(fixture.issue,fixture.pr,refreshed,{...fixture.io,listRefs,contentPreservingRefresh:()=>({ok:true})}),/could not be read|durable reviewer refusal/)
+})
+
 test('POSITIVE CONTROL #2758: a refreshed head with an assignment of its own is never carried past',()=>{
   const fixture=durableApprovalFixture(),refreshed='c'.repeat(40)
   const listRefs=(prefix)=>prefix===`${REVIEW_ASSIGNMENT_REF_PREFIX}/${fixture.issue}-${fixture.pr}-${refreshed}`?[{ref:prefix,sha:'1'.repeat(40)}]:fixture.io.listRefs(prefix)

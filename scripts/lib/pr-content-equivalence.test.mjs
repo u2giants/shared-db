@@ -58,6 +58,25 @@ test('an .agent evidence-only change keeps the approval', () => {
   } finally { rmSync(repo, { recursive: true, force: true }) }
 })
 
+test('POSITIVE CONTROL: main editing the same file outside the hunk context needs a new review', () => {
+  const repo = mkdtempSync(join(tmpdir(), 'pr-equiv-'))
+  try {
+    git(repo, ['init', '-q', '-b', 'main']); git(repo, ['config', 'user.email', 't@example.invalid']); git(repo, ['config', 'user.name', 'T']); git(repo, ['config', 'commit.gpgsign', 'false'])
+    const lines = Array.from({ length: 30 }, (_, i) => `line ${i}`)
+    const body = (edit) => { const copy = [...lines]; edit(copy); return copy.join('\n') + '\n' }
+    commit(repo, { 'scripts/shared.mjs': body(() => {}) }, 'seed')
+    git(repo, ['switch', '-q', '-c', 'pr'])
+    const approved = commit(repo, { 'scripts/shared.mjs': body((c) => { c[1] = 'pr edit' }) }, 'pr change')
+    git(repo, ['switch', '-q', 'main'])
+    commit(repo, { 'scripts/shared.mjs': body((c) => { c[27] = 'main edit' }) }, 'main edits far away')
+    git(repo, ['switch', '-q', 'pr'])
+    git(repo, ['merge', '-q', '--no-edit', 'main'])
+    const refreshed = git(repo, ['rev-parse', 'HEAD']).trim()
+    const proof = check(repo, approved, refreshed)
+    assert.equal(proof.ok, false); assert.match(proof.reason, /main changed scripts\/shared\.mjs/)
+  } finally { rmSync(repo, { recursive: true, force: true }) }
+})
+
 test('POSITIVE CONTROL: only the root .agent/ tree is excluded; a nested .agent path is compared', () => {
   const { repo, approved } = fixture()
   try {

@@ -72,6 +72,20 @@ export function isContentPreservingRefresh({ approvedHead, head, mainRef = 'orig
   try { gitRunner(['merge-base', '--is-ancestor', a, b]) } catch (error) {
     return { ok: false, reason: error?.status === 1 ? `${a} is not an ancestor of ${b}; the branch was rewritten, not refreshed` : `could not prove ${a} is an ancestor of ${b}` }
   }
+  // A FILE BOTH SIDES EDITED IS A NEW FILE (grok review of PR #2780). Distant
+  // hunks merge cleanly and leave the stripped diff identical, yet the blob at B
+  // is not the blob that was reviewed at A. So if main, between the two merge
+  // bases, touched any path the pull request changes, nothing is carried.
+  try {
+    const mergeBase = (sha) => { const base = String(gitRunner(['merge-base', sha, mainRef])).trim(); if (!SHA.test(base)) throw new Error(`could not compute the merge base of ${sha} and ${mainRef}`); return base }
+    const names = (from, to) => String(gitRunner(['-c', 'core.quotepath=false', 'diff', '--name-only', '--no-renames', from, to, '--', '.', REFRESH_REGENERATED_PATHSPEC])).split('\n').map((line) => line.trim()).filter(Boolean)
+    const baseA = mergeBase(a), baseB = mergeBase(b)
+    const prPaths = new Set([...names(baseA, a), ...names(baseB, b)])
+    const shared = baseA === baseB ? [] : names(baseA, baseB).filter((path) => prPaths.has(path))
+    if (shared.length) return { ok: false, reason: `main changed ${shared.slice(0, 5).join(', ')}, which the pull request also changes; the combined file needs a new review` }
+  } catch (error) {
+    return { ok: false, reason: `could not compare the paths main changed: ${String(error?.message ?? error).split('\n')[0]}` }
+  }
   let before, after
   try { before = prContentDigest(a, mainRef, { gitRunner }); after = prContentDigest(b, mainRef, { gitRunner }) } catch (error) {
     return { ok: false, reason: `could not read the pull request diff: ${String(error?.message ?? error).split('\n')[0]}` }

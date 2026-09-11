@@ -3546,9 +3546,16 @@ export function assertDurableReviewApproval(issue,pr,headSha,io=githubIo){
     const own=[REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_RETURN_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX].flatMap((p)=>io.listRefs(`${p}/${Number(issue)}-${Number(pr)}-${head}`)??[])
     if(own.length)throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because this head has reviewer records of its own (assignment, return or verdict), so it is judged on those alone`)
     const prefix=(p)=>`${p}/${Number(issue)}-${Number(pr)}-`
-    const priors=[...new Set([REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX].flatMap((p)=>io.listRefs(prefix(p))).map(({ref})=>parseAssignmentRef(ref)).filter((named)=>named&&named.issue===Number(issue)&&named.pr===Number(pr)).map((named)=>named.headSha))].filter((sha)=>sha!==head)
+    // Prior heads come from verdicts and returns too, not only live assignments:
+    // an exclusion clears a refused head's assignment and leaves its verdict,
+    // and that refusal must still block (grok review of PR #2780).
+    const priors=[...new Set([REVIEW_ASSIGNMENT_REF_PREFIX,REVIEW_REPLACEMENT_REF_PREFIX,REVIEW_RETURN_REF_PREFIX,REVIEW_VERDICT_REF_PREFIX,REVIEW_VERDICT_REPLACEMENT_REF_PREFIX].flatMap((p)=>(io.listRefs(prefix(p))??[]).map(({ref})=>new RegExp(`^${Number(issue)}-${Number(pr)}-([0-9a-f]{40})`).exec(String(ref).slice(p.length+1))?.[1])).filter(Boolean))].filter((sha)=>sha!==head)
     const equivalent=priors.filter((sha)=>io.contentPreservingRefresh(sha,head)?.ok===true)
-    for(const sha of equivalent)if(readReviewVerdicts(issue,pr,sha,io).some((row)=>row.verdict!=='APPROVE'))throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because head ${sha}, whose pull request diff is identical to this head, carries a durable reviewer refusal`)
+    for(const sha of equivalent){
+      let rows
+      try{rows=readReviewVerdicts(issue,pr,sha,io)}catch(error){throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because the reviewer records at head ${sha}, whose pull request diff is identical to this head, could not be read: ${error?.message??error}`)}
+      if(rows.some((row)=>row.verdict!=='APPROVE'))throw new LaneError(`${exactError.message}; an APPROVE cannot be carried forward because head ${sha}, whose pull request diff is identical to this head, carries a durable reviewer refusal`)
+    }
     for(const sha of equivalent){try{return assertExactDurableReviewApproval(issue,pr,sha,io)}catch(error){if(!(error instanceof LaneError))throw error}}
     throw exactError
   }
