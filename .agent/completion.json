@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/21",
-  "contract_sha256": "5493ef9794c288347586e6c04a6475950a6bd9cc9efbf9334edac46576f36c2e",
-  "head_sha": "978536713c9ba52b2c69457ecd27fefa0cf47bb3",
+  "contract_ref": "refs/db-contracts/2727/22",
+  "contract_sha256": "7addfa0417893559c1958c7a4de009f38b4b962cd88a216ea7c2565c760cbc02",
+  "head_sha": "c6c09c007005d9d10d4a6f6a567f9fc910efe0b3",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -21,7 +21,8 @@
     "scripts/manage-migration-author-lanes.test.mjs",
     "scripts/orchestrator-flow/admission.mjs",
     "scripts/orchestrator-flow/admission-outcome.test.mjs",
-    "scripts/orchestrator-flow/outcome-lifecycle.mjs"
+    "scripts/orchestrator-flow/outcome-lifecycle.mjs",
+    "scripts/orchestrator-flow/reconcile.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
@@ -34,7 +35,7 @@
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "703 tests passed; zero failed, skipped, cancelled, or todo (including reviewer and shared-stage admission revalidation under the author mutex); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
+      "evidence": "705 tests passed; zero failed, skipped, cancelled, or todo, including green and refused reviewer admission, shared-stage admission, and preview preparation using one operation-owned mutex."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
@@ -53,7 +54,8 @@
     "PR 2737 and its successful prose-only canary are integrated; its mutex-only command remains outside claims, reviewer assignment, shared stages, and lifecycle events.",
     "PR 2736 remains correctly held until this resolver and admission interface reaches main.",
     "The sealed and parallel reviews rejected unadmitted legacy dispatch, unbound objects, linkage confusion, cross-issue or unidentified replay, unsafe partial writes, metadata-only production proof, incomplete multi-target DDL, clock inversion, and admission-to-dependent-write races; every finding is fixed and covered before this report.",
-    "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects."
+    "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects.",
+    "Reviewer assignment, reviewer replacement, shared-stage acquisition, and preview preparation now revalidate admission inside their own single mutex interval; preview preparation with --admit-issue executes preparation rather than silently returning after admission."
   ],
   "stop_conditions_hit": []
 }
