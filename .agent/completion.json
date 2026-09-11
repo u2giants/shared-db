@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/3",
-  "contract_sha256": "672474fbed8cc8c899c5297553ae039ce4e7b3e2358e807d68806300eb9399d3",
-  "head_sha": "afc48ea29bfa6c79e4ef8a31814c86afd5647e31",
+  "contract_ref": "refs/db-contracts/2727/4",
+  "contract_sha256": "48f77dd550ae4d463319ea3d1a5bde2f1f621c976f877242f269986d439465d3",
+  "head_sha": "d2ae06d83700904844b37877747a51a2f229ce6c",
   "files_changed": [
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
