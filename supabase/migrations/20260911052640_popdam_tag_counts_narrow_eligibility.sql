@@ -16,6 +16,37 @@ create or replace function public.filter_effective_assets(p_filters jsonb defaul
 returns setof public.assets
 language sql stable security invoker
 as $$
+  select a.* from (
+    -- Simple tag requests have no optional wide-column reads even in a generic plan.
+    select a.*
+    from (select distinct e.asset_id from public.asset_effective_tags e
+          where e.tag = p_filters ->> 'tagFilter') t
+    join public.assets a on a.id=t.asset_id
+    where nullif(p_filters ->> 'tagFilter', '') is not null and (coalesce(p_filters, '{}'::jsonb) - array['tagFilter','fileType','status','workflowStatus','stage','isLicensed']::text[]) = '{}'::jsonb
+      and a.is_deleted=false
+      and a.thumbnail_url is not null
+      and (jsonb_array_length(coalesce(p_filters -> 'fileType','[]')) = 0 or a.file_type::text in (select jsonb_array_elements_text(p_filters -> 'fileType')))
+      and (jsonb_array_length(coalesce(p_filters -> 'status','[]')) = 0 or a.status::text in (select jsonb_array_elements_text(p_filters -> 'status')))
+      and (jsonb_array_length(coalesce(p_filters -> 'workflowStatus','[]')) = 0 or a.workflow_status::text in (select jsonb_array_elements_text(p_filters -> 'workflowStatus')))
+      and (jsonb_array_length(coalesce(p_filters -> 'stage','[]')) = 0 or a.stage in (select jsonb_array_elements_text(p_filters -> 'stage')))
+      and ((p_filters ->> 'isLicensed') is null or a.is_licensed = (p_filters ->> 'isLicensed')::boolean)
+    union all
+    select a.*
+    from (select distinct e.asset_id from public.asset_effective_tags e
+          where e.tag = p_filters ->> 'tagFilter') t
+    join public.assets a on a.id=t.asset_id
+    where nullif(p_filters ->> 'tagFilter', '') is not null and (coalesce(p_filters, '{}'::jsonb) - array['tagFilter','fileType','status','workflowStatus','stage','isLicensed']::text[]) = '{}'::jsonb
+      and a.is_deleted=false
+      and a.thumbnail_url is null
+      and (a.modified_at >= (select public.assets_thumbnail_min_date())
+        or a.file_created_at >= (select public.assets_thumbnail_min_date()))
+      and (jsonb_array_length(coalesce(p_filters -> 'fileType','[]')) = 0 or a.file_type::text in (select jsonb_array_elements_text(p_filters -> 'fileType')))
+      and (jsonb_array_length(coalesce(p_filters -> 'status','[]')) = 0 or a.status::text in (select jsonb_array_elements_text(p_filters -> 'status')))
+      and (jsonb_array_length(coalesce(p_filters -> 'workflowStatus','[]')) = 0 or a.workflow_status::text in (select jsonb_array_elements_text(p_filters -> 'workflowStatus')))
+      and (jsonb_array_length(coalesce(p_filters -> 'stage','[]')) = 0 or a.stage in (select jsonb_array_elements_text(p_filters -> 'stage')))
+      and ((p_filters ->> 'isLicensed') is null or a.is_licensed = (p_filters ->> 'isLicensed')::boolean)
+    union all
+    -- Preserve the full existing filter path for every other request.
   select a.*
   from (
     -- No identity or tag filter: preserve the simple active-assets path.
@@ -25,9 +56,6 @@ as $$
       and nullif(p_filters ->> 'propertyId', '') is null
       and nullif(p_filters ->> 'customerId', '') is null
       and nullif(p_filters ->> 'tagFilter', '') is null
-      and a.is_deleted = false
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
     union all
     -- No identity filter and a tag filter: let (tag, asset_id) drive the plan.
     -- DISTINCT preserves EXISTS semantics when one asset has the tag at both
@@ -43,25 +71,6 @@ as $$
     where nullif(p_filters ->> 'licensorId', '') is null
       and nullif(p_filters ->> 'propertyId', '') is null
       and nullif(p_filters ->> 'customerId', '') is null
-      and a.is_deleted = false and a.thumbnail_url is not null
-    union all
-    -- No identity filter and a tag filter: let (tag, asset_id) drive the plan.
-    -- DISTINCT preserves EXISTS semantics when one asset has the tag at both
-    -- asset and style-group scope.
-    select a.*
-    from (
-      select distinct e.asset_id
-      from public.asset_effective_tags e
-      where nullif(p_filters ->> 'tagFilter', '') is not null
-        and e.tag = p_filters ->> 'tagFilter'
-    ) t
-    join public.assets a on a.id = t.asset_id
-    where nullif(p_filters ->> 'licensorId', '') is null
-      and nullif(p_filters ->> 'propertyId', '') is null
-      and nullif(p_filters ->> 'customerId', '') is null
-      and a.is_deleted = false and a.thumbnail_url is null
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date())
     union all
     -- Licensor is the leading key when supplied; property/customer still narrow.
     select a.*
@@ -71,9 +80,6 @@ as $$
       and a.licensor_id = (p_filters ->> 'licensorId')::uuid
       and (nullif(p_filters ->> 'propertyId', '') is null or a.property_id = (p_filters ->> 'propertyId')::uuid)
       and (nullif(p_filters ->> 'customerId', '') is null or a.customer_id = (p_filters ->> 'customerId')::uuid)
-      and a.is_deleted = false
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
     union all
     select a.*
     from public.style_groups sg
@@ -82,9 +88,6 @@ as $$
       and sg.licensor_id = (p_filters ->> 'licensorId')::uuid
       and (nullif(p_filters ->> 'propertyId', '') is null or sg.property_id = (p_filters ->> 'propertyId')::uuid)
       and (nullif(p_filters ->> 'customerId', '') is null or sg.customer_id = (p_filters ->> 'customerId')::uuid)
-      and a.is_deleted = false
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
     union all
     -- Property leads only when licensor is absent.
     select a.*
@@ -94,9 +97,6 @@ as $$
       and a.style_group_id is null
       and a.property_id = (p_filters ->> 'propertyId')::uuid
       and (nullif(p_filters ->> 'customerId', '') is null or a.customer_id = (p_filters ->> 'customerId')::uuid)
-      and a.is_deleted = false
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
     union all
     select a.*
     from public.style_groups sg
@@ -105,9 +105,6 @@ as $$
       and nullif(p_filters ->> 'propertyId', '') is not null
       and sg.property_id = (p_filters ->> 'propertyId')::uuid
       and (nullif(p_filters ->> 'customerId', '') is null or sg.customer_id = (p_filters ->> 'customerId')::uuid)
-      and a.is_deleted = false
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
     union all
     -- Customer leads only when neither taxonomy key is supplied.
     select a.*
@@ -117,9 +114,6 @@ as $$
       and nullif(p_filters ->> 'customerId', '') is not null
       and a.style_group_id is null
       and a.customer_id = (p_filters ->> 'customerId')::uuid
-      and a.is_deleted = false
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
     union all
     select a.*
     from public.style_groups sg
@@ -128,11 +122,11 @@ as $$
       and nullif(p_filters ->> 'propertyId', '') is null
       and nullif(p_filters ->> 'customerId', '') is not null
       and sg.customer_id = (p_filters ->> 'customerId')::uuid
-      and a.is_deleted = false
-      and (a.modified_at >= public.assets_thumbnail_min_date()
-        or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
   ) a
-  where public.require_dam_access()
+  where not coalesce((nullif(p_filters ->> 'tagFilter', '') is not null and (coalesce(p_filters, '{}'::jsonb) - array['tagFilter','fileType','status','workflowStatus','stage','isLicensed']::text[]) = '{}'::jsonb), false)
+    and a.is_deleted = false
+    and (a.modified_at >= public.assets_thumbnail_min_date()
+      or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null)
     and (nullif(p_filters ->> 'search','') is null or a.filename ilike '%' || (p_filters ->> 'search') || '%')
     and (nullif(p_filters ->> 'tagFilter','') is null or exists (
       select 1 from public.asset_effective_tags e where e.asset_id = a.id and e.tag = p_filters ->> 'tagFilter'))
@@ -156,7 +150,8 @@ as $$
       ('Wall' in (select jsonb_array_elements_text(p_filters -> 'productCategory')) and
         (a.relative_path ilike '%WALL ART%' or a.relative_path ilike '%3FZ%')))
     and (nullif(p_filters ->> 'customer','') is null or a.customer = p_filters ->> 'customer')
-    and (nullif(p_filters ->> 'program','') is null or a.program = p_filters ->> 'program');
+    and (nullif(p_filters ->> 'program','') is null or a.program = p_filters ->> 'program')
+  ) a where public.require_dam_access()
 $$;
 
 revoke all on function public.filter_effective_assets(jsonb) from public, anon;

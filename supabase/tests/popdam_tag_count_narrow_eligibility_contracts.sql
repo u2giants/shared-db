@@ -1,4 +1,5 @@
 begin;
+set local plan_cache_mode=force_generic_plan;
 
 -- Cold count eligibility must not store the thumbnail URL in either covering
 -- index. Its presence is represented by disjoint partial-index predicates.

@@ -45,28 +45,21 @@ begin
   if v_gate <> 1 then
     raise exception 'effective list function must invoke public.require_dam_access() exactly once, found %', v_gate;
   end if;
-  if position(') a where public.require_dam_access() and (' in v_lower) = 0 then
+  if position(') a where public.require_dam_access()' in v_lower) = 0 then
     raise exception 'effective list function must gate on DAM entitlement in its outer WHERE clause';
   end if;
 
-  -- Deletion eligibility moved into every arm so each partial index can prove
-  -- it without fetching heap payload. No arm may lose that predicate.
-  if (length(v_lower)-length(replace(v_lower,'and a.is_deleted = false','')))
-       / length('and a.is_deleted = false') <> 9 then
-    raise exception 'each effective list arm must exclude deleted assets';
-  end if;
-
-  -- Nine mutually exclusive identity/tag/thumbnail arms, each pinned by its leading guard.
+  -- Eight preserved fallback arms plus two exclusive narrow tag arms, each pinned by its leading guard.
   -- The bare equality tokens also occur as optional conjuncts on the licensor
   -- pair, so counting arms and pinning guards is what stops a deleted
   -- property- or customer-leading arm from passing while the DAM property and
   -- customer libraries silently return nothing.
   v_arms := (length(v_lower) - length(replace(v_lower, 'union all', ''))) / length('union all');
-  if v_arms <> 8 then
-    raise exception 'effective predicates must keep nine UNION arms, found % UNION ALLs', v_arms;
+  if v_arms <> 9 then
+    raise exception 'effective predicates must keep ten UNION arms, found % UNION ALLs', v_arms;
   end if;
   foreach v_pin in array array[
-    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null and a.is_deleted = false and (a.modified_at >= public.assets_thumbnail_min_date() or a.file_created_at >= public.assets_thumbnail_min_date() or a.thumbnail_url is not null) union all',
+    'from public.assets a where nullif(p_filters ->> ''licensorid'', '''') is null and nullif(p_filters ->> ''propertyid'', '''') is null and nullif(p_filters ->> ''customerid'', '''') is null and nullif(p_filters ->> ''tagfilter'', '''') is null union all',
     'select distinct e.asset_id from public.asset_effective_tags e where nullif(p_filters ->> ''tagfilter'', '''') is not null and e.tag = p_filters ->> ''tagfilter''',
     'where nullif(p_filters ->> ''licensorid'', '''') is not null and a.style_group_id is null and a.licensor_id = (p_filters ->> ''licensorid'')::uuid',
     'from public.style_groups sg join public.assets a on a.style_group_id = sg.id where nullif(p_filters ->> ''licensorid'', '''') is not null and sg.licensor_id = (p_filters ->> ''licensorid'')::uuid',
