@@ -1,63 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2712,
+  "work_issue": 2664,
   "outcome": "ready-for-merge",
-  "pr": 2765,
+  "pr": 2748,
   "migration_versions": [
-    "20260911124845"
+    "20260911081204"
   ],
-  "contract_ref": "refs/db-contracts/2712/1",
-  "contract_sha256": "4606f577186f7a3a3d21b9fed8f4311f595e33e6f9014d828e2b83d0bbd41067",
-  "head_sha": "ebc587047dd9b68362958c1c627e0a6cd171d96c",
+  "contract_ref": "refs/db-contracts/2664/4",
+  "contract_sha256": "5b1b3b0d1a96eb5e8f13624ec6041622df51c2c58f5185340b6f404fbe3f85cd",
+  "head_sha": "e0a412e36812b291323394976d87845b6343e96a",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
-    "supabase/tests/hts_rag_shared_schema_contract.sql"
+    "supabase/migrations/20260911081204_dam_order_list_find_position.sql",
+    "supabase/tests/dam_order_list_find_position.sql",
+    "scripts/test_order_list_find_position.py",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production-verification-sidecars/20260911081204.json"
   ],
   "db_reads": [
-    "function app.set_updated_at"
+    "view api.dam_order_list"
   ],
   "db_writes": [
-    "schema hts_rag",
-    "role designflow_hts_prod_runtime",
-    "role designflow_hts_alsand_runtime",
-    "role designflow_hts_prod_worker",
-    "role designflow_hts_alsand_worker",
-    "table hts_rag.hts_rag_rulings",
-    "table hts_rag.hts_rag_product_examples",
-    "table hts_rag.hts_rag_precedents",
-    "table hts_rag.hts_rag_precedent_rulings",
-    "table hts_rag.hts_rag_extraction_jobs",
-    "table hts_rag.hts_rag_determinations",
-    "table hts_rag.hts_rag_provider_responses",
-    "table hts_rag.hts_rag_review_events",
-    "table hts_rag.hts_rag_product_family_allowlist",
-    "table hts_rag.hts_rag_debate_runs",
-    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
+    "function public.find_dam_order_list_row"
   ],
   "checks": [
     {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors at implementation head 70adaa861f672ab86a46297193e65dcc089d1ddc."
-    },
-    {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "SQL migration guards job passed on PR 2765 (run 34603204304 and at the implementation head)."
+      "evidence": "Static guards passed; live-ledger check not configured. No shared database writes."
     },
     {
-      "command": "hosted ephemeral migration regression suite",
+      "command": "python scripts/test_order_list_find_position.py",
       "exit_code": 0,
-      "evidence": "Database Contract Tests run 34609342984 passed at implementation head 70adaa861f672ab86a46297193e65dcc089d1ddc; migration 20260911124845 replayed from empty and hts_rag_shared_schema_contract.sql passed: worker provenance, bounded updates, no delete/truncate, immutable promotion gate, runtime visibility limited to qualified operative precedents, anon/authenticated/service_role denied."
+      "evidence": "TEST_DATABASE_URL pointed to loopback127.0.0.1:55486; fresh uniquely-created database was removed afterward.14 expected-position cases,4 independent ranking parity cases, wildcard/null/JS-trim/RLS/auth/injection contracts passed;0 skipped."
+    },
+    {
+      "evidence": "49 sidecars validated; runtime dynamic SELECT marker96 explicitly covered as no additional durable catalog target.",
+      "command": "python scripts/check_production_verification_sidecars.py --repo . --scan-version 20260911081204",
+      "exit_code": 0
+    },
+    {
+      "evidence": "137 tests passed;0 skipped.",
+      "command": "python -m unittest scripts.test_production_business_risk_gate",
+      "exit_code": 0
     }
   ],
   "assumptions_resolved": [
-    "Production qsllyeztdwjgirsysgai verified read-only on 2026-09-11: no hts_rag schema and no designflow_hts roles exist.",
-    "The migration is self-contained and does not depend on unapplied public.hts_rag_* migrations; public.hts_rag_* is untouched.",
-    "All four roles are NOLOGIN; no password is committed. Granting login credentials to the application is a separate governed follow-up."
+    "PopDAM main562dc999ac0039e017fd6b0fd0e32c6172ac6893 helpers define9 search fields, normalized filters and ascending-boolean sort, defaultorder_date descending/null-last/id ascending.",
+    "Duplicate2665 closed as duplicate, not delivered;2664 is canonical underclaim2747.",
+    "Draft preparation only: independent paid review, shared-preview plan/runtime proof and merge remain held for parent priority2734 and2703.",
+    "No application code or data writes, no shared database writes, no timeout changes.",
+    "Actual CI failure repaired with hash-bound runtime SELECT disposition and pinned producer sidecar; SQL bytes unchanged."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Implementation is tested. Independent governed review, guarded merge, preview apply, production apply and live verification remain pending and are not asserted by this record."
+  "stop_conditions_hit": []
 }
