@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange, inspectPrStructuralChange } from './admission.mjs'
 import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
-import { admitIssue, buildDynamicQueues, claimBody, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
+import { admitIssue, buildDynamicQueues, claimBody, EXCLUSIVE_REFS, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, MUTEX_REF, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
 import { findCompletionRecord } from '../lib/work-dependencies.mjs'
 
 const issue = (body, number = 41) => ({ number, state: 'open', title: 'structural outcome', body, createdAt: '2026-09-11T00:00:00Z' })
@@ -190,6 +190,26 @@ test('a merge-closed admitted issue reopens only for a merged linked PR', () => 
   io.getPr=()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z'})
   assert.equal(admitIssue(41,io,{pr:7}).admitted,true)
   assert.equal(state,'open')
+})
+
+test('reviewer and shared-stage capacity revalidate admission after taking the author mutex',()=>{
+  for(const operation of ['reviewer','preview']){
+    let state='open';const refs=new Map(),created=[]
+    const io={
+      enforceAdmission:true,makeOwnerCommit:()=>`${operation}-owner`,readRef:(ref)=>refs.get(ref)??null,
+      createRef:(ref,sha)=>{created.push(ref);if(refs.has(ref))return false;refs.set(ref,sha);if(ref===MUTEX_REF)state='closed';return true},
+      deleteRef:(ref)=>refs.delete(ref),getIssue:()=>({...issue(scopeBody()),state}),
+      closingIssuesForPr:()=>[{number:41,state}],getPr:()=>({head:{sha:'a'.repeat(40)},merged_at:null}),
+    }
+    const old=console.error;console.error=()=>{}
+    try{
+      const args=operation==='reviewer'
+        ?['--assign-reviewer','--admit-issue','41','--issue','41','--pr','7','--head-sha','a'.repeat(40)]
+        :['--acquire-preview','--admit-issue','41','--owner','test','--pr','7','--head-sha','a'.repeat(40)]
+      assert.equal(managerMain(args,new Date(),io),2)
+    }finally{console.error=old}
+    assert.deepEqual(created,[MUTEX_REF]);assert.equal(refs.has(EXCLUSIVE_REFS.preview),false)
+  }
 })
 
 test('forged or stale refusal comments cannot suppress current owner refusal proof',()=>{
