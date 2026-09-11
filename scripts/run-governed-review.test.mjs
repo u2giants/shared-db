@@ -1,9 +1,99 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { runGovernedReview, wrapperVerdictContractArgs, wrapperBaseName, codexReportPath, codexGovernedBody, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
+import { runGovernedReview as executeGovernedReview, resolveReviewSource, reserveReviewReceipt, validateSourceReceipt, wrapperSourceContractArgs, wrapperVerdictContractArgs, wrapperBaseName, codexReportPath, codexGovernedBody, verdictFromOutput, neutraliseVerdictLine, extraVerdictLines, PRESERVED_HEADER } from './run-governed-review.mjs'
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, symlinkSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import { anyVerdictFor } from './lib/review-verdict.mjs'
 
 const options={issue:1824,pr:2000,headSha:'a'.repeat(40),reviewer:'glm-5.3',wrapper:'ai-glm',worktree:'C:/review',slot:1,wrapperArgs:['review']}
+const fixtureSource=(input)=>({repository:'u2giants/shared-db',pr:input.pr,baseRef:'develop',targetSha:'b'.repeat(40),headSha:input.headSha,mergeBase:'c'.repeat(40)})
+const fixtureReceipt=(input)=>({schema_version:1,identity:{repository:input.worktree,base:'c'.repeat(40),head:input.headSha,source_digest:'d'.repeat(64)},packet_sha256:'e'.repeat(64)})
+function runGovernedReview(input,deps){return executeGovernedReview(input,{sourceResolver:fixtureSource,receiptFactory:()=>({path:'C:/review/.ai/reviews/source.json',read:()=>fixtureReceipt(input),bind:()=> 'C:/review/.ai/reviews/source.json.binding.json'}),...deps})}
+
+test('all qualified wrappers receive immutable source arguments without rewriting prompt values',()=>{
+  const source=fixtureSource(options)
+  for(const name of ['ai-claude-review','ai-codex-review','ai-gemini','ai-glm','ai-grok-review','ai-kimi','ai-muse','ai-qwen']){
+    for(const wrapper of [name,`C:\\tools\\${name.toUpperCase()}.CMD`,`/usr/bin/${name}.exe`]){
+      assert.deepEqual(wrapperSourceContractArgs(wrapper,['new','session','--prompt','--base'],source),['new','session','--prompt','--base','--base',source.mergeBase,'--assert-head',source.headSha])
+      assert.deepEqual(wrapperSourceContractArgs(wrapper,['new',`--base=${source.mergeBase}`,'--assert-head',source.headSha],source),['new','--base',source.mergeBase,'--assert-head',source.headSha])
+    }
+  }
+  for(const args of [['--base','f'.repeat(40)],['--assert-head='+ 'f'.repeat(40)],['--base',source.mergeBase,'--base='+source.mergeBase]])assert.throws(()=>wrapperSourceContractArgs('ai-glm',args,source),/does not match|duplicate/)
+  assert.throws(()=>wrapperSourceContractArgs('ai-deepseek-agent',[],source),/no qualified source/)
+})
+
+function sourceIo(overrides={}){
+  const pr={number:options.pr,state:'open',merged:false,base:{ref:'develop',sha:'b'.repeat(40),repo:{full_name:'u2giants/shared-db'}},head:{sha:options.headSha},...overrides.pr}
+  const seen=[]
+  return {seen,github:()=>({status:0,stdout:JSON.stringify(pr)}),git:(_command,args)=>{
+    const op=args[2];seen.push(args.slice(2))
+    if(overrides.fail===op)return{status:1,stdout:''}
+    const stdout={remote:'https://github.com/u2giants/shared-db.git','rev-parse':options.headSha,status:'','cat-file':'','merge-base':'c'.repeat(40),...overrides.stdout}[op]
+    return{status:0,stdout}
+  }}
+}
+test('source resolver binds live non-main PR target to local merge-base',()=>{
+  assert.deepEqual(resolveReviewSource(options,sourceIo()),fixtureSource(options))
+})
+test('source resolver refuses stale or wrong repository evidence before provider work',()=>{
+  for(const overrides of [
+    {pr:{state:'closed'}},{pr:{head:{sha:'f'.repeat(40)}}},
+    {pr:{base:{ref:'develop',sha:'b'.repeat(40),repo:{full_name:'other/repo'}}}},
+    {stdout:{remote:'https://github.com/other/repo.git'}},{stdout:{'rev-parse':'f'.repeat(40)}},
+    {stdout:{status:' M file'}},{fail:'cat-file'},{stdout:{'merge-base':''}},
+  ])assert.throws(()=>resolveReviewSource(options,sourceIo(overrides)),/source|head|repository|dirty|merge-base/)
+})
+test('source movement after provider completion prevents every publication and recording',()=>{
+  let reads=0,calls=0
+  assert.throws(()=>runGovernedReview(options,{sourceResolver:(input)=>({...fixtureSource(input),targetSha:(++reads===1?'b':'f').repeat(40)}),preflight:()=>{},resolve:(name)=>name,spawn:()=>{calls++;return{status:0,stdout:`VERDICT: APPROVE ${options.headSha}`}},record:()=>assert.fail('must not record')}),/source changed/)
+  assert.equal(calls,1)
+})
+test('receipt mismatches refuse without publishing a verdict',()=>{
+  for(const patch of [{packet_sha256:'bad'},{identity:{...fixtureReceipt(options).identity,base:'f'.repeat(40)}},{identity:{...fixtureReceipt(options).identity,head:'f'.repeat(40)}},{identity:{...fixtureReceipt(options).identity,repository:'C:/other'}}]){
+    let calls=0
+    assert.throws(()=>runGovernedReview(options,{receiptFactory:()=>({path:'receipt',read:()=>({...fixtureReceipt(options),...patch}),bind:()=>assert.fail('must not bind')}),preflight:()=>{},resolve:(name)=>name,spawn:()=>{calls++;return{status:0,stdout:`VERDICT: APPROVE ${options.headSha}`}},record:()=>assert.fail('must not record')}),/receipt/)
+    assert.equal(calls,1)
+  }
+})
+test('receipt binds Windows drive-letter aliases to the exact worktree',()=>{
+  const receipt=fixtureReceipt(options);receipt.identity.repository='/c/review'
+  assert.equal(validateSourceReceipt(receipt,fixtureSource(options),'C:\\review').packetSha256,'e'.repeat(64))
+})
+test('receipt storage retains a private create-only PR and packet binding',()=>{
+  const root=mkdtempSync(join(tmpdir(),'governed-source-'))
+  try{
+    const git=(_command,args)=>({status:args[2]==='check-ignore'?0:1,stdout:''})
+    const store=reserveReviewReceipt({...options,worktree:root},{git})
+    writeFileSync(store.path,JSON.stringify(fixtureReceipt({...options,worktree:root})))
+    assert.equal(store.read().packet_sha256,'e'.repeat(64))
+    const binding=store.bind(fixtureSource(options))
+    assert.equal(JSON.parse(readFileSync(binding,'utf8')).baseRef,'develop')
+    assert.throws(()=>store.bind(fixtureSource(options)),/EEXIST/)
+    assert.throws(()=>reserveReviewReceipt({...options,worktree:root},{git:()=>({status:1})}),/not private/)
+  }finally{rmSync(root,{recursive:true,force:true})}
+})
+test('receipt storage refuses a linked private evidence directory',()=>{
+  const root=mkdtempSync(join(tmpdir(),'governed-source-link-'))
+  try{
+    const outside=join(root,'outside');mkdirSync(outside)
+    symlinkSync(outside,join(root,'.ai'),process.platform==='win32'?'junction':'dir')
+    assert.throws(()=>reserveReviewReceipt({...options,worktree:root}),/linked or unsafe/)
+  }finally{rmSync(root,{recursive:true,force:true})}
+})
+test('successful governed review retains the trusted PR target and packet receipt',()=>{
+  let environment,bound,recorded
+  const result=runGovernedReview(options,{preflight:()=>{},resolve:(name)=>name,
+    receiptFactory:()=>({path:'C:/review/.ai/reviews/source.json',read:()=>fixtureReceipt(options),bind:(value)=>{bound={...value};return 'binding.json'}}),
+    spawn:(command,_args,spawnOptions)=>{
+      if(command!=='gh'){environment=spawnOptions.env;return{status:0,stdout:`VERDICT: APPROVE ${options.headSha}`}}
+      return{status:0,stdout:JSON.stringify({id:123,html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-123'})}
+    },record:(value)=>{recorded=value;return{ref:'ref',sha:'f'.repeat(40)}}})
+  assert.equal(environment.AI_REVIEW_SOURCE_RECEIPT_FILE,'C:/review/.ai/reviews/source.json')
+  assert.equal(bound.targetSha,'b'.repeat(40));assert.equal(bound.baseRef,'develop')
+  assert.equal(result.sourceEvidence.packetSha256,'e'.repeat(64))
+  assert.deepEqual(recorded.sourceEvidence,result.sourceEvidence)
+})
 
 test('wrapper failure preserves a safe cause without publishing a verdict or raw diagnostics',()=>{
   for(const [stderr,expected] of [
@@ -258,7 +348,7 @@ test('the injected contract reaches the spawned gemini wrapper',()=>{
   const spawn=(command,args)=>{seen.push([command,args]);return command==='gh'?{status:0,stdout:JSON.stringify({html_url:'https://github.com/u2giants/shared-db/pull/2000#issuecomment-1'})}:{status:0,stdout:`Findings.
 VERDICT: APPROVE ${head}`}}
   runGovernedReview({...options,reviewer:'gemini-3.8-flash-high',wrapper:'ai-gemini',wrapperArgs:['new','sess','--prompt','x']},{spawn,resolve:(name)=>name,preflight:()=>{},record:()=>({ref:'refs/db-review-verdicts/x',sha:'b'.repeat(40)})})
-  assert.deepEqual(seen[0][1],['new','--governed-verdict',head,'sess','--prompt','x'])
+  assert.deepEqual(seen[0][1],['new','--governed-verdict',head,'sess','--prompt','x','--base','c'.repeat(40),'--assert-head',head])
 })
 
 test('every spelling of a caller-supplied gemini verdict head is checked',()=>{

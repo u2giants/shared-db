@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 import { spawnSync } from 'node:child_process'
-import { readFileSync } from 'node:fs'
+import { readFileSync, mkdirSync, lstatSync, realpathSync, writeFileSync } from 'node:fs'
+import { join, resolve as resolvePath } from 'node:path'
+import { randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { recordReviewVerdict, reviewerExecutionPreflight, resolveCommandPath } from './manage-migration-author-lanes.mjs'
+import { REPO, recordReviewVerdict, reviewerExecutionPreflight, resolveCommandPath } from './manage-migration-author-lanes.mjs'
 import { lineOpensWithVerdictWord, isVerdictFor } from './lib/review-verdict.mjs'
 // Issue #2342: one shared transport owns the never-replay-a-write policy.
 import { spawnGitHub } from './lib/github-transport.mjs'
@@ -96,6 +98,91 @@ export function neutraliseVerdictLine(body,reason){
 // here from the head this review is actually recording against.
 export function wrapperBaseName(wrapper){
   return String(wrapper??'').split(/[\\/]/).pop().replace(/\.(cmd|bat|exe)$/i,'').toLowerCase()
+}
+
+// Source authority is the live PR, never a caller's remembered branch name.
+// No fetch, ref update, lease change, or provider invocation happens here.
+export function resolveReviewSource(options,{git=spawnSync,github=spawnGitHub}={}){
+  if(!Number.isSafeInteger(Number(options.pr))||Number(options.pr)<1)throw new Error('source identity requires a pull request number')
+  const head=String(options.headSha??'').toLowerCase()
+  if(!/^[0-9a-f]{40}$/.test(head)||!options.worktree)throw new Error('source identity requires an exact head and worktree')
+  const response=github(['api',`repos/${REPO}/pulls/${Number(options.pr)}`])
+  if(response.error||response.status!==0)throw new Error('could not resolve live pull request source identity')
+  let pr
+  try{pr=JSON.parse(response.stdout)}catch{throw new Error('live pull request source identity is unreadable')}
+  if(pr.state!=='open'||pr.merged||pr.number!==Number(options.pr)||pr.base?.repo?.full_name?.toLowerCase()!==REPO.toLowerCase())throw new Error('pull request source repository or state does not match this review')
+  const target=String(pr.base?.sha??'').toLowerCase(),baseRef=String(pr.base?.ref??'')
+  if(pr.head?.sha?.toLowerCase()!==head)throw new Error('live pull request head differs from the assigned review head')
+  if(!/^[0-9a-f]{40}$/.test(target)||!baseRef)throw new Error('live pull request target is missing or invalid')
+  const local=(args)=>{
+    const result=git('git',['-C',options.worktree,...args],{encoding:'utf8',maxBuffer:4*1024*1024})
+    if(result.error||result.status!==0)throw new Error('local source identity is unavailable; fetch the exact PR target and head before review')
+    return String(result.stdout??'').trim()
+  }
+  const remote=local(['remote','get-url','origin']).replace(/\\/g,'/').replace(/\.git\/?$/i,'').replace(/\/$/,'').toLowerCase()
+  if(![`https://github.com/${REPO}`,`git@github.com:${REPO}`,`ssh://git@github.com/${REPO}`].map((x)=>x.toLowerCase()).includes(remote))throw new Error('review worktree origin is not the pull request repository')
+  if(local(['rev-parse','--verify','HEAD^{commit}']).toLowerCase()!==head)throw new Error('local review head differs from the assigned review head')
+  if(local(['status','--porcelain']))throw new Error('review source worktree is dirty')
+  local(['cat-file','-e',`${target}^{commit}`])
+  const mergeBase=local(['merge-base','--all',target,head]).toLowerCase()
+  if(!/^[0-9a-f]{40}$/.test(mergeBase))throw new Error('review source has no unique merge-base')
+  return {repository:REPO,pr:Number(options.pr),baseRef,targetSha:target,headSha:head,mergeBase}
+}
+
+const SOURCE_WRAPPERS=new Set(['ai-claude-review','ai-codex-review','ai-gemini','ai-glm','ai-grok-review','ai-kimi','ai-muse','ai-qwen'])
+const OPAQUE_VALUE_OPTIONS=new Set(['--prompt','--prompt-file','--decision','--tests','--system','--file','--model','--timeout','--review-kind','--governed-verdict'])
+function canonicalSourcePath(value){
+  let path=String(value).replace(/\\/g,'/').replace(/^\/([a-z])\//i,'$1:/').replace(/\/$/,'')
+  return /^[a-z]:\//i.test(path)?path.toLowerCase():path
+}
+export function reserveReviewReceipt(options,{git=spawnSync}={}){
+  const root=realpathSync(options.worktree)
+  const ensureDirectory=(path)=>{
+    try{mkdirSync(path,{mode:0o700})}catch(error){if(error.code!=='EEXIST')throw error}
+    const stat=lstatSync(path)
+    if(stat.isSymbolicLink()||!stat.isDirectory()||canonicalSourcePath(realpathSync(path))!==canonicalSourcePath(resolvePath(path)))throw new Error('source receipt directory is linked or unsafe')
+  }
+  ensureDirectory(join(root,'.ai'));ensureDirectory(join(root,'.ai','reviews'))
+  const path=join(root,'.ai','reviews',`governed-source-${randomUUID()}.json`),bindingPath=`${path}.binding.json`
+  const guarded=()=>{
+    ensureDirectory(join(root,'.ai'));ensureDirectory(join(root,'.ai','reviews'))
+    for(const file of [path,bindingPath]){
+      const ignored=git('git',['-C',root,'check-ignore','--no-index','-q','--',file],{encoding:'utf8'})
+      const tracked=git('git',['-C',root,'ls-files','--error-unmatch','--',file],{encoding:'utf8'})
+      if(ignored.error||ignored.status!==0||tracked.error||tracked.status!==1)throw new Error('source receipt destination is not private untracked evidence')
+    }
+  }
+  guarded()
+  for(const file of [path,bindingPath]){try{lstatSync(file);throw new Error('source receipt destination already exists')}catch(error){if(error.code!=='ENOENT')throw error}}
+  return {path,read(){
+    guarded()
+    const stat=lstatSync(path)
+    if(!stat.isFile()||stat.isSymbolicLink()||stat.size>128*1024)throw new Error('source receipt is not a bounded regular file')
+    return JSON.parse(readFileSync(path,'utf8'))
+  },bind(sourceEvidence){guarded();writeFileSync(bindingPath,`${JSON.stringify(sourceEvidence,null,2)}\n`,{flag:'wx',mode:0o600});return bindingPath}}
+}
+export function validateSourceReceipt(receipt,source,worktree){
+  if(receipt?.schema_version!==1||!/^[0-9a-f]{64}$/.test(receipt.packet_sha256??''))throw new Error('wrapper source receipt is missing a complete packet digest')
+  const identity=receipt.identity
+  if(identity?.head!==source.headSha||identity?.base!==source.mergeBase||canonicalSourcePath(identity?.repository)!==canonicalSourcePath(worktree)||!/^[0-9a-f]{64}$/.test(identity?.source_digest??''))throw new Error('wrapper source receipt differs from trusted PR source')
+  return {...source,packetSha256:receipt.packet_sha256,sourceDigest:identity.source_digest}
+}
+export function wrapperSourceContractArgs(wrapper,args,source){
+  if(!SOURCE_WRAPPERS.has(wrapperBaseName(wrapper)))throw new Error('review wrapper has no qualified source identity contract')
+  const expected={'--base':source.mergeBase,'--assert-head':source.headSha},seen=new Set(),out=[]
+  for(let i=0;i<args.length;i++){
+    const token=String(args[i]),key=token.split('=')[0]
+    if(Object.hasOwn(expected,key)){
+      const value=token.includes('=')?token.slice(key.length+1):String(args[++i]??'')
+      if(seen.has(key))throw new Error(`duplicate wrapper ${key} source option`)
+      if(value.toLowerCase()!==expected[key])throw new Error(`wrapper ${key} does not match the trusted pull request source`)
+      seen.add(key)
+      continue
+    }
+    out.push(args[i])
+    if(OPAQUE_VALUE_OPTIONS.has(token)&&i+1<args.length)out.push(args[++i])
+  }
+  return [...out,'--base',source.mergeBase,'--assert-head',source.headSha]
 }
 
 // `ai-codex-review` (issue #2244) speaks a verdict grammar this runner cannot
@@ -211,12 +298,16 @@ export function wrapperFailureReason(run){
   return reasons.join('; ')||(stderr?'wrapper stderr was present but its reason was not recognized; inspect the exact wrapper session':'the wrapper supplied no recognized diagnostic')
 }
 export function runGovernedReview(options,deps={spawn:spawnSync,preflight:reviewerExecutionPreflight,record:recordReviewVerdict,resolve:resolveCommandPath,readReport:(path)=>readFileSync(path,'utf8')}){
+  const resolveSource=deps.sourceResolver??resolveReviewSource
+  const sourceIdentity=resolveSource(options)
+  const wrapperArgs=wrapperSourceContractArgs(options.wrapper,wrapperVerdictContractArgs(options.wrapper,options.wrapperArgs,options.headSha),sourceIdentity)
   const skipDoctor=options.skipDoctor===true||options.skipDoctor==='true'
   deps.preflight({reviewer:options.reviewer,wrapper:options.wrapper,worktree:options.worktree,headSha:options.headSha,skipDoctor})
   const resolved=(deps.resolve??resolveCommandPath)(options.wrapper)
   if(!resolved)throw new Error(`review wrapper ${options.wrapper} is not executable`)
-  const plan=wrapperSpawnPlan(resolved,wrapperVerdictContractArgs(options.wrapper,options.wrapperArgs,options.headSha))
-  const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
+  const receipt=(deps.receiptFactory??reserveReviewReceipt)(options)
+  const plan=wrapperSpawnPlan(resolved,wrapperArgs)
+  const run=deps.spawn(plan.file,plan.args,{cwd:options.worktree,env:{...process.env,AI_REVIEW_SOURCE_RECEIPT_FILE:receipt.path},encoding:'utf8',maxBuffer:64*1024*1024,stdio:['ignore','pipe','pipe']})
   let rawBody=String(run.stdout??'').trim()
   // Issue #2244: the codex wrapper's verdict lives in its published report, not on
   // standard output. Transcribe it into this runner's grammar BEFORE parsing, and
@@ -231,6 +322,10 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   }
   const verdict=verdictFromOutput(rawBody,options.headSha)
   if(run.error||run.status!==0||!verdict)throw new Error(`review wrapper did not produce a recordable terminal verdict (exit ${run.status??'unknown'}): ${wrapperFailureReason(run)}`)
+  if(JSON.stringify(resolveSource(options))!==JSON.stringify(sourceIdentity))throw new Error('pull request source changed during review; no verdict was published or recorded')
+  const sourceEvidence=validateSourceReceipt(receipt.read(),sourceIdentity,options.worktree)
+  sourceEvidence.receiptPath=receipt.path
+  sourceEvidence.bindingPath=receipt.bind(sourceEvidence)
   // CLOSE THE ORDERING HOLE AT THE ONLY POINT WHERE IT CAN BE CLOSED.
   // Recording BEFORE posting is impossible: `recordReviewVerdict` binds the
   // artifact to `findings_ref` (a durable comment URL on this exact PR) and to
@@ -298,7 +393,7 @@ export function runGovernedReview(options,deps={spawn:spawnSync,preflight:review
   let comment
   try{comment=JSON.parse(posted.stdout)}catch{throw new Error('durable findings response was unreadable; no verdict was recorded')}
   let artifact
-  try{artifact=deps.record({...options,verdict,findingsRef:comment.html_url,replacementSequence:options.replacementSequence??null})}
+  try{artifact=deps.record({...options,sourceIdentity,sourceEvidence,verdict,findingsRef:comment.html_url,replacementSequence:options.replacementSequence??null})}
   catch(error){
     // DEFENCE IN DEPTH, NOT THE FIX. The cause of issue #2075 was that the lane
     // tooling read a decision word in comment PROSE as a verdict; that is now
@@ -356,9 +451,9 @@ The preceding findings comment (${comment.html_url}) has been left UNTOUCHED on 
     if(stillLive)throw new Error(`${error.message} — and the voiding edit ${voidStatus}; a parseable verdict line is still live on comment ${comment.id} and must be neutralised by hand`)
     throw error
   }
-  return {artifact,body}
+  return {artifact,body,sourceIdentity,sourceEvidence}
 }
 export function main(argv=process.argv.slice(2)){
-  try{const result=runGovernedReview(parseArgs(argv));process.stdout.write(`${result.body}\n\nDURABLE VERDICT: ${result.artifact.ref} ${result.artifact.sha}\n`);return 0}catch(error){process.stderr.write(`REFUSED: ${error.message}\n`);return 2}
+  try{const result=runGovernedReview(parseArgs(argv));process.stdout.write(`${result.body}\n\nDURABLE VERDICT: ${result.artifact.ref} ${result.artifact.sha}\nSOURCE EVIDENCE: ${JSON.stringify(result.sourceEvidence)}\n`);return 0}catch(error){process.stderr.write(`REFUSED: ${error.message}\n`);return 2}
 }
 if(import.meta.url===pathToFileURL(process.argv[1]??'').href)process.exitCode=main()
