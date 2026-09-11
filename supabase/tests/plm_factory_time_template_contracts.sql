@@ -86,7 +86,9 @@ begin
   begin
     delete from plm."FactoryTime" where id = template_a;
     raise exception 'in-use template was deleted';
-  exception when restrict_violation then null;
+  -- ON DELETE RESTRICT surfaces as foreign_key_violation on some server
+  -- versions and restrict_violation on others; the contract is the refusal.
+  exception when restrict_violation or foreign_key_violation then null;
   end;
 
   -- A template referenced only as a previous value can be deleted once unused.
