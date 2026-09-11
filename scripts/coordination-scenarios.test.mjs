@@ -138,7 +138,7 @@ const DEPENDENCY_SCENARIOS = [
 
 function completion(over) {
   const record = { schema_version: 1, work_issue: 10, ...over }
-  return { body: '```db-work-completion\n' + JSON.stringify(record) + '\n```' }
+  return { body: '```db-work-completion\n' + JSON.stringify(record) + '\n```', author_association:'OWNER', author:'u2giants' }
 }
 
 for (const row of DEPENDENCY_SCENARIOS) {

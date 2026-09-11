@@ -474,6 +474,8 @@ test('zero-valued primary operations cannot disappear from command cardinality',
   try{
     assert.equal(managerMain(['--prepare-preview-dispatch','0'],new Date(),{}),2)
     assert.equal(managerMain(['--prepare-preview-dispatch','0','--assign-reviewer'],new Date(),{}),2)
+    assert.equal(managerMain(['--admit-issue','0'],new Date(),{}),2)
+    assert.equal(managerMain(['--admit-issue','0','--complete-work','--issue','7','--report-file','x'],new Date(),{}),2)
   }finally{console.error=old}
 })
 
