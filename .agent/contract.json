@@ -95,12 +95,13 @@
     "Generation 44 restores shared-supabase default issues read and limits job-level issues write to preview and production-apply, with effective-permission coverage for validate, production-dry-run, and production-apply-review.",
     "Generation 45 integrates current main 26d9345b and repairs the guarded-operation routing boundary: structural and mixed or unknown pull requests still require two-sided DDL admission, while deterministic repository-maintenance code retains exact-head review, CI, and guarded merge without fabricated database admission or database stages.",
     "Generation 46 integrates current main e420cd86 after PR 2726, preserving its search-performance migration and merged truth-audit dispositions while retaining the generation 45 routing repair unchanged.",
-    "Generation 47 integrates current main 485a0ba5 after PR 2804, preserving its FactoryTime migration and property-source coverage while retaining the routing repair unchanged."
+    "Generation 47 integrates current main 485a0ba5 after PR 2804, preserving its FactoryTime migration and property-source coverage while retaining the routing repair unchanged.",
+    "Generation 48 keeps reviewer routing inside the unchanged request budget by replacing separate route reads with one complete fail-closed GraphQL snapshot; live schema and the exact PR 2738 inventory were verified read-only."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if repository-maintenance work can consume a database author, preview, or production lane; exact-head reviewer and guarded merge use remain required.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 47
+  "generation": 48
 }
