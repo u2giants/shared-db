@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 10,
+  "generation": 11,
   "work_issue": 2741,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -11,7 +11,7 @@
   "branch": "codex/issue-2426-character-parent",
   "worktree": "C:/repos/shared-db-worktrees/issue-2426-character-parent",
   "allowed_paths": [
-    "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
+    "supabase/migrations/20260911152203_character_alias_provenance_forward_repair.sql",
     "supabase/tests/character_alias_forward_repair_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json",
@@ -20,7 +20,7 @@
     "scripts/test_post_batch_app_verification.py"
   ],
   "file_writes": [
-    "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
+    "supabase/migrations/20260911152203_character_alias_provenance_forward_repair.sql",
     "supabase/tests/character_alias_forward_repair_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json",
@@ -81,7 +81,8 @@
     "Generation7 rebinds evidence after merging origin/main 5eaebe7c as implementation cf1a3c6f; migration SQL, tests, guards and claims unchanged.",
     "Generation8 rebinds evidence after merging origin/main dae160a0 (#2760) as implementation 2a43f89f; migration SQL, tests, guards and claims unchanged.",
     "Generation9 rebinds evidence after merging origin/main b68a1900 (#2740) as implementation 7080421c; migration SQL, tests, guards and claims unchanged.",
-    "Generation10 rebinds evidence after merging origin/main 9da98ede (#2748) as implementation a663cf83; migration SQL, tests, guards and claims unchanged."
+    "Generation10 rebinds evidence after merging origin/main 9da98ede (#2748) as implementation a663cf83; migration SQL, tests, guards and claims unchanged.",
+    "Generation11 records the governed claim-version supersession 20260911063554 -> 20260911152203 (refs/db-claim-supersessions/2742-20260911063554) after #2748 landed newer 20260911081204; migration SQL body unchanged, file and test references renamed only."
   ],
   "stop_conditions": [
     "Unexpected legacy column definition or dependent consumer.",

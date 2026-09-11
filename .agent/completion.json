@@ -4,13 +4,13 @@
   "outcome": "ready-for-merge",
   "pr": 2743,
   "migration_versions": [
-    "20260911063554"
+    "20260911152203"
   ],
-  "contract_ref": "refs/db-contracts/2741/10",
-  "contract_sha256": "bfc1b61cd1fa7f0c2a4cf879886df730cdb03499cdb4c08e4186e88e6e150d42",
-  "head_sha": "a663cf8355e9ed1dd74bd11287bf248ee985a300",
+  "contract_ref": "refs/db-contracts/2741/11",
+  "contract_sha256": "57426aa2acad9c9cadd49852662569a604c63ef764613e1786b8f01ea5f7a307",
+  "head_sha": "97f9b20a4383d74bccfabfc52097b125c2cf57ff",
   "files_changed": [
-    "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
+    "supabase/migrations/20260911152203_character_alias_provenance_forward_repair.sql",
     "supabase/tests/character_alias_forward_repair_contracts.sql",
     ".agent/contract.json",
     ".agent/completion.json",
@@ -57,17 +57,17 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass on merged implementation a663cf83 (main 9da98ede)."
+      "evidence": "Static SQL guards pass on implementation 97f9b20a (main 9da98ede, re-reserved 20260911152203)."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on origin/main..a663cf83."
+      "evidence": "No whitespace errors on origin/main..97f9b20a."
     },
     {
       "command": "python -m unittest discover -s scripts -p test_*.py -q",
       "exit_code": 0,
-      "evidence": "939 tests pass, eight existing skips, on merged implementation a663cf83."
+      "evidence": "939 tests pass, eight existing skips, on implementation 97f9b20a."
     },
     {
       "command": "Database Contract Tests run34573081462",
@@ -91,7 +91,8 @@
     "Generation7 rebinds both evidence files after merging origin/main 5eaebe7c (implementation cf1a3c6f); no SQL, policy, test or claim change. New-head CI and independent review remain required.",
     "Generation8 rebinds both evidence files after merging origin/main dae160a0 (implementation 2a43f89f); no SQL, policy, test or claim change.",
     "Generation9 rebinds both evidence files after merging origin/main b68a1900 (implementation 7080421c); no SQL, policy, test or claim change.",
-    "Generation10 rebinds both evidence files after merging origin/main 9da98ede (implementation a663cf83); no SQL, policy, test or claim change."
+    "Generation10 rebinds both evidence files after merging origin/main 9da98ede (implementation a663cf83); no SQL, policy, test or claim change.",
+    "Generation11 follows governed claim-version supersession 20260911063554 -> 20260911152203 (implementation 97f9b20a); SQL body unchanged, file name, test and guard-message references renamed only."
   ],
   "stop_conditions_hit": []
 }
