@@ -97,7 +97,7 @@ test('production admission requires the source PR so actual SQL is rechecked',()
 
 test('legacy in-flight structural PRs remain executable but cannot enter as new claims',()=>{
   const legacy=issue(['```db-work-scope','status: ready','work_type: structural','route: shared-db-orchestrator','priority: 5','depends_on:','writes:','  - table core.example','```'].join('\n'))
-  const io={getIssue:()=>legacy,getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);'}
+  const io={getIssue:()=>legacy,closingIssuesForPr:()=>[{number:41,state:'open'}],getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],getFileAt:()=>'create table core.example(id bigint);'}
   assert.equal(admitIssue(41,io,{pr:7,allowLegacy:true}).legacy,true)
   assert.throws(()=>admitIssue(41,io),/change_type/)
 })
@@ -116,6 +116,7 @@ test('a data-only migration PR publishes a typed refusal instead of trusting its
   const comments=[]
   const io={
     enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push({body:value}),
+    closingIssuesForPr:()=>[{number:41,state:'open'}],
     getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_data.sql',status:'added'}],
     getFileAt:()=>'insert into core.example values (1);',
   }
@@ -159,7 +160,26 @@ test('source PR resolves exactly one linked open issue and independently admits 
   }
   assert.deepEqual(resolveAdmittedIssueForPr(7,io),{issue:41,pr:7,admission:'admitted'})
   io.closingIssuesForPr=()=>[{number:41,state:'open'},{number:42,state:'open'}]
-  assert.throws(()=>resolveAdmittedIssueForPr(7,io),/exactly one open/)
+  assert.throws(()=>resolveAdmittedIssueForPr(7,io),/exactly one structural work issue/)
+  io.closingIssuesForPr=()=>[{number:41,state:'open'}]
+  io.getFileAt=()=>'create table core.example(id bigint); create table core.undeclared(id bigint);'
+  assert.throws(()=>admitIssue(41,io,{pr:7}),/structural objects must exactly match/)
+  io.getFileAt=()=> 'create table core.example(id bigint);'
+  io.closingIssuesForPr=()=>[{number:99,state:'open'}]
+  assert.throws(()=>admitIssue(41,io,{pr:7}),/must close exactly admitted issue #41/)
+})
+
+test('a merge-closed admitted issue reopens only for a merged linked PR', () => {
+  let state='closed'
+  const io={
+    closingIssuesForPr:()=>[{number:41,state}],getIssue:()=>({...issue(scopeBody()),state}),updateIssue:(_n,fields)=>{state=fields.state},
+    getPr:()=>({head:{sha:'a'.repeat(40)},merged_at:null}),getFileAt:()=> 'create table core.example(id bigint);',getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],
+  }
+  assert.throws(()=>admitIssue(41,io,{pr:7}),/is closed and cannot be admitted/)
+  assert.equal(state,'closed')
+  io.getPr=()=>({head:{sha:'a'.repeat(40)},merged_at:'2026-09-11T00:00:00Z'})
+  assert.equal(admitIssue(41,io,{pr:7}).admitted,true)
+  assert.equal(state,'open')
 })
 
 test('downloaded proof contents bind live assertion and generated types to exact issue, app head, and instant',()=>{
@@ -216,6 +236,7 @@ function completionFixture({through='production_applied',generated='not-applicab
   const io={
     getIssue:()=>({...issue(scopeBody({generated})),state:issueState}),updateIssue:(_n,fields)=>{issueState=fields.state},parseScope:parseQueueScope,issueComments:()=>comments,
     readOutcomeEvidence:()=>['```db-outcome-evidence',JSON.stringify(evidence),'```'].join('\n'),
+    closingIssuesForPr:()=>[{number:41,state:'closed'}],prStructuralObjects:()=>['table core.example'],
     getPr:()=>({merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:merge}),mergeCommitInMain:()=>true,
     applicationCommitInDefaultBranch:()=>true,verifyLiveAssertion:()=>true,verifyGeneratedTypes:()=>true,
     commentIssue:(_n,body)=>comments.push({body}),
@@ -260,4 +281,6 @@ test('completion refuses preview-only, merge-only, missing generated types, miss
   {const {io}=completionFixture({generated:'required'});const base=io.readOutcomeEvidence;io.readOutcomeEvidence=()=>base().replace(/,"generated_types_evidence":"[^"]+"/,'');assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/generated types/)}
   {const {io}=completionFixture();io.getIssue=()=>issue(scopeBody({returnTo:''}));assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/application_return_to|return address/)}
   {const {io}=completionFixture();const base=io.readOutcomeEvidence;io.readOutcomeEvidence=()=>base().replace('authenticated create-and-read succeeds','different assertion');assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/live_assertion/)}
+  {const {io}=completionFixture();io.closingIssuesForPr=()=>[{number:41},{number:42}];assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/not linked exclusively/)}
+  {const {io}=completionFixture();io.prStructuralObjects=()=>['table core.other'];assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/structural objects do not match/)}
 })
