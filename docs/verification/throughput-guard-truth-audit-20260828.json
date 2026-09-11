@@ -1945,9 +1945,16 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": ".github/workflows/shared-supabase-migrations.yml:1154",
+      "semantic_key": ".github/workflows/shared-supabase-migrations.yml:5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4:1",
+      "line_sha256": "5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4",
+      "disposition": "excluded",
+      "reason": "Issue 2789 early refusal: with the automatic risk policy active, a production apply review dispatched without a numeric source_pr is refused by name before any credential is used. It adds a refusal and changes no existing check."
     }
   ],
-  "call_site_count": 276,
-  "call_site_sha256": "f9781c4cc4614297efa5dffcc7ca3206254c34acc7d4dda5448ce8bc58fdecce",
+  "call_site_count": 277,
+  "call_site_sha256": "a66e4c5db54972afa39365d18921e73821459712fe918ca3242a272495ff7206",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
