@@ -1,66 +1,78 @@
 {
   "schema_version": 1,
-  "work_issue": 2712,
+  "work_issue": 2785,
   "outcome": "ready-for-merge",
-  "pr": 2765,
-  "migration_versions": [
-    "20260911124845"
-  ],
-  "contract_ref": "refs/db-contracts/2712/1",
-  "contract_sha256": "4606f577186f7a3a3d21b9fed8f4311f595e33e6f9014d828e2b83d0bbd41067",
-  "head_sha": "8b1a617b07adff4c8fc8437c5684e5772d496b13",
+  "pr": 2786,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2785/4",
+  "contract_sha256": "6a0b917ab5090675eac198904e26eacacc293505b192ba09a119c9bb303372c5",
+  "head_sha": "58c8cab9a1b577b1d4be2439e67311aa73be548f",
   "files_changed": [
-    "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
-    "supabase/tests/hts_rag_shared_schema_contract.sql"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    ".github/workflows/business-rule-library.yml",
+    ".github/workflows/documents-only-merge-authorization.yml",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/migration-author-lease.yml",
+    ".github/workflows/orchestrator-marker-guard.yml",
+    ".github/workflows/pr-object-collision.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
+    ".github/workflows/task-gates.yml",
+    "AGENTS.md",
+    "config/orchestrator-global-invalidators-v1.json",
+    "scripts/check-actions-quota.mjs",
+    "scripts/check-actions-quota.test.mjs",
+    "scripts/check-dispatch-collision.test.mjs",
+    "scripts/check-pr-object-collisions.mjs",
+    "scripts/check-pr-source-collisions.mjs",
+    "scripts/lib/github-transport.mjs",
+    "scripts/lib/github-transport.test.mjs",
+    "scripts/lib/open-pr-files.mjs",
+    "scripts/lib/open-pr-files.test.mjs",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
-  "db_reads": [
-    "function app.set_updated_at"
-  ],
-  "db_writes": [
-    "schema hts_rag",
-    "role designflow_hts_prod_runtime",
-    "role designflow_hts_alsand_runtime",
-    "role designflow_hts_prod_worker",
-    "role designflow_hts_alsand_worker",
-    "table hts_rag.hts_rag_rulings",
-    "table hts_rag.hts_rag_product_examples",
-    "table hts_rag.hts_rag_precedents",
-    "table hts_rag.hts_rag_precedent_rulings",
-    "table hts_rag.hts_rag_extraction_jobs",
-    "table hts_rag.hts_rag_determinations",
-    "table hts_rag.hts_rag_provider_responses",
-    "table hts_rag.hts_rag_review_events",
-    "table hts_rag.hts_rag_product_family_allowlist",
-    "table hts_rag.hts_rag_debate_runs",
-    "function hts_rag.enforce_hts_rag_precedent_promotion_gate_immutable"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
+    {
+      "command": "node --test scripts/check-pr-object-collisions.test.mjs scripts/check-dispatch-collision.test.mjs scripts/check-pr-source-collisions.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/lib/github-transport.test.mjs scripts/lib/open-pr-files.test.mjs scripts/check-actions-quota.test.mjs",
+      "exit_code": 0,
+      "evidence": "663 tests, 663 pass, 0 fail, 0 skipped after merging main 25c4ca3b. Includes: with no opt-in a rate-limit 403 fails after one call with no wait or probe; an opted-in read waits 301 s then succeeds; other 403s fail after one call; every open PR gets the changed_files proof and a short truncated list is refused; the quota preflight never waits with the cap unset, 0, or shorter than the reset."
+    },
+    {
+      "command": "python -m unittest scripts.test_production_business_risk_gate",
+      "exit_code": 0,
+      "evidence": "Ran 141 tests, OK, after merging main 25c4ca3b."
+    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors at implementation head 8b1a617b07adff4c8fc8437c5684e5772d496b13."
+      "evidence": "No whitespace errors in the diff from main 25c4ca3b to the head."
     },
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "node --test scripts/orchestrator-flow/evidence-bundle.test.mjs scripts/throughput-guard/check-throughput-truth-audit.test.mjs",
       "exit_code": 0,
-      "evidence": "SQL migration guards job passed on PR 2765 (run 34603204304 and at c8c557174c84794716bd0e3448369bc9b03c2259); the migration file is unchanged since."
+      "evidence": "12 tests, 12 pass, 0 fail."
     },
     {
-      "command": "psql contract test in a rolled-back transaction",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "hts_rag_shared_schema_contract.sql passed at 8314a3b8dc375a2772a40bce67d0e26a083b99c7 (migration and test byte-identical at implementation head 8b1a617b07adff4c8fc8437c5684e5772d496b13) against a local PostgreSQL 17 cluster with migration 20260911124845 applied; a negative control granting EXECUTE on the promotion-gate trigger function to designflow_hts_alsand_worker made it fail as intended."
+      "evidence": "truth audit OK: call_sites=276 (main 25c4ca3b added one site in #2789)."
     },
     {
-      "command": "hosted ephemeral migration regression suite",
+      "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "Database Contract Tests run 34614159509 passed at c8c557174c84794716bd0e3448369bc9b03c2259 with the previous test revision; migration 20260911124845 replayed from empty. The hosted run for this head is produced by CI on push."
+      "evidence": "216 files scanned; every GitHub call goes through the governed transport."
     }
   ],
   "assumptions_resolved": [
-    "Production qsllyeztdwjgirsysgai verified read-only on 2026-09-11: no hts_rag schema and no designflow_hts roles exist.",
-    "The migration is self-contained and does not depend on unapplied public.hts_rag_* migrations; public.hts_rag_* is untouched.",
-    "All four roles are NOLOGIN; no password is committed. Granting login credentials to the application is a separate governed follow-up."
+    "Only primary quota exhaustion (403/429 with remaining 0) can wait, at most 15 minutes, only for reads, and only when the step opted in with GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS; secondary limits and other 403s still fail immediately.",
+    "The wait is opt-in, so every lock-holding step (merge lane, author mutex, production lane, including unedited steps) fails fast exactly as on main.",
+    "The dispatch collision check proves changed_files for every open PR, unchanged from main.",
+    "The shared open-PR snapshot keeps every completeness proof and is bound to repo, PR number and schema; a mismatch fails closed.",
+    "No database reads or writes.",
+    "The lanes script change (list issues once) was moved to follow-up #2787 to clear the protected-source collision; the lanes script is unchanged here."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Implementation is tested. Independent governed review, guarded merge, preview apply, production apply and live verification remain pending and are not asserted by this record."
+  "stop_conditions_hit": []
 }

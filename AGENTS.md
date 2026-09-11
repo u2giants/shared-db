@@ -1188,7 +1188,14 @@ The rule, in four parts:
    *answer* ("does this ref exist yet?"), and a gate that concludes "absent" only after
    exhausting a retry budget has made its absence proof depend on a timeout — fail-open,
    which is worse than fail-closed. Retries are for HTTP 5xx and connection or TLS failures
-   only; rate-limit responses remain semantic failures and are not retried.
+   only. The one bounded exception is a **primary quota exhaustion** ("rate limit
+   exceeded" with HTTP 403/429) on a read: it waits once for the reset GitHub states (via
+   the free `rate_limit` endpoint), only when that reset is 15 minutes away or less, then
+   re-reads. A further reset, an unreadable reset, a second exhaustion, a write, a
+   secondary rate limit, or any other 403 still fails closed. The wait is **opt-in**: only
+   a step that holds no lock sets `GITHUB_RATE_LIMIT_MAX_WAIT_SECONDS` (at most 900).
+   Unset means no wait, so a lock-holding step never waits. Never set it on a step that
+   holds the author mutex, a merge lane, or the production lane.
 
 **This is enforced, not advised.** `scripts/check-github-transport-conformance.mjs` fails
 the build on direct Node `gh` process calls, literal shell-wrapped governed `gh` calls, a
