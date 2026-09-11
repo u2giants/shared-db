@@ -1,52 +1,38 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
+  "work_issue": 2809,
   "outcome": "ready-for-merge",
-  "pr": 2746,
-  "migration_versions": [
-    "20260911212849"
-  ],
-  "contract_ref": "refs/db-contracts/2478/4",
-  "contract_sha256": "433e32594d69874c2cae511acec319c749d96af1334a8fbae6581a8f792f7d84",
-  "head_sha": "462d5ee4765c575c043d9708a30bf6b626c09df5",
+  "pr": 2810,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2809/1",
+  "contract_sha256": "26023b2615ca3511465c94d4c7100bc0a30dade14a2b746b6f3c70f4b260b504",
+  "head_sha": "d057ee689de0e352be022d9637de5efa4174fd93",
   "files_changed": [
-    "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
-  ],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
+      "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
+      "evidence": "243 tests passed, 0 failures, on the tree merged with main 26d9345b. Suite went 241 to 243: the two added cases are the archive-a-table case that now passes preflight, and the negative control proving the OLD name after a move is still refused with 'DROPPED (or renamed away) by 20260102000000'."
     },
     {
-      "command": "local PostgreSQL helper parity contracts",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
+      "evidence": "truth audit OK: call_sites=277. The one new site is the explanatory comment at scripts/production_migration_guard.py:1969, registered as excluded because it is prose quoting the refusal text rather than a detection site."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
       "evidence": "No whitespace errors."
-    },
-    {
-      "command": "python -m unittest scripts.test_migration_derivation",
-      "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
     }
   ],
   "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
+    "The identical self-flag shape in `alter table ... rename to ...` was confirmed present and deliberately left out of scope; it is recorded in the pull request body as deserving its own issue."
   ],
   "stop_conditions_hit": []
 }

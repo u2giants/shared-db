@@ -1,54 +1,47 @@
 {
-    "schema_version": 1,
-    "generation": 4,
-    "work_issue": 2478,
-    "work_type": "structural",
-    "route": "shared-db-orchestrator",
-    "goal": "Extract one SKU derivation shared by rebuild and read-only drift detector without changing grouping, correction, or drift behavior.",
-    "base_sha": "9da98edefecc7104d709762e53fd1efb421cc9dc",
-    "dispatcher": "Codex orchestrator #2714",
-    "worker": "codex-2714-2478",
-    "branch": "codex/issue-2478-shared-sku-key",
-    "worktree": "C:/repos/shared-db-worktrees/issue-2478-shared-sku-key",
-    "allowed_paths": [
-        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "file_writes": [
-        "supabase/migrations/20260911212849_shared_style_group_sku_key.sql",
-        "supabase/tests/style_group_key_for_sku_contracts.sql",
-        "supabase/tests/style_group_drift_reconciler_contracts.sql",
-        ".agent/contract.json",
-        ".agent/completion.json"
-    ],
-    "db_reads": [],
-    "db_writes": [
-        "function public.style_group_key_for_sku",
-        "function public.rebuild_style_groups_batch",
-        "function public.reconcile_style_group_drift"
-    ],
-    "prohibited_actions": [
-        "No shared database writes by worker.",
-        "No correction of application row drift or change to nightly correction path.",
-        "No paid review, merge or main movement before parent priority window clears.",
-        "No changes to issues2705 or2709."
-    ],
-    "required_checks": [
-        "bash scripts/check-sql.sh",
-        "local PostgreSQL helper parity contracts",
-        "git diff --check"
-    ],
-    "assumptions": [
-        "Parent authorized adapting obsolete inline-token assertion to shared-helper wiring while preserving all existing behavior/security tests.",
-        "Latest consumer definitions derive from migrations20260906035323 and20260907031246.",
-        "Generation 4: claim #2745 version 20260911204023 was superseded to 20260911212849 by the governed --supersede-active-claim-version (supersession 861a3f5cb2c7ce8720c61da0f69ac53c32e0e27b) because main added later version 20260911210709."
-    ],
-    "stop_conditions": [
-        "Object overlap or changed source definitions.",
-        "Old/new grouping parity mismatch.",
-        "Consumer behavior or security changes beyond helper delegation."
-    ]
+  "schema_version": 1,
+  "work_issue": 2809,
+  "work_type": "repo-maintenance",
+  "route": "shared-db-orchestrator",
+  "goal": "Book an `alter table ... set schema ...` removal at the END of its own statement so archiving a table stops self-flagging as a missing reference, without weakening the guard's genuine missing-reference detection.",
+  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
+  "dispatcher": "Claude orchestrator #2758",
+  "worker": "claude-2758-2809",
+  "branch": "claude/issue-2809-guard-set-schema-ordering",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2809-guard-ordering",
+  "allowed_paths": [
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "file_writes": [
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "db_reads": [],
+  "db_writes": [],
+  "prohibited_actions": [
+    "No weakening, bypassing, deleting or allowlisting around the preflight guard; its missing-reference detection must still refuse after this change.",
+    "No shared database reads or writes by this worker.",
+    "No migration file and no reserved migration version; this work ships none.",
+    "No edits to issue 2482's claim, branch, worktree or migration."
+  ],
+  "required_checks": [
+    "python -m unittest scripts.test_production_migration_guard",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "git diff --check"
+  ],
+  "assumptions": [
+    "The identical self-flag shape in `alter table ... rename to ...` is deliberately out of scope and is recorded in the pull request body as deserving its own issue."
+  ],
+  "stop_conditions": [
+    "Stop if the one-line ordering change cannot be made without altering any other guard behaviour.",
+    "Stop if either negative control stops refusing, since that would mean the capability was lost rather than repaired.",
+    "Stop and report the exact refusal if a required tool refuses, rather than working around it."
+  ]
 }
