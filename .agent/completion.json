@@ -8,7 +8,7 @@
   ],
   "contract_ref": "refs/db-contracts/2712/1",
   "contract_sha256": "4606f577186f7a3a3d21b9fed8f4311f595e33e6f9014d828e2b83d0bbd41067",
-  "head_sha": "70adaa861f672ab86a46297193e65dcc089d1ddc",
+  "head_sha": "ebc587047dd9b68362958c1c627e0a6cd171d96c",
   "files_changed": [
     "supabase/migrations/20260911124845_hts_rag_shared_schema_least_privilege_roles.sql",
     "supabase/tests/hts_rag_shared_schema_contract.sql"
