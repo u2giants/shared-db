@@ -1,18 +1,12 @@
 {
-  "schema_version": 1,
-  "work_issue": 2697,
-  "outcome": "ready-for-merge",
-  "pr": 2700,
+  "schema_version": 1, "work_issue": 2697, "outcome": "ready-for-merge", "pr": 2700,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2697/8",
-  "contract_sha256": "0c176ee426f811e05a245efcdfa5cdb3c026f867e13119d790879fdb107a4417",
-  "head_sha": "dd38e49d76e2d9ebc10eba66b9ee6e379772ba07",
+  "contract_ref": "refs/db-contracts/2697/9", "contract_sha256": "PENDING", "head_sha": "PENDING",
   "files_changed": [".agent/completion.json", ".agent/contract.json", "docs/verification/reviewer-assignment-api-budget-2026-08-28.md", "docs/verification/reviewer-silent-reclaim-api-budget-2026-09-10.md", "scripts/manage-migration-author-lanes.mjs", "scripts/manage-migration-author-lanes.test.mjs"],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [], "db_writes": [],
   "checks": [
     {"command": "node --test scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "509 pass, 0 fail, 0 skipped; current keys measured 28 and legacy fallback 30."},
-    {"command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Contract generation 8 is valid and published."},
+    {"command": "node scripts/agent-work-contract.mjs --validate-contract --contract-file .agent/contract.json", "exit_code": 0, "evidence": "Contract generation 9 is valid and published."},
     {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors."}
   ],
   "assumptions_resolved": ["The operation has its own measured ceiling of 30 and mutex reserve of 15.", "The shared ceiling of 25 remains unchanged.", "The redundant request was removed without removing the in-mutex proof."],
