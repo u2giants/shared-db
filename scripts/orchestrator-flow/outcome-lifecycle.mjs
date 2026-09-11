@@ -27,7 +27,7 @@ export function parseOutcomeEvidence(body = '') {
   if (!record || typeof record !== 'object' || Array.isArray(record)) throw new OutcomeError('db-outcome-evidence must be a JSON object')
   const known = new Set([
     'schema_version', 'work_issue', 'merge_pr', 'merge_sha', 'application_repository',
-    'production_evidence', 'production_artifact_id', 'production_artifact_digest',
+    'production_evidence', 'production_commit_sha', 'production_artifact_id', 'production_artifact_digest',
     'application_commit_sha', 'generated_types_evidence', 'generated_types_artifact_id', 'generated_types_artifact_digest', 'generated_types_output_digest', 'live_assertion',
     'live_evidence', 'live_artifact_id', 'live_artifact_digest', 'environment', 'verified_at',
   ])
@@ -37,6 +37,7 @@ export function parseOutcomeEvidence(body = '') {
   if (!Number.isInteger(record.merge_pr) || record.merge_pr <= 0) throw new OutcomeError('db-outcome-evidence must name merge_pr')
   if (!SHA.test(record.merge_sha ?? '')) throw new OutcomeError('db-outcome-evidence must name the exact 40-character merge_sha')
   if (typeof record.production_evidence !== 'string' || !EVIDENCE_REF.test(record.production_evidence)) throw new OutcomeError('db-outcome-evidence must link durable production apply proof')
+  if (!SHA.test(record.production_commit_sha ?? '')) throw new OutcomeError('db-outcome-evidence must name the exact production_commit_sha')
   if (!Number.isInteger(record.production_artifact_id) || record.production_artifact_id <= 0) throw new OutcomeError('db-outcome-evidence must name the production apply artifact id')
   if (typeof record.production_artifact_digest !== 'string' || !/^sha256:[0-9a-f]{64}$/i.test(record.production_artifact_digest)) throw new OutcomeError('db-outcome-evidence must name the production apply artifact sha256 digest')
   if (!REPOSITORY.test(record.application_repository ?? '')) throw new OutcomeError('db-outcome-evidence must name application_repository as owner/repo')
@@ -52,8 +53,9 @@ export function parseOutcomeEvidence(body = '') {
 
 export function trustedOutcomeComments(comments = []) {
   return comments.filter((comment) => {
+    if(!Object.prototype.hasOwnProperty.call(comment??{},'author_association')&&!Object.prototype.hasOwnProperty.call(comment??{},'authorAssociation'))return false
     const association = String(comment?.author_association ?? comment?.authorAssociation ?? '').toUpperCase()
-    return association === '' || association === 'OWNER'
+    return association === 'OWNER'
   })
 }
 

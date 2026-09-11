@@ -1807,10 +1807,17 @@ export const githubIo = {
     const match=/^https:\/\/github\.com\/(u2giants\/shared-db)\/actions\/runs\/(\d+)$/.exec(String(evidence?.production_evidence??''))
     if(!match)return false
     const run=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}`])
-    if(run?.conclusion!=='success'||run?.event!=='workflow_dispatch'||run?.path!=='.github/workflows/shared-supabase-migrations.yml'||String(run?.head_sha??'').toLowerCase()!==String(evidence.merge_sha).toLowerCase())return false
+    if(run?.conclusion!=='success'||run?.event!=='workflow_dispatch'||run?.path!=='.github/workflows/shared-supabase-migrations.yml'||String(run?.head_sha??'').toLowerCase()!==String(evidence.production_commit_sha).toLowerCase())return false
+    const ancestry=ghJson(['api',`repos/${REPO}/compare/${evidence.merge_sha}...${evidence.production_commit_sha}`])
+    if(!['identical','ahead'].includes(ancestry?.status)||Number(ancestry?.behind_by)!==0)return false
     const artifacts=ghJson(['api',`repos/${match[1]}/actions/runs/${match[2]}/artifacts`])?.artifacts
     const artifact=Array.isArray(artifacts)?artifacts.find((row)=>Number(row.id)===Number(evidence.production_artifact_id)):null
-    return artifact?.name===`production-migration-apply-${String(evidence.merge_sha).toLowerCase()}`&&artifact.expired===false&&String(artifact.digest??'').toLowerCase()===String(evidence.production_artifact_digest).toLowerCase()
+    if(!(artifact?.name===`production-migration-apply-${String(evidence.production_commit_sha).toLowerCase()}`&&artifact.expired===false&&String(artifact.digest??'').toLowerCase()===String(evidence.production_artifact_digest).toLowerCase()))return false
+    const files=this.readArtifactFiles(match[1],artifact.id,['production-apply.txt','production-ledger-after.txt','migration-content-manifest.json','production-catalog-verification.json'])
+    if(!files.get('production-apply.txt')?.trim())return false
+    try{JSON.parse(files.get('production-catalog-verification.json'));JSON.parse(files.get('migration-content-manifest.json'))}catch{return false}
+    const versions=this.getPrFiles(Number(evidence.merge_pr)).map((file)=>/^supabase\/migrations\/(\d{14})_[^/]+\.sql$/.exec(String(file?.filename??''))?.[1]).filter(Boolean)
+    return versions.length>0&&versions.every((version)=>files.get('production-ledger-after.txt').includes(version)&&files.get('migration-content-manifest.json').includes(version))
   },
   verifyLiveAssertion(evidence) {
     const match=/^https:\/\/github\.com\/([^/]+\/[^/]+)\/actions\/runs\/(\d+)$/.exec(String(evidence?.live_evidence??''))
@@ -1846,6 +1853,21 @@ export const githubIo = {
       if(entries.length!==1||entries[0]!==expectedFile)throw new LaneError(`proof artifact must contain exactly ${expectedFile}`)
       execFileSync('tar',['-xf',archive,'-C',directory],{stdio:'ignore'})
       return JSON.parse(readFileSync(path.join(directory,expectedFile),'utf8'))
+    }finally{rmSync(directory,{recursive:true,force:true})}
+  },
+  readArtifactFiles(repository,id,expectedFiles){
+    const directory=mkdtempSync(path.join(tmpdir(),'shared-db-production-proof-')),archive=path.join(directory,'proof.zip')
+    try{
+      const bytes=gh(['api',`repos/${repository}/actions/artifacts/${Number(id)}/zip`],{encoding:null,maxBuffer:20*1024*1024})
+      writeFileSync(archive,bytes)
+      const entries=execFileSync('tar',['-tf',archive],{encoding:'utf8',stdio:['ignore','pipe','pipe']}).split(/\r?\n/).filter(Boolean)
+      const result=new Map()
+      for(const expected of expectedFiles){
+        const entry=entries.find((value)=>value===expected||value.endsWith(`/${expected}`))
+        if(!entry)throw new LaneError(`production proof artifact is missing ${expected}`)
+        result.set(expected,execFileSync('tar',['-xOf',archive,entry],{encoding:'utf8',stdio:['ignore','pipe','pipe']}))
+      }
+      return result
     }finally{rmSync(directory,{recursive:true,force:true})}
   },
   closeIssue(number) { gh(['issue','close',String(number),'--repo',REPO]) },

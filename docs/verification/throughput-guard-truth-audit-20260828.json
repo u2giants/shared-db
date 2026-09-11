@@ -1952,9 +1952,16 @@
       "line_sha256": "fc5dbd3411165633fff781b72e2e50b072c8134f5ea05a3a39f2ae78125cbc07",
       "disposition": "enriched",
       "reason": "The queue explicitly excludes an issue missing the required admission fields, so it cannot advertise work that the claim gate must refuse."
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:1867",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:a506dd54ce0a675ce62b60933700254ff523561f16a7abdd7e91a1615f095238:1",
+      "line_sha256": "a506dd54ce0a675ce62b60933700254ff523561f16a7abdd7e91a1615f095238",
+      "disposition": "enriched",
+      "reason": "A missing required production-proof artifact file refuses outcome completion, so absent evidence cannot be read as successful application."
     }
   ],
-  "call_site_count": 277,
-  "call_site_sha256": "855966e514ad4cf485db21ffea7e476b6b88ece0303c105566bdb30781407d82",
+  "call_site_count": 278,
+  "call_site_sha256": "a3faf91b5348c7e38f41e9b77fff8a5726f92177c01905aa1f86660a7059ed2f",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

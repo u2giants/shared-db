@@ -7,6 +7,7 @@ import { admitIssue, buildDynamicQueues, claimBody, main as managerMain, matches
 import { findCompletionRecord } from '../lib/work-dependencies.mjs'
 
 const issue = (body, number = 41) => ({ number, state: 'open', title: 'structural outcome', body, createdAt: '2026-09-11T00:00:00Z' })
+const ownerComment = (body) => ({body,author_association:'OWNER'})
 const scopeBody = ({ service='standard-application', change='migration', stage='entered', object='table core.example', returnTo='u2giants/example-app', live='authenticated create-and-read succeeds', generated='not-applicable', extra='' } = {}) => [
   '```db-work-scope', 'status: ready', 'work_type: structural', 'route: shared-db-orchestrator',
   `service_class: ${service}`, `change_type: ${change}`, `application_return_to: ${returnTo}`,
@@ -104,7 +105,7 @@ test('legacy in-flight structural PRs remain executable but cannot enter as new 
 
 test('a refused actual change publishes one typed refusal with return and reopening evidence', () => {
   const body=scopeBody({change:'application-code'}),comments=[]
-  const io={enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push({body:value})}
+  const io={enforceAdmission:true,getIssue:()=>issue(body),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value))}
   const old=console.error;console.error=()=>{}
   try { assert.equal(managerMain(['--admit-issue','41'],new Date('2026-09-11T00:00:00Z'),io),2) } finally { console.error=old }
   const event=parseEventComment(comments[0].body)[0]
@@ -115,7 +116,7 @@ test('a refused actual change publishes one typed refusal with return and reopen
 test('a data-only migration PR publishes a typed refusal instead of trusting its filename', () => {
   const comments=[]
   const io={
-    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push({body:value}),
+    enforceAdmission:true,getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,value)=>comments.push(ownerComment(value)),
     closingIssuesForPr:()=>[{number:41,state:'open'}],
     getPr:()=>({head:{sha:'a'.repeat(40)}}),getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_data.sql',status:'added'}],
     getFileAt:()=>'insert into core.example values (1);',
@@ -144,7 +145,7 @@ test('legacy issues remain protected if already claimed but are never offered as
 
 test('an admitted issue cannot authorize a claim for different objects',()=>{
   const comments=[];let claims=0
-  const io={enforceAdmission:true,getIssue:()=>issue(scopeBody({object:'table core.authorized'})),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body}),createClaim:()=>{claims++}}
+  const io={enforceAdmission:true,getIssue:()=>issue(scopeBody({object:'table core.authorized'})),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body)),createClaim:()=>{claims++}}
   const old=console.error;let message='';console.error=(value)=>{message=String(value)}
   try{
     assert.equal(managerMain(['--claim','--admit-issue','41','--task','x','--owner','o','--branch','b','--worktree','w','--objects','table core.unrelated'],new Date('2026-09-11T00:00:00Z'),io),2)
@@ -155,7 +156,7 @@ test('an admitted issue cannot authorize a claim for different objects',()=>{
 test('source PR resolves exactly one linked open issue and independently admits its files', () => {
   const comments=[]
   const io={
-    closingIssuesForPr:()=>[{number:41,state:'open'}],getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body}),
+    closingIssuesForPr:()=>[{number:41,state:'open'}],getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body)),
     getPr:()=>({head:{sha:'a'.repeat(40)}}),getFileAt:()=> 'create table core.example(id bigint);',getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_example.sql',status:'added'}],
   }
   assert.deepEqual(resolveAdmittedIssueForPr(7,io),{issue:41,pr:7,admission:'admitted'})
@@ -190,8 +191,10 @@ test('a refused merged PR leaves its closed issue closed',()=>{
 })
 
 test('multi-target DDL binds every structural object',()=>{
-  const result=inspectPrStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'drop table core.example, core.other;'}])
-  assert.deepEqual(result.objects,['table core.example','table core.other'])
+  for(const [ddl,kind] of [['table','table'],['view','view'],['materialized view','materialized view'],['function','function'],['procedure','procedure'],['index','index']]){
+    const result=inspectPrStructuralChange([{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:`drop ${ddl} core.example, core.other;`}])
+    assert.deepEqual(result.objects,[`${kind} core.example`,`${kind} core.other`],ddl)
+  }
 })
 
 test('downloaded proof contents bind live assertion and generated types to exact issue, app head, and instant',()=>{
@@ -213,7 +216,7 @@ test('full capacity records urgent waiting without revoking active work', () => 
 })
 
 const linear=OUTCOME_STATES.filter((state)=>!['blocked','yielded'].includes(state))
-const eventComments=(through='production_applied',issue=41)=>linear.slice(0,linear.indexOf(through)+1).map((state,index)=>({body:formatEventComment(outcomeEvent({issue,state,actor:'test',timestamp:new Date(Date.UTC(2026,8,11,0,index)).toISOString()}))}))
+const eventComments=(through='production_applied',issue=41)=>linear.slice(0,linear.indexOf(through)+1).map((state,index)=>ownerComment(formatEventComment(outcomeEvent({issue,state,actor:'test',timestamp:new Date(Date.UTC(2026,8,11,0,index)).toISOString()}))))
 
 test('outcome lifecycle refuses every skip and merge is not live completion', () => {
   const skipped=[eventComments('entered')[0],eventComments('review_ready').at(-1)]
@@ -226,15 +229,16 @@ test('untrusted forged and malformed event comments cannot alter lifecycle histo
   const trusted=eventComments('classified').map((row)=>({...row,author_association:'OWNER'}))
   const forged={...eventComments('live_verified').at(-1),author_association:'NONE'}
   const malformed={body:'```db-coordination-event\n{bad json}\n```',author_association:'NONE'}
-  const history=outcomeHistory([...trusted,forged,malformed],41)
+  const missingAssociation={body:eventComments('live_verified').at(-1).body}
+  const history=outcomeHistory([...trusted,forged,malformed,missingAssociation],41)
   assert.equal(history.valid,true);assert.equal(history.state,'classified')
 })
 
 test('admission and dispatch can share the command clock without invalidating claim history',()=>{
   const comments=[],timestamp='2026-09-11T00:00:00.000Z'
-  const io={getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body})}
+  const io={getIssue:()=>issue(scopeBody()),issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body))}
   admitIssue(41,io,{timestamp})
-  comments.push({body:formatEventComment(outcomeEvent({issue:41,state:'dispatched',actor:'test',timestamp}))})
+  comments.push(ownerComment(formatEventComment(outcomeEvent({issue:41,state:'dispatched',actor:'test',timestamp}))))
   const history=outcomeHistory(comments,41)
   assert.equal(history.valid,true);assert.equal(history.state,'dispatched')
 })
@@ -247,16 +251,16 @@ test('completion refuses lifecycle events belonging to another issue',()=>{
 
 test('blocked outcomes must yield before advancing and malformed block events invalidate history',()=>{
   const comments=eventComments('classified')
-  comments.push({body:formatEventComment(outcomeEvent({issue:41,state:'blocked',actor:'test',timestamp:'2026-09-11T00:03:00Z'}))})
+  comments.push(ownerComment(formatEventComment(outcomeEvent({issue:41,state:'blocked',actor:'test',timestamp:'2026-09-11T00:03:00Z'}))))
   assert.throws(()=>advanceOutcome({issue:41,state:'dispatched',actor:'test',timestamp:'2026-09-11T00:04:00Z'}, {issueComments:()=>comments,commentIssue:()=>{}}),/record yielded/)
-  comments.push({body:formatEventComment(outcomeEvent({issue:41,state:'yielded',actor:'test',timestamp:'2026-09-11T00:04:00Z'}))})
+  comments.push(ownerComment(formatEventComment(outcomeEvent({issue:41,state:'yielded',actor:'test',timestamp:'2026-09-11T00:04:00Z'}))))
   assert.equal(outcomeHistory(comments).valid,true)
-  const stray=[...eventComments('classified'),{body:formatEventComment(outcomeEvent({issue:41,state:'yielded',actor:'test',timestamp:'2026-09-11T00:03:00Z'}))}]
+  const stray=[...eventComments('classified'),ownerComment(formatEventComment(outcomeEvent({issue:41,state:'yielded',actor:'test',timestamp:'2026-09-11T00:03:00Z'})))]
   assert.deepEqual(outcomeHistory(stray).problems,['yielded without an active blocked state'])
 })
 
 test('every linear outcome transition records exactly once and every skip refuses',()=>{
-  const comments=[],io={issueComments:()=>comments,commentIssue:(_n,body)=>comments.push({body})}
+  const comments=[],io={issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body))}
   linear.forEach((state,index)=>{
     assert.equal(advanceOutcome({issue:41,state,actor:'test',timestamp:new Date(Date.UTC(2026,8,11,0,index)).toISOString(),evidenceUrls:['https://github.com/u2giants/shared-db/issues/41']},io).state,state)
   })
@@ -267,14 +271,14 @@ test('every linear outcome transition records exactly once and every skip refuse
 function completionFixture({through='production_applied',generated='not-applicable'}={}) {
   const comments=eventComments(through), merge='a'.repeat(40), app='b'.repeat(40)
   let issueState='open'
-  const evidence={schema_version:1,work_issue:41,merge_pr:7,merge_sha:merge,production_evidence:'https://github.com/u2giants/shared-db/actions/runs/97',production_artifact_id:121,production_artifact_digest:`sha256:${'f'.repeat(64)}`,application_repository:'u2giants/example-app',application_commit_sha:app,live_assertion:'authenticated create-and-read succeeds',live_evidence:'https://github.com/u2giants/example-app/actions/runs/99',live_artifact_id:123,live_artifact_digest:`sha256:${'c'.repeat(64)}`,environment:'production',verified_at:'2026-09-11T01:00:00Z',...(generated==='required'?{generated_types_evidence:'https://github.com/u2giants/example-app/actions/runs/98',generated_types_artifact_id:122,generated_types_artifact_digest:`sha256:${'d'.repeat(64)}`,generated_types_output_digest:`sha256:${'e'.repeat(64)}`}:{})}
+  const evidence={schema_version:1,work_issue:41,merge_pr:7,merge_sha:merge,production_evidence:'https://github.com/u2giants/shared-db/actions/runs/97',production_commit_sha:merge,production_artifact_id:121,production_artifact_digest:`sha256:${'f'.repeat(64)}`,application_repository:'u2giants/example-app',application_commit_sha:app,live_assertion:'authenticated create-and-read succeeds',live_evidence:'https://github.com/u2giants/example-app/actions/runs/99',live_artifact_id:123,live_artifact_digest:`sha256:${'c'.repeat(64)}`,environment:'production',verified_at:'2026-09-11T01:00:00Z',...(generated==='required'?{generated_types_evidence:'https://github.com/u2giants/example-app/actions/runs/98',generated_types_artifact_id:122,generated_types_artifact_digest:`sha256:${'d'.repeat(64)}`,generated_types_output_digest:`sha256:${'e'.repeat(64)}`}:{})}
   const io={
     getIssue:()=>({...issue(scopeBody({generated})),state:issueState}),updateIssue:(_n,fields)=>{issueState=fields.state},parseScope:parseQueueScope,issueComments:()=>comments,
     readOutcomeEvidence:()=>['```db-outcome-evidence',JSON.stringify(evidence),'```'].join('\n'),
     closingIssuesForPr:()=>[{number:41,state:'closed'}],prStructuralObjects:()=>['table core.example'],
     getPr:()=>({merged_at:'2026-09-11T00:00:00Z',merge_commit_sha:merge}),mergeCommitInMain:()=>true,
     applicationCommitInDefaultBranch:()=>true,verifyProductionApply:()=>true,verifyLiveAssertion:()=>true,verifyGeneratedTypes:()=>true,
-    commentIssue:(_n,body)=>comments.push({body}),
+    commentIssue:(_n,body)=>comments.push(ownerComment(body)),
   }
   return {io,comments}
 }
@@ -313,7 +317,7 @@ test('completion retries safely after completion-comment or close response loss'
 
 test('existing incompatible completion refuses before publishing live_verified',()=>{
   const {io,comments}=completionFixture()
-  comments.push({body:['```db-work-completion',JSON.stringify({schema_version:1,work_issue:41,outcome:'merged',pr:7,merge_sha:'a'.repeat(40),migration_versions:[]}), '```'].join('\n')})
+  comments.push(ownerComment(['```db-work-completion',JSON.stringify({schema_version:1,work_issue:41,outcome:'merged',pr:7,merge_sha:'a'.repeat(40),migration_versions:[]}), '```'].join('\n')))
   const before=comments.length
   assert.throws(()=>completeOutcome({issue:41,evidenceRef:'x',actor:'test'},io),/existing immutable completion record disagrees/)
   assert.equal(comments.length,before);assert.equal(outcomeHistory(comments,41).state,'production_applied')
