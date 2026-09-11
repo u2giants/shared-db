@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
-  "generation": 4,
+  "generation": 5,
   "work_issue": 2706,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Align DCP Creative section, status and guidance with stable latest-terminal identity authority across retained copies; preserve genuine unresolved/conflicting records and non-authoritative Marvel raw-tag treatment.",
-  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
+  "base_sha": "439beffc5970b60bc7e1c8e0445f892fae46f8a7",
   "dispatcher": "Codex orchestrator #2714",
   "worker": "codex-2714-2706",
   "branch": "codex/issue-2706",
