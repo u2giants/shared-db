@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2501,
-  "generation": 2,
+  "generation": 3,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Recover inherited tag-filtered facet and exact list-total optimization after the separate replay-provenance repair lands, preserving count parity, access control and the existing viewer timeout.",
-  "base_sha": "71dca7b3deae7eea2ab0c2e47a320e1291dc0580",
+  "base_sha": "a671cd47aaf7608c07a9db31822d3c708fda85b3",
   "dispatcher": "Codex orchestrator marker2714",
   "worker": "Codex issue2501 successor",
   "branch": "codex/issue-2501-popdam-tag-totals",
@@ -13,14 +13,14 @@
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260910223429_popdam_tag_totals_cold_plan.sql",
+    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
     "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_effective_count_performance_contracts.sql"
   ],
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
-    "supabase/migrations/20260910223429_popdam_tag_totals_cold_plan.sql",
+    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
     "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_effective_count_performance_contracts.sql"
   ],
@@ -52,7 +52,8 @@
     "Replay-provenance repair2537 landed as PR2540 merge d57be0d59499ca0c156c3a80ec87354a5367f5b3; scoped real-SQL regression verifies the old restoration failure and repaired helper preservation.",
     "Claim2525 retains original owner, branch, remote worktree and immutable version.",
     "Independent exact-head review, representative authenticated cold/warm preview and production acceptance remain separate gates.",
-    "Successor preserves remote PR ancestry at 99f3d4ed713ae9dd0bd471ffa05cfe7b4c7b9900 by merging into current-main worktree. This generation only repairs stale evidence and reserved-version references; existing claim2525 identity is retained and remains active."
+    "Successor preserves remote PR ancestry at 99f3d4ed713ae9dd0bd471ffa05cfe7b4c7b9900 by merging into current-main worktree. This generation only repairs stale evidence and reserved-version references; existing claim2525 identity is retained and remains active.",
+    "Current main2638 integrated without SQL conflicts. Manager superseded never-applied20260910223429 to20260911045353; migration body remains byte-identical."
   ],
   "stop_conditions": [
     "Stop before final evidence if current main is not an ancestor of implementation.",

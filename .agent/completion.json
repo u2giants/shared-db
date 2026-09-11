@@ -4,15 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2527,
   "migration_versions": [
-    "20260910223429"
+    "20260911045353"
   ],
-  "contract_ref": "refs/db-contracts/2501/2",
-  "contract_sha256": "42fb06eeadb07ef6af636afabfb621e756c784f7bb0542c5beea1d232fc3b89d",
-  "head_sha": "5d5181246058cf6f3678f6aa92fdf689633c4473",
+  "contract_ref": "refs/db-contracts/2501/3",
+  "contract_sha256": "17e9e0c0508b4f858b3dd7935ff82b26127d55bc3a889c169b1d396eb103396c",
+  "head_sha": "045088329df6f673464a3e41b05436bce7d58efc",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "supabase/migrations/20260910223429_popdam_tag_totals_cold_plan.sql",
+    "supabase/migrations/20260911045353_popdam_tag_totals_cold_plan.sql",
     "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_effective_count_performance_contracts.sql"
   ],
@@ -49,7 +49,8 @@
   "assumptions_resolved": [
     "Current main71dca7b3 and PR head99f3d4ed are both ancestors of implementation head5d518124. Migration and test bytes are unchanged; only stale contract/version evidence is repaired.",
     "Claim2525 remains active under inherited identity; no protected claims were changed.",
-    "No database writes, preview, merges or production promotion are performed by this worker."
+    "No database writes, preview, merges or production promotion are performed by this worker.",
+    "Current main a671cd47 merged; supported reversion changed filename only. Earlier independent APPROVE does not automatically authorize the new head."
   ],
   "stop_conditions_hit": []
 }
