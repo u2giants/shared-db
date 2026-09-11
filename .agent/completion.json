@@ -8,8 +8,10 @@
   ],
   "contract_ref": "refs/db-contracts/2802/1",
   "contract_sha256": "8f3d34152b340470be46139ae6ae6fedbfeb8726568197329dcb2fdbcab32148",
-  "head_sha": "2f194ec5461095026f9f7ab040b3c4d394c85ade",
+  "head_sha": "69fed8b14f23e934f934b60a0440cdca281c7c3e",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260911224952_dam_style_guide_file_has_talent_likeness.sql"
   ],
   "db_reads": [],
@@ -20,12 +22,14 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed at 2f194ec5. Guard B: no migration sorts before the base branch's newest version 20260911213429 (source: git:origin/main). Issue #1235 expected-count guard passed. Verify-cost guard passed: 1 added migration contains no prohibited verification read. Issue #1684 EOL reference guard passed. Guard B2 did not run: no live ledger source configured (informational, issue #651)."
+      "evidence": "Static checks passed at merge head 69fed8b1. Guard B: no migration sorts before the base branch's newest version 20260911214438 (source: git:origin/main). Issue #1235 expected-count guard passed. Verify-cost guard passed: 1 added migration contains no prohibited verification read. Issue #1684 EOL reference guard passed. Guard B2 did not run: no live ledger source configured (informational, issue #651)."
     }
   ],
   "assumptions_resolved": [
     "Confirmed against the table definition in supabase/migrations/20260621151024_domain_tables.sql that dam.style_guide_file already carries title, relative_path, folder and metadata, so the raw source filename and label stay preserved separately and this migration does not touch them.",
-    "The column is declared nullable with no default, so NULL remains a distinct third state meaning the source exposed no determination and is never a stand-in for FALSE."
+    "The column is declared nullable with no default, so NULL remains a distinct third state meaning the source exposed no determination and is never a stand-in for FALSE.",
+    "No database was read or written by this work; it is static authoring only. The contract permitted a read of core.style_guide that proved unnecessary, so db_reads is reported empty rather than widened to match the contract."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Refreshed onto main 485a0ba5 by MERGING main, never rebasing. The only conflict was the .agent evidence pair, which on main belongs to issue #2724; it was resolved to this pull request's own issue #2802 evidence and no implementation file was touched. Implementation head 69fed8b1; only .agent/completion.json follows it."
 }
