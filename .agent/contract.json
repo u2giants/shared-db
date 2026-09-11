@@ -14,6 +14,7 @@
     ".agent/completion.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-pr-object-collisions.mjs",
     "scripts/coordination-scenarios.test.mjs",
     "scripts/db-coordination-events.mjs",
     "scripts/lib/work-dependencies.mjs",
@@ -29,6 +30,7 @@
     ".agent/completion.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-pr-object-collisions.mjs",
     "scripts/coordination-scenarios.test.mjs",
     "scripts/db-coordination-events.mjs",
     "scripts/lib/work-dependencies.mjs",
@@ -48,7 +50,7 @@
   ],
   "required_checks": [
     "git diff --check",
-    "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
+    "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
     "node scripts/check-throughput-truth-audit.mjs",
     "node scripts/check-github-transport-conformance.mjs"
   ],
@@ -57,12 +59,13 @@
     "PR 2737 merge 1b50c414 and canary main d530f85b are integrated; current main 5eaebe7c is merged while PR 2736 remains held until this branch lands because it consumes the admission resolver.",
     "Legacy structural work already in flight remains executable only when the proposed PR contains real schema DDL; new work requires the complete outcome fields.",
     "Outcome lifecycle replay is bound to the requested work issue so another issue's events cannot authorize completion.",
-    "Admission and dispatch use one command clock so a successful claim cannot be followed by a chronologically invalid lifecycle event."
+    "Admission and dispatch use one command clock so a successful claim cannot be followed by a chronologically invalid lifecycle event.",
+    "Only owner-authored lifecycle evidence is replayed; completion re-derives production apply proof; closed issues mutate only after validation; and multi-target DDL binds every object."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 10
+  "generation": 11
 }

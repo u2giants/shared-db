@@ -4,14 +4,15 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/10",
-  "contract_sha256": "94c13f5fe9069df2ff63aee57e613682ba3f5a18847eca2c853d1b5ab6a34c7e",
-  "head_sha": "3112ff879bad37e3e3331bf1f2ff8dd843673dcc",
+  "contract_ref": "refs/db-contracts/2727/11",
+  "contract_sha256": "417e53f836453ed9b2c37e01dfcb3a972930645469673cc5100a69151781d192",
+  "head_sha": "8994a87fe752c215252ef77d71972e732e128a06",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-pr-object-collisions.mjs",
     "scripts/coordination-scenarios.test.mjs",
     "scripts/db-coordination-events.mjs",
     "scripts/lib/work-dependencies.mjs",
@@ -31,9 +32,9 @@
       "evidence": "No whitespace errors after merging current main and repairing the linked-PR admission tests."
     },
     {
-      "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
+      "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "661 tests passed; zero failed, skipped, cancelled, or todo (includes linked-PR, reopen-after-merge, object-binding, cross-issue replay, and admission/dispatch clock adversarial cases); the exact workflow suite passed 1014 tests with zero failures or skips."
+      "evidence": "693 tests passed; zero failed, skipped, cancelled, or todo (including trust, partial-write, production-proof, and multi-target DDL adversarial cases); the exact workflow suite passed 1018 tests with zero failures or skips."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
@@ -51,7 +52,7 @@
     "The sealed be971275 review REJECT is retained in PR evidence, and all three findings were repaired before this report.",
     "PR 2737 and its successful prose-only canary are integrated; its mutex-only command remains outside claims, reviewer assignment, shared stages, and lifecycle events.",
     "PR 2736 remains correctly held until this resolver and admission interface reaches main.",
-    "The sealed reviews rejected unadmitted legacy dispatch, unbound claim objects, non-exclusive linkage, unrelated completion evidence, cross-issue replay, and admission/dispatch clock inversion; every finding is fixed and covered by adversarial tests before this report.",
+    "The sealed and parallel reviews rejected unadmitted legacy dispatch, unbound objects, linkage confusion, cross-issue or untrusted replay, unsafe partial writes, unproved production application, multi-target DDL undercounting, and clock inversion; every finding is fixed and covered before this report.",
     "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects."
   ],
   "stop_conditions_hit": []
