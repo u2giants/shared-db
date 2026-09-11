@@ -1,60 +1,63 @@
 {
   "schema_version": 1,
-  "work_issue": 2724,
+  "work_issue": 2794,
   "outcome": "ready-for-merge",
-  "pr": 2804,
+  "pr": 2821,
   "migration_versions": [
-    "20260911214438"
+    "20260911225801"
   ],
-  "contract_ref": "refs/db-contracts/2724/5",
-  "contract_sha256": "31a3a3c38dc86816d7e95e46e305d19f16e374d8fd79d8686c0e76f21750d2aa",
-  "head_sha": "58b492ba0055b4df1162b4747b9f97758b522a73",
+  "contract_ref": "refs/db-contracts/2794/1",
+  "contract_sha256": "33be5fb12e8c41b28007fa580942d1264563d72d0d0d50784d0b77ff15713d19",
+  "head_sha": "b3cfdaff0a5253ffae26933ee7bf1350fce6c9fe",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "config/db-data-admin-property-source-coverage.json",
-    "supabase/migrations/20260911214438_plm_factory_time_templates.sql",
-    "supabase/tests/plm_factory_time_template_contracts.sql"
+    ".github/workflows/coldlion-licensor-property-phase6-parallel.yml",
+    "AGENTS.md",
+    "README.md",
+    "docs/implementation/schema-implementation-notes.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "supabase/migrations/20260911225801_remove_retired_designflow_plm_import.sql",
+    "supabase/tests/licensing_write_authority_guard_contracts.sql",
+    "systemd/plm-sync-alert.service",
+    "systemd/plm-sync.service",
+    "systemd/plm-sync.timer",
+    "tools/coldlion-licensor-property-phase6.test.mjs",
+    "tools/phase6-schedule-map.mjs",
+    "tools/phase6-schedule-map.test.mjs",
+    "tools/run-plm-master-data-sync.sh",
+    "tools/sync-plm-master-data.mjs",
+    "tools/sync-plm-master-data.test.mjs"
   ],
-  "db_reads": [],
+  "db_reads": [
+    "catalog pg_proc",
+    "catalog pg_depend",
+    "catalog pg_trigger"
+  ],
   "db_writes": [
-    "table plm.\"FactoryTime\"",
-    "column plm.\"FactoryTime\".name",
-    "column plm.\"FactoryTime\".description",
-    "column plm.\"FactoryTime\".tags",
-    "column plm.\"FactoryTime\".updated_by",
-    "column plm.\"FactoryTime\".product_subtype",
-    "index plm.factory_time_name_ci_key",
-    "table plm.product_type_factory_time",
-    "column plm.product_type_factory_time.previous_factory_time_id",
-    "index plm.product_type_factory_time_factory_time_id_idx"
+    "function plm.import_master_data(jsonb,jsonb)"
   ],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed at implementation head 8db739a2; 1 added migration, no prohibited verification read."
+      "evidence": "Static checks passed at head b3cfdaff after merging origin/main: 1 added migration, no prohibited verification read, expected-count guard and EOL reference guard both passed."
     },
     {
-      "command": "node scripts/check-db-data-admin-property-source-coverage.mjs",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Passed at 8db739a2: 37 families, 15 exposed, 331 plm tables classified; the new family claims plm.product_type_factory_time by exact name."
+      "evidence": "truth audit OK: call_sites=276. Removing the DesignFlow sync step deleted exactly one discovered call site (coldlion-licensor-property-phase6-parallel.yml:206); none was added and no surviving line hash changed, so the recorded semantic inventory was re-reviewed down from 277 to 276 rather than the guard being relaxed."
     },
     {
-      "command": "python -m unittest scripts/test_migration_derivation.py",
+      "command": "node --test tools/*.test.mjs",
       "exit_code": 0,
-      "evidence": "44 tests, OK at 8db739a2; the migration declares derived-from: none."
+      "evidence": "828 tests, 828 pass, 0 fail. Includes the inverted DESIGNFLOW_API_KEY assertion, which now fails if the workflow ever regains a DesignFlow secret reference, and the phase6 schedule map assertion that the retired 30 3 * * * cron no longer resolves to a job."
     }
   ],
   "assumptions_resolved": [
-    "The migration itself refuses at apply time if plm.\"FactoryTime\" holds rows, so the zero-row assumption is enforced rather than trusted.",
-    "Version 20260911214438 is the version reserved by author claim #2803.",
-    "No object was renamed; previous_factory_time_id and every other name match the WIP head the consuming app was built against.",
-    "The ephemeral-database contract test failure was reproduced on a disposable local PostgreSQL cluster: the row state was correct and the only defect was the test accepting a single SQLSTATE for an ON DELETE RESTRICT refusal. The handler now accepts restrict_violation or foreign_key_violation; the test was not quarantined and the schema was not changed. That fix passed the CI ephemeral-database job at the earlier head 4aab3768.",
-    "Generation 2 at head 4aab3768 earned a governed APPROVE (refs/db-review-verdicts/2724-2804-4aab37683541138f598cd6ba707919a0731374d8). Main then advanced to 5ec8aef0 and the branch was REBASED, which rewrites history, so that verdict was voided and not carried. The carry-forward checker added by PR #2780 was run against it and refused for exactly that reason: 4aab3768 is not an ancestor of b5a98122.",
-    "A second full governed review was therefore run at head b5a98122 and returned APPROVE from muse-spark-1.3-contributor, durable verdict ref refs/db-review-verdicts/2724-2804-b5a981222a2b73b195e357b7f9b54336f405e84a.",
-    "Main then advanced again to 26d9345b. This time the branch was refreshed by MERGING main rather than rebasing, so the approved head b5a98122 remains an ancestor of the merge head 35aa1d34 and the pull request's own diff is byte-identical at both (.agent evidence aside). The b5a98122 APPROVE therefore carries forward under the PR #2780 rule and no third review was run. No reviewer was drawn at the merge head, because a head carrying reviewer records of its own is judged on those alone and that would have forfeited the carry."
+    "The drop is authorised rather than an archive: the issue says to remove the DesignFlow PLM sync completely and to drop the guarded importer once no callers remain, and the object is a raise-only #1090 retirement stub holding no rows, history or audit trail, so there is no data to dispose of.",
+    "Nothing still reads the importer. Production catalog evidence recorded in the migration header shows zero referencing functions, zero referencing views, zero non-normal pg_depend rows and proacl limited to postgres, measured with a positive control of 2 so the zeros are genuine absences rather than a silently broken predicate.",
+    "The migration re-proves this at apply time: it refuses to drop unless the body is still the #1090 retirement stub and no non-normal dependants exist, drops without cascade so an unexpected dependant fails loudly, and then verifies the licensing write-authority guard is still intact.",
+    "The licensing write-authority guard survives untouched. Its contract test was strengthened, not weakened: the previous assertion that the importer body was the retirement stub would hard-error once the function was gone, so it became an absence assertion, and the revived-importer replay block that proves a rebuilt importer still cannot bypass the table guard was deliberately retained.",
+    "The Phase 6 workflow, schedule map and test edits were forced rather than optional, because those steps executed the deleted tool and test file and would have left main red."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Structural change refreshed onto main e420cd86 by merging main, not rebasing, so the governed APPROVE at b5a98122 survives. The three implementation files are unchanged in content across every refresh. Head 58b492ba; only the two .agent evidence files follow it. Ready for guarded merge on the carried approval, with the preview rehearsal after merge and production after that."
+  "stop_conditions_hit": []
 }
