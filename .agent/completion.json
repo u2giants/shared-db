@@ -1,52 +1,33 @@
 {
   "schema_version": 1,
-  "work_issue": 2478,
+  "work_issue": 2759,
   "outcome": "ready-for-merge",
-  "pr": 2746,
-  "migration_versions": [
-    "20260911075244"
-  ],
-  "contract_ref": "refs/db-contracts/2478/1",
-  "contract_sha256": "adfee00a4d886efb70e6f3f5c46863e47d6fcc65a6ad4c40706df53d206cbd29",
-  "head_sha": "6cbb821ec784ee09e273c7e5712f0a4e8611d376",
+  "pr": 2760,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2759/1",
+  "contract_sha256": "915f615a7aa3e69b1c1067a6d806983bb20cf73c253357d278aa608d11d5df18",
+  "head_sha": "443f8254cbdd138c65befcc3cdc90a6262e4e5d5",
   "files_changed": [
-    "supabase/migrations/20260911075244_shared_style_group_sku_key.sql",
-    "supabase/tests/style_group_drift_reconciler_contracts.sql",
-    "supabase/tests/style_group_key_for_sku_contracts.sql"
+    "scripts/check-required-checks-preflight.mjs",
+    "scripts/check-required-checks-preflight.test.mjs"
   ],
   "db_reads": [],
-  "db_writes": [
-    "function public.style_group_key_for_sku",
-    "function public.rebuild_style_groups_batch",
-    "function public.reconcile_style_group_drift"
-  ],
+  "db_writes": [],
   "checks": [
-    {
-      "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static SQL guards pass. Live-ledger and disposable full replay checks not configured; full PR database CI remains required."
-    },
-    {
-      "command": "local PostgreSQL helper parity contracts",
-      "exit_code": 0,
-      "evidence": "220 explicit/differential synthetic cases passed using local-only PostgreSQL127.0.0.1:55478. Server stopped after test. No shared database accessed."
-    },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors between base 5eaebe7c and implementation head 443f8254."
     },
     {
-      "command": "python -m unittest scripts.test_migration_derivation",
+      "command": "node --test scripts/check-required-checks-preflight.test.mjs",
       "exit_code": 0,
-      "evidence": "44 tests passed, 0 failures/skips. Corrected derivation declarations to exact14-digit versions; SQL body unchanged."
+      "evidence": "48 tests passed, 0 failed, 0 skipped at 443f8254."
     }
   ],
   "assumptions_resolved": [
-    "Both consumer definitions mechanically match their predecessor outside helper substitution and explanatory comment.",
-    "Existing read-only, catalog, grants and behavior contract blocks are byte-identical; only obsolete inline-rule block adapts to helper wiring.",
-    "Full CI, governed independent review, parent guarded merge, preview and production remain pending. Draft PR is author preparation only.",
-    "No 6392-row application drift correction and no nightly-path retirement."
+    "The exemption is filtered against the mirror, so a required context of the same name would still be enforced."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Ready for exact-head review, required CI, and guarded merge."
 }
