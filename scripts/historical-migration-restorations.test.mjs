@@ -3,6 +3,46 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { HISTORICAL_RESTORATIONS, validateHistoricalProductionProvenance, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 
+test('production provenance accepts only the exact issue 2535 preview apply evidence',()=>{
+  const row=HISTORICAL_RESTORATIONS['20260908202651']
+  assert.equal(row.filename,'supabase/migrations/20260908202651_hts_rag_dual_model_debate_audit.sql')
+  assert.equal(row.previewProject,'mvpkijzfmfcxhnzqogzs')
+  assert.equal(Object.isFrozen(row),true)
+  assert.equal(Object.isFrozen(row.objects),true)
+  const raw=readFileSync(row.filename,'utf8')
+  assert.equal(validateHistoricalRestorationFile(row.filename,raw),row)
+  const evidence={
+    version:'20260908202651',
+    previewApplyRun:'34281856111',
+    previewDispatchCommit:'69226335c20fef57f8a7c15cd7b014a157b61484',
+    previewAppliedCommit:'69226335c20fef57f8a7c15cd7b014a157b61484',
+    sourcePr:2584,
+    sourceMergeCommit:'d669c43eda033919091c532605ee1cf1f2e786e4',
+    artifactFileSha256:'0f0bd894725486ba6fb80990c09e00e8048e3e433242746e79e4883d4a14b74a',
+  }
+  assert.equal(validateHistoricalProductionProvenance(row.filename,raw,evidence),row)
+  for(const [key,value] of [
+    ['version','20260908202652'],
+    ['previewApplyRun','34281856112'],
+    ['previewDispatchCommit','d'.repeat(40)],
+    ['previewAppliedCommit','a'.repeat(40)],
+    ['sourcePr',2583],
+    ['sourceMergeCommit','b'.repeat(40)],
+    ['artifactFileSha256','c'.repeat(64)],
+  ])assert.throws(
+    ()=>validateHistoricalProductionProvenance(row.filename,raw,{...evidence,[key]:value}),
+    new RegExp(`mismatch for ${key}`),
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile('supabase/migrations/20260908202651_wrong.sql','select 1;\n'),
+    /not an approved exact historical restoration/,
+  )
+  assert.throws(
+    ()=>validateHistoricalRestorationFile(row.filename,raw+'-- changed bytes\n'),
+    /historical restoration file hash mismatch for 20260908202651/,
+  )
+})
+
 test('pins the issue 2622 restoration without changing production eligibility',()=>{
   const row=HISTORICAL_RESTORATIONS['20260909194231']
   assert.equal(row.filename,'supabase/migrations/20260909194231_coldlion_merch_group_detail_category_identity.sql')
