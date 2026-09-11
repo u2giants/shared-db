@@ -6,13 +6,13 @@
   "migration_versions": [
     "20260911052640"
   ],
-  "contract_ref": "refs/db-contracts/2501/6",
-  "contract_sha256": "affb9f334836539d450964444757893eefe85031b54f1c776f78a357c239f5a3",
-  "head_sha": "76dbba1ed2f4c9c0b18da85fa017b718ca1cdd6e",
+  "contract_ref": "refs/db-contracts/2501/7",
+  "contract_sha256": "6c6b2c409ce2beac5af5ce4fbb150180af214442604f4c1298e9063eb41a3cb2",
+  "head_sha": "5fff9483cd00113688b9a88029925910db535df4",
   "files_changed": [
     "supabase/migrations/20260911052640_popdam_tag_counts_narrow_eligibility.sql",
-    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_effective_count_performance_contracts.sql",
+    "supabase/tests/popdam_authorized_ranked_search_contracts.sql",
     "supabase/tests/popdam_tag_count_narrow_eligibility_contracts.sql"
   ],
   "db_reads": [
@@ -49,7 +49,8 @@
     "Production qsllyeztdwjgirsysgai target verified read-only; underlying blue count timed out at8s and showed primary-key heap lookups into2.12GBassets. Existing tag RLS requires visible asset existence; policy bytes remain unchanged.",
     "Simple tag/facet-only requests have guarded narrow generic-plan arms; other filters retain complete original fallback. Existing API eight-second configurations remain unchanged.",
     "Ordinary atomic index builds use lock_timeout2s and statement_timeout30s per build. Three full heap passes may hold write-blocking locks for roughly90s; preview must measure actual build duration. No concurrent/ad-hoc production DDL.",
-    "Applied migration bytes preserved. Parent owns final-main integration,one independent exact-head review,guarded merge,preview,production and real authenticated acceptance."
+    "Applied migration bytes preserved. Parent owns final-main integration,one independent exact-head review,guarded merge,preview,production and real authenticated acceptance.",
+    "Currentmain208ba30d merged without anySQL/test change; finalheadCIandoneindependentreview stillrequired."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Implementation is tested. Final-main reviewer approval and real shared-target performance acceptance remain pending, not asserted by this completion record."
