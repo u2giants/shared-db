@@ -8,10 +8,13 @@
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
-  "worktree": "C:/repos/shared-db-worktrees/refresh-2738-codex",
+  "worktree": "C:/repos/shared-db-worktrees/issue-2727-review-fix-401",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/preview-ledger-orphan-reconciliation.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/check-pr-object-collisions.mjs",
@@ -30,6 +33,9 @@
   "file_writes": [
     ".agent/contract.json",
     ".agent/completion.json",
+    ".github/workflows/guarded-migration-merge.yml",
+    ".github/workflows/preview-ledger-orphan-reconciliation.yml",
+    ".github/workflows/shared-supabase-migrations.yml",
     "AGENTS.md",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/check-pr-object-collisions.mjs",
@@ -69,12 +75,13 @@
     "Generation 26 is a takeover by the Claude shared-db orchestrator sub-agent (marker #2758) after the Codex worker was idle from 14:29Z to 16:43Z; scope is unchanged and limited to refreshing on main 9b02ad48 (#2767) and resolving the lane-manager conflict by keeping admission enforcement inside assignWithMutexRetry with the reviewer queue disabled.",
     "Generation 27 refreshes the same takeover on main 5761bc5e (#2764, #2761); only the .agent evidence pair conflicted and no code changed.",
     "Generation 29 is the explicit handoff back to the Codex issue 401 owner and integrates main 153b7754 while preserving #2767 reviewer queue removal and #2777 unlimited author lanes.",
-    "Generation 32 merges current main e11a5989 after #2780 while preserving its approval carry-over behavior; only the .agent evidence pair conflicted and every substantive file auto-merged."
+    "Generation 32 merges current main e11a5989 after #2780 while preserving its approval carry-over behavior; only the .agent evidence pair conflicted and every substantive file auto-merged.",
+    "Generation 34 closes the exact-head governed review finding by requiring authoritative admission identity at every workflow stage caller and refusing re-admission of a completed live outcome."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if an in-flight repository-maintenance command can consume author, reviewer, preview, merge, or production capacity.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 33
+  "generation": 34
 }
