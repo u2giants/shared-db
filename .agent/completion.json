@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/12",
-  "contract_sha256": "614c21d7dbb87e718cc0d1f43f54fa4ae2e74d0d6d35beea526bdd9e3f0c5a64",
-  "head_sha": "7e40d2b5c38e76bd249721bb7d452496fb2bd00e",
+  "contract_ref": "refs/db-contracts/2727/13",
+  "contract_sha256": "6bbd43d5e176e24c050d586999ca779bff3765420a51449e2b61351c9c19dffb",
+  "head_sha": "70169fc90818db4e1f5c7552a21c422c4c84b91b",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -34,7 +34,7 @@
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "693 tests passed; zero failed, skipped, cancelled, or todo (including trust, partial-write, production-proof, and multi-target DDL adversarial cases); the exact workflow suite passed 1018 tests with zero failures or skips."
+      "evidence": "693 tests passed; zero failed, skipped, cancelled, or todo (including trust, partial-write, production-proof, and multi-target DDL adversarial cases); after integrating current main, the exact workflow suite passed 1019 tests with zero failures or skips."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
