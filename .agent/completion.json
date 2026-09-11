@@ -6,14 +6,17 @@
   "migration_versions": [
     "20260911063554"
   ],
-  "contract_ref": "refs/db-contracts/2741/2",
-  "contract_sha256": "9c44da255cb1b0330a18efb44b0124dc1e6892d8c1cbeb826c9b6f6c6bbe1b3f",
-  "head_sha": "3c6f0058225d357efd8e680b9e350be8a647abe3",
+  "contract_ref": "refs/db-contracts/2741/5",
+  "contract_sha256": "30693851663287c3db25fa06a7b456481c2d9ea79c02bc89c01aa5cd7976794c",
+  "head_sha": "dc2ece0bc556210ec89ca446653a1ea1d6bd4d78",
   "files_changed": [
     "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
     "supabase/tests/character_alias_forward_repair_contracts.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py",
+    "scripts/test_post_batch_app_verification.py"
   ],
   "db_reads": [
     "table core.licensor",
@@ -54,7 +57,7 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards passed. Shared ledgers are owned by parent; no shared database execution."
+      "evidence": "Final static SQL guards pass; no shared execution."
     },
     {
       "command": "git diff --check",
@@ -62,21 +65,28 @@
       "evidence": "No whitespace errors."
     },
     {
-      "command": "Database Contract Tests run34571296991",
+      "command": "python -m unittest discover -s scripts -p test_*.py -q",
       "exit_code": 0,
-      "evidence": "Exact source3c6f0058:170 passing contract files, zero nonquarantined failures, one existing quarantined pass and12 existing quarantined failures. Historical-shape repair and original2355 behavioral suite both passed."
+      "evidence": "935 tests pass, eight existing skips. Includes retirement rejection, standalone classification and preserved old migration hash."
+    },
+    {
+      "command": "Database Contract Tests run34573081462",
+      "exit_code": 0,
+      "evidence": "Source0dd175a4:170 pass, zero nonquarantined failures, existing1quarantinedpass/12quarantinedfail. Historical, repeat-final and pre2355productionshape paths all pass catalog/row parity and original2355/C10. Subsequent SQL change only documents derived-from:none after that standalone proof; final-head CI remains mandatory."
     },
     {
       "command": "python .ai-test-guard.py",
       "exit_code": 0,
-      "evidence": "Four owned disposable-DB scenarios passed: expected generated column accepted; plain, changed-expression and dependent-view cases refused."
+      "evidence": "Four disposable-DB safety scenarios passed; unexpected columns and consumers refused."
     }
   ],
   "assumptions_resolved": [
     "Pinned old preview content manifest differs from final reviewed2355 migration; oldproof cannotauthorizefinalbytes.",
     "Read-only preview catalog found exact derived expression, only internalgenerateddependency and no columnACL; DROP RESTRICT preserves unknownconsumers byrefusing.",
     "Both historical upgrade and repeat finalschema application preserve all provenance rows and match reviewed function/constraint/index/policy/grant catalog; C10 parentcascade and ColdLion breakers pass.",
-    "Oldversion20260906222338 unchanged. Parent owns preview/production and finalindependentreview after2501 priority."
+    "Oldversion20260906222338 unchanged. Parent owns preview/production and finalindependentreview after2501 priority.",
+    "Existing retirement policy hard-blocks oldversion while preserving file/ledger; standaloneforward works withoutoldbase and is genuinely-pending ratherthanbase-absent.",
+    "No paidindependentreview or sharedpreview/production has run for2743. Parent ownsfinalheadreview andpromotion."
   ],
   "stop_conditions_hit": []
 }
