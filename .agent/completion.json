@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911063554"
   ],
-  "contract_ref": "refs/db-contracts/2741/6",
-  "contract_sha256": "e0df5dd3f3b2ddec9105bc196582464e446d222e461d83ba9289715c1b294b69",
-  "head_sha": "dc2ece0bc556210ec89ca446653a1ea1d6bd4d78",
+  "contract_ref": "refs/db-contracts/2741/7",
+  "contract_sha256": "d4ee36fa1c260efd03009df56bd331e283483685f061d6d9a3c8a85f9c129c37",
+  "head_sha": "cf1a3c6f6346b06d61900701ddac4370381c4739",
   "files_changed": [
     "supabase/migrations/20260911063554_character_alias_provenance_forward_repair.sql",
     "supabase/tests/character_alias_forward_repair_contracts.sql",
@@ -57,17 +57,17 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Final static SQL guards pass; no shared execution."
+      "evidence": "Static SQL guards pass on merged implementation cf1a3c6f (main 5eaebe7c)."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors on origin/main..cf1a3c6f."
     },
     {
       "command": "python -m unittest discover -s scripts -p test_*.py -q",
       "exit_code": 0,
-      "evidence": "935 tests pass, eight existing skips. Includes retirement rejection, standalone classification and preserved old migration hash."
+      "evidence": "939 tests pass, eight existing skips, on merged implementation cf1a3c6f."
     },
     {
       "command": "Database Contract Tests run34573081462",
@@ -87,7 +87,8 @@
     "Oldversion20260906222338 unchanged. Parent owns preview/production and finalindependentreview after2501 priority.",
     "Existing retirement policy hard-blocks oldversion while preserving file/ledger; standaloneforward works withoutoldbase and is genuinely-pending ratherthanbase-absent.",
     "No paidindependentreview or sharedpreview/production has run for2743. Parent ownsfinalheadreview andpromotion.",
-    "Generation6 refreshes both evidence files after actual implementationdc2ece0b; no SQL, policy, test or claim change. New-head CI and independent review remain required."
+    "Generation6 refreshes both evidence files after actual implementationdc2ece0b; no SQL, policy, test or claim change. New-head CI and independent review remain required.",
+    "Generation7 rebinds both evidence files after merging origin/main 5eaebe7c (implementation cf1a3c6f); no SQL, policy, test or claim change. New-head CI and independent review remain required."
   ],
   "stop_conditions_hit": []
 }

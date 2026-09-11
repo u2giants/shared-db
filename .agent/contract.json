@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "generation": 6,
+  "generation": 7,
   "work_issue": 2741,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
@@ -77,7 +77,8 @@
     "Old preview applied67dc237a body; final reviewed2355 bodycb7bf087 differs.",
     "Only legacy generated is_current=(missing_since IS NULL) may be removed RESTRICT; all independently held rows remain untouched.",
     "Existing retirement policy retains oldhistory and permits only newforwardversion; CI34573081462 proves standaloneconstruction frompre2355shape withoutoldmigration.",
-    "Generation6 repairs evidence-pair binding only after implementationdc2ece0b; all SQL, policies, tests, claims and source behavior are unchanged."
+    "Generation6 repairs evidence-pair binding only after implementationdc2ece0b; all SQL, policies, tests, claims and source behavior are unchanged.",
+    "Generation7 rebinds evidence after merging origin/main 5eaebe7c as implementation cf1a3c6f; migration SQL, tests, guards and claims unchanged."
   ],
   "stop_conditions": [
     "Unexpected legacy column definition or dependent consumer.",
