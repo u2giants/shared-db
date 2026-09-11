@@ -4,17 +4,17 @@
   "outcome": "ready-for-merge",
   "pr": 2526,
   "migration_versions": [
-    "20260910223341"
+    "20260911045438"
   ],
-  "contract_ref": "refs/db-contracts/2493/2",
-  "contract_sha256": "25a3496bd43956430c27a4b1f308336081169882052c195d739b7ae5cf91bd3c",
-  "head_sha": "64d15debefcc2017d03f8f70e858ebbede449419",
+  "contract_ref": "refs/db-contracts/2493/3",
+  "contract_sha256": "c39be8af16a8dd521e2565d1d065d9850dae47d407387fd1f9397402541b579e",
+  "head_sha": "3ddbf9eff36d3d8941944218b659249e892e2616",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "scripts/production-verification-sidecars/20260910223341.json",
+    "scripts/production-verification-sidecars/20260911045438.json",
     "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260910223341_source_resolution_new_kind_read_parity.sql",
+    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
     "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "db_reads": [
@@ -55,5 +55,5 @@
     "Implementation is ready for coordinator review gates; independent exact-head review, fresh CI, preview and production/consumer acceptance remain pending and are not asserted by this report."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Prior runtime evidence below is retained historical evidence. Current successor changed no SQL or tests, preserved predecessor supersession and refreshed shared evidence only. Fresh exact-head CI and governed review are required."
+  "evidence_note": "Historical runtime evidence retained. Final reconciliation incorporates main f3eff56d and supported version supersession; SQL bytes remain unchanged. Fresh CI and one independent exact-head review required."
 }

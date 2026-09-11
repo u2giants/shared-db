@@ -4,23 +4,23 @@
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Recover inherited PR2526 under enforced contract governance, preserving its four-file implementation and adding six-kind helper and role runtime tests. This records prospective recovery authority; original implementation predates publication.",
-  "base_sha": "71dca7b3deae7eea2ab0c2e47a320e1291dc0580",
+  "base_sha": "f3eff56d26dcdec29bba42a209e1d51fbc3a2689",
   "dispatcher": "codex shared-db orchestrator marker2714",
   "worker": "codex finish_2493 successor",
   "branch": "codex/issue-2493-source-resolution-new-kinds",
   "worktree": "C:/repos/shared-db-worktrees/finish-2493-2714",
   "allowed_paths": [
-    "scripts/production-verification-sidecars/20260910223341.json",
+    "scripts/production-verification-sidecars/20260911045438.json",
     "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260910223341_source_resolution_new_kind_read_parity.sql",
+    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
     "supabase/tests/licensing_source_authority_and_relationship_decisions.sql",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "scripts/production-verification-sidecars/20260910223341.json",
+    "scripts/production-verification-sidecars/20260911045438.json",
     "scripts/production_business_risk_gate.py",
-    "supabase/migrations/20260910223341_source_resolution_new_kind_read_parity.sql",
+    "supabase/migrations/20260911045438_source_resolution_new_kind_read_parity.sql",
     "supabase/tests/licensing_source_authority_and_relationship_decisions.sql"
   ],
   "db_reads": [
@@ -52,12 +52,12 @@
   "assumptions": [
     "Inherited implementation and earlier test patch predate this recovery contract; no retrospective publication claim.",
     "Exact-head independent review, CI, preview and production/consumer acceptance remain coordinator gates outside this implementation completion record.",
-    "Generation2 binds existing predecessor supersession to20260910223341 and current-main reconciliation. SQL hash unchanged. Current hosted CI and one governed exact-head reviewer required."
+    "Generation 3 binds supported unapplied version supersession to 20260911045438 and final main reconciliation after PR2527. SQL bytes unchanged. Fresh hosted CI and one governed exact-head reviewer required."
   ],
   "stop_conditions": [
     "Stop if migration bytes or setter definitions change.",
     "Stop if test assertions fail.",
     "Stop if scope extends beyond the four implementation files."
   ],
-  "generation": 2
+  "generation": 3
 }
