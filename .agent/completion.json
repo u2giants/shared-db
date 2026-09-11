@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2738,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/35",
-  "contract_sha256": "4f2237cfe5a7bcd282adce218d497da44e0b71ed74df4f4be9cb344e73ae9050",
-  "head_sha": "e49c5ad5c1a9758b3f2f237d85261f5145a8a631",
+  "contract_ref": "refs/db-contracts/2727/36",
+  "contract_sha256": "f07a3d5c0dbe37a6003a48267212fe8a711d469df81d9a813cca60a5a7e22805",
+  "head_sha": "dba350b3e4e1cf730269a12f197bc38abcb46684",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -34,27 +34,27 @@
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "git diff --check f13a77dc e49c5ad5 reports no whitespace errors."
+      "evidence": "git diff --check f938f36f dba350b3 reports no whitespace errors."
     },
     {
       "command": "node --test scripts/agent-work-contract.test.mjs",
       "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at e49c5ad5."
+      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at dba350b3."
     },
     {
       "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
       "exit_code": 0,
-      "evidence": "723 tests, 723 pass, 0 fail, 0 skipped at e49c5ad5."
+      "evidence": "723 tests, 723 pass, 0 fail, 0 skipped at dba350b3."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=279 at e49c5ad5."
+      "evidence": "truth audit OK: call_sites=279 at dba350b3."
     },
     {
       "command": "node scripts/check-github-transport-conformance.mjs",
       "exit_code": 0,
-      "evidence": "221 files scanned at e49c5ad5; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "221 files scanned at dba350b3; every GitHub call goes through scripts/lib/github-transport.mjs."
     }
   ],
   "assumptions_resolved": [
@@ -68,7 +68,7 @@
     "Dependency completion is trusted only from the explicitly identified repository owner; preview marker ownership is rechecked inside the mutex; lifecycle advances require durable references; and unsupported compound commands refuse before any operation runs.",
     "Generation 26 takeover: merged main 9b02ad48 (#2767); the only code conflict was two lane-manager hunks, resolved by keeping requireAdmissionArguments and admissionOptions inside assignWithMutexRetry with enableReviewerQueue:false. No database, preview, or production operation was performed.",
     "The governed review REJECT at 56ca196e (preview filename-only readiness, open-ended legacy admission, truncated patches) was repaired in 21d86cab with regression tests before this report.",
-    "Current main f13a77dc is integrated; #2780 approval carry-over, #2777 unlimited author lanes, and #2767 reviewer queue removal remain active alongside the admission lifecycle.",
+    "Current main f938f36f is integrated; #2780 approval carry-over, #2777 unlimited author lanes, and #2767 reviewer queue removal remain active alongside the admission lifecycle.",
     "Every workflow acquisition caller now supplies authoritative admission and PR identity, preventing the post-merge self-lock found by the exact-head governed review; completed live outcomes cannot be reopened by re-admission."
   ],
   "stop_conditions_hit": []
