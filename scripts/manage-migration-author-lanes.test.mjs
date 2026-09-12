@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { REVIEW_VERDICT_REF_PREFIX } from './lib/review-verdict-artifact.mjs'
 import { assignWithMutexRetry } from './manage-migration-author-lanes.mjs'
-import { readyRecord } from './orchestrator-flow/reconcile.mjs'
+import { readyRecord, persistInitialReady } from './orchestrator-flow/reconcile.mjs'
 import { canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -5301,8 +5301,12 @@ test('the exact byte-pinned #2509 claim apply is valid immutable historical-rebi
 
 function historicalTerminalIo(overrides={}){
   const manifest={target:'preview',preview_allowlist:'20260907131728',claim_pr:'2513',claim_head_sha:'1be8f325dbf1ff035bd5039638dc47c14a3eb155',commit_sha:'c5f85ad3a98b7a5598e8c81a56735473d5bb5487',historical_preview_source_pr:'2513',historical_preview_original_run_map:'20260907131728:34157812748'}
-  const record=readyRecord({issue:2509,pr:2513,head_sha:manifest.claim_head_sha,bundle_id:'7e75bf09d81bc26fd310797c9db658629871b3ed186ee4788dfce4a6ac13b42b',route:'historical_rebind',route_context:manifest.commit_sha,manifest}),refs=new Map()
-  refs.set(`refs/db-preview-ready/${record.ready_id}`,{digest:sha256(canonicalJson(record)),record})
+  const readyInput={issue:2509,pr:2513,head_sha:manifest.claim_head_sha,bundle_id:'7e75bf09d81bc26fd310797c9db658629871b3ed186ee4788dfce4a6ac13b42b',route:'historical_rebind',route_context:manifest.commit_sha,manifest}
+  const record=readyRecord(readyInput),refs=new Map()
+  // Written by the REAL writer rather than by a hand-copied digest convention. A
+  // producer/consumer digest divergence must BREAK this fixture, not hide inside it:
+  // the previous hand-set digest pinned one convention and passed either way.
+  persistInitialReady(readyInput,{resolveMarker:()=>({live:true,task:'t',calling_task:'t'}),actor:()=> 't',now:()=> '2026-09-08T09:38:33Z',appendEvent:()=>{},createRef:(ref,digest,value)=>refs.has(ref)?false:(refs.set(ref,{digest,record:value}),true),readRef:(ref)=>refs.get(ref)??null})
   const runId='34211013201',artifactId='10049835085',artifactDigest=`sha256:${'4'.repeat(64)}`
   const evidence={
     run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:manifest.commit_sha},
@@ -5387,6 +5391,11 @@ test('#2509 emits only the existing no-write historical recovery manifest from i
   })
   assert.equal('merged_preview_source_pr' in candidate.manifest,false)
   assert.equal('production_allowlist' in candidate.manifest,false)
+  // #2796: apply-only, and the instruction says so. The workflow's mode input
+  // defaults to dry-run, and a historical dry-run runs neither the recovery proof
+  // nor a bounded dry-run -- it just succeeds having proved nothing.
+  assert.deepEqual(candidate.mode_sequence,['apply'])
+  assert.equal('mode' in candidate.manifest,false)
 })
 
 test('a merged claim still reaches the post-merge rehearsal route instead of being stranded',()=>{
@@ -5402,6 +5411,10 @@ test('a merged claim still reaches the post-merge rehearsal route instead of bei
   assert.equal(candidate.manifest.commit_sha,mainSha)
   assert.equal(candidate.manifest.merged_preview_source_pr,'1809')
   assert.equal(candidate.manifest.preview_allowlist,version)
+  // #2796: the dry-run is a REQUIRED first phase here, so the instruction names
+  // both phases rather than being silent and dispatching at the dry-run default.
+  assert.deepEqual(candidate.mode_sequence,['dry-run','apply'])
+  assert.equal('mode' in candidate.manifest,false)
   // "merged_preview_source_pr replaces claim_pr ... do not name both" -- naming
   // either claim field alongside it makes the workflow refuse the dispatch outright.
   assert.equal('claim_pr' in candidate.manifest,false)
