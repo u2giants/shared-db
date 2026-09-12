@@ -1,48 +1,54 @@
 {
-  "schema_version": 1,
-  "work_issue": 2820,
-  "outcome": "ready-for-merge",
-  "pr": 2826,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2820/3",
-  "contract_sha256": "8654aff4037f5d410aab528fb8e174879b910f92737c3cdb1603cc386ecd2fc2",
-  "head_sha": "f6a461d04fef12972427f91d5760e7caf30ac27b",
-  "files_changed": [
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-migration-ledger-drift.mjs",
-    "scripts/check-migration-ledger-drift.test.mjs",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py"
+  "assumptions_resolved": [
+    "api.db_data_admin_scraped_properties is byte-for-byte unchanged: it is not in files_changed, and the contract test asserts it still exists and still carries its review fields.",
+    "The Property arm reuses the existing licensor authority derivation, so the two functions cannot disagree about row attribution.",
+    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are excluded; the contract test fails if any appears in the function definition.",
+    "Each capture-backed family reads one latest complete capture, so issue #2744's performance repair is untouched.",
+    "app.require_licensing_manager_access() is called before any read and is otherwise unmodified."
   ],
-  "db_reads": [],
-  "db_writes": [],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_migration_guard",
-      "exit_code": 0,
-      "evidence": "Ran 248 tests, OK, at implementation head f6a461d0 on the tree rebased onto main 5d89c5e2. This is the first execution of this file combining this PR's ForeignTargetScopeTest with the admission-permission tests main gained in #2738; both sides pass together. ForeignTargetScopeTest asserts: the registered version is excluded for production, the in-scope control 20260911210844 is STILL classified genuinely-pending, the same version is reported as outstanding when the target it names is the one being checked, an unregistered version is in scope for every target, an unknown target raises rather than silently excluding, and parse_allowlist refuses the foreign version while still accepting the in-scope control."
+      "command": "bash scripts/check-sql.sh",
+      "evidence": "Static checks passed. Guard B compared against base newest version 20260911210709; Guard B2 disclosed no live-ledger source configured.",
+      "exit_code": 0
     },
     {
-      "command": "node --test scripts/check-migration-ledger-drift.test.mjs",
-      "exit_code": 0,
-      "evidence": "tests 35, pass 35, fail 0, cancelled 0, skipped 0, todo 0 (duration_ms 1192.6) at implementation head f6a461d0 on the rebased tree. Includes the named positive control 'POSITIVE CONTROL: an in-scope migration is STILL reported as promotable', 'out-of-scope migrations are reported in their own section, never silently omitted', 'the drift checker passes the target through, so scope is decided per database', and 'a foreign-target classification with no reason is still REFUSED'."
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "evidence": "{\"status\":\"OK\",\"sidecars\":49} - version 20260911221304 requires no production verification sidecar.",
+      "exit_code": 0
     },
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=280, guard exit 0, at implementation head f6a461d0. Re-derived against main 5d89c5e2, which is itself the merge of colliding PR #2738; main also stands at 280. A key-set diff against origin/main shows EXACTLY one semantic_key removed (\u2026:10cdacb1\u2026:1), exactly one added (\u2026:b6eb5e5e\u2026:1), and ZERO common entries altered, so no site #2738 recorded was dropped or re-judged. The digest necessarily differs from main's (9e51861c\u2026 vs 92f775a4\u2026): this PR changes one call site's content, so its semantic_key changes; a matching digest would mean the change had not been recorded. The audit was not relaxed; count and semantic digest are both enforced."
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "evidence": "Migration claim verified: #2807, version 20260911221304.",
+      "exit_code": 0
+    },
+    {
+      "command": "git diff --check",
+      "evidence": "No whitespace errors and no conflict markers reported in the diff.",
+      "exit_code": 0
     }
   ],
-  "assumptions_resolved": [
-    "The target was confirmed by reading, not assuming, as the issue required. Issue #2403 names the DesignFlow non-prod Supabase project reached by the DB_*_SANDBOX settings in GCP project lithe-breaker-323913, explicitly neither shared production nor the shared-db-schema-rehearsal preview branch. The migration's own header independently states it was transcribed from a read-only structure dump of the live DesignFlow non-production database. It is NOT production-scoped, so the stop condition about hiding real work did not fire.",
-    "LIVE PROBE, production, at implementation head f6a461d0: `node scripts/check-migration-ledger-drift.mjs --target production` EXIT=1. Header reads 'MERGED BUT NOT APPLIED -- 26 version(s)'. The four in-scope controls 20260911210844, 20260911212849, 20260911213429 and 20260911214438 are ALL STILL reported [GENUINELY-PENDING], proving the exclusion did not swallow the check. 20260909121403 appears under a separate 'NOT IN SCOPE FOR THIS DATABASE -- 1 version(s)' section as [FOREIGN-TARGET], naming the DesignFlow consolidated non-production Supabase project (DB_*_SANDBOX in GCP project lithe-breaker-323913) and citing issue #2403, and telling a challenger to correct FOREIGN_TARGET_MIGRATIONS rather than promote it by hand. Exit 1 is correct and expected: real unrelated drift remains, which is why this probe is recorded as evidence and not as a required check. The Supabase token was injected from 1Password vault vibe_coding; the captured output was grepped for 'Bearer' and 'sbp_' and contained neither.",
-    "LIVE PROBE, preview, at implementation head f6a461d0: `node scripts/check-migration-ledger-drift.mjs --target preview` EXIT=1. Header reads 'MERGED BUT NOT APPLIED -- 15 version(s)'. Five versions are STILL [GENUINELY-PENDING], including 20260911203057; the orphan ledger row 20260911221304 is STILL surfaced under 'APPLIED BUT NOT ON THE BASE BRANCH'; and the same entry reads 'NOT IN SCOPE FOR PREVIEW'. The reason text is derived from the target being checked, not from a version literal -- the identical registry row produces 'NOT IN SCOPE FOR PRODUCTION' on the other target.",
-    "The exclusion was proven able to fail. Every exclusion test is paired with a positive control, and the live production and preview runs both still exit 1 with their in-scope work reported. An exclusion mechanism that silently swallowed everything would have looked identical to a working one without these controls.",
-    "No skip list was added. Scope is DERIVED by comparing a migration's recorded target with the target being checked, so the same version yields different answers per target, and an unregistered migration remains in scope everywhere. A forgotten entry can therefore only over-report, never hide work.",
-    "The contract was published after implementation rather than before it, because the enforced-mode requirement for an evidence pair was discovered from the failing check on PR #2826 rather than at dispatch. The contract describes the work as actually performed and was not widened to fit it; the immutable ref pins it against any later edit.",
-    "No migration file was created and no migration author lane was claimed; this is repo-maintenance. No DDL was run against any database, and the Supabase access token used by the two live ledger reads was injected from the 1Password vault vibe_coding, never appearing in arguments or logs.",
-    "Rebased again, from base 9eb1d587 onto current main 5d89c5e2, because main advanced while this PR was open. Main's new tip IS the merge of PR #2738, a colliding PR that moved this file to 280 call sites, so the branch was BEHIND main on that file, not ahead. The audit file was re-derived with the checker's own discover(), never resolved by taking one side: dispositions carry forward by semantic_key, which binds to source-line CONTENT, so pure line movement needs no re-judging. One site genuinely changed content in this PR and was re-reviewed and re-recorded with a substantive disposition; nothing was invented and no site needed refusing. The .agent evidence pair conflicted because main's pair belongs to issue 2727 / PR 2738; it was replaced wholesale with this PR's own authored bytes, never blended, since that pair describes the current pull request rather than accumulating across them. Both prior APPROVE verdicts at head e685bc29 are burnt and were NOT carried: the PR's diff against its base is not identical at the old and new heads (134,974 vs 56,131 bytes), so check-exact-head-approval.mjs contentPreservingRefresh could not have applied -- a merge-from-main would have burnt them exactly as the rebase did. Two fresh reviewer slots are drawn at the new head before either review is run, because the first recorded verdict locks the second. The contract was republished as generation 3 (refs/db-contracts/2820/3) because generation 1 and 2 are immutable and base_sha changed; the contract's worktree field was also corrected, as the path it named was taken over by another lane."
+  "contract_ref": "refs/db-contracts/2797/1",
+  "contract_sha256": "bd9cca28ae5bae161a346f00a25d5f6743af26f7ecdfd23819e5810222795b45",
+  "db_reads": [
+    "function api.db_data_admin_scraped_properties",
+    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
+    "character and style-guide source landing tables in the same approved captures"
   ],
+  "db_writes": [
+    "function api.db_data_admin_scraped_source_inventory"
+  ],
+  "files_changed": [
+    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
+    "supabase/tests/db_data_admin_scraped_source_inventory.sql"
+  ],
+  "head_sha": "b4ad90b8c2715192195cc636501697fd86de65e2",
+  "migration_versions": [
+    "20260911221304"
+  ],
+  "outcome": "ready-for-merge",
+  "pr": 2808,
+  "schema_version": 1,
   "stop_conditions_hit": [],
-  "evidence_note": "Implementation head f6a461d0; only the two .agent evidence files follow it. The Documents-only merge authorization check fails by design on this pull request and must: it changes code, not prose, so the lightweight lane correctly refuses and the guarded code checks apply instead."
+  "work_issue": 2797
 }
