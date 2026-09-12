@@ -1,51 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2809,
+  "work_issue": 2847,
   "work_type": "repo-maintenance",
-  "route": "shared-db-orchestrator",
-  "goal": "Book an `alter table ... set schema ...` removal at the END of its own statement so archiving a table stops self-flagging as a missing reference, without weakening the guard's genuine missing-reference detection.",
-  "base_sha": "c7465a7598fb2191e2df549ec63ba255360c484a",
-  "dispatcher": "Claude orchestrator #2758",
-  "worker": "claude-2758-2809",
-  "branch": "claude/issue-2809-guard-set-schema-ordering",
-  "worktree": "C:/repos/shared-db-worktrees/pr2810-refresh",
+  "route": "repo-maintenance",
+  "goal": "Stop the outcome lifecycle ledger wedging itself when GitHub comment listing is eventually consistent: make the post-then-verify read-back bounded-retry instead of throwing on first miss, and add a governed append-only repair verb that supersedes the duplicate events already wedging issues #2802 and #2848. Generation 2 additionally answers the governed review of sequence 2577 on PR #2849: the repair verb must supersede ONLY the read-back-race problem classes and refuse loudly on any genuine lifecycle violation, and supersession must be honoured only from the single governed repair event type and only against outcome events of the same issue. Generation 3 re-seals the same work after refreshing the branch from main da9ff0c6; no behaviour changed. Generation 4 additionally registers the one new throughput-audit call site this lane's refusal message creates, regenerating the audit inventory rather than rewording the message to evade review.",
+  "base_sha": "da9ff0c68894bf973a78178fb6649573ab83ba81",
+  "dispatcher": "u2giants/shared-db issue 2847 repo-maintenance brief, plus the REVISE verdict of governed review sequence 2577 on PR #2849",
+  "worker": "shared-db repo-maintenance subagent in worktree recursing-poincare-85d3a9",
+  "branch": "worktree-agent-ae540534d380fb3af",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
+    "scripts/orchestrator-flow/outcome-lifecycle.mjs",
+    "scripts/orchestrator-flow/admission-outcome.test.mjs",
+    "scripts/db-coordination-events.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    ".agent/contract.json",
-    ".agent/completion.json"
+    "scripts/orchestrator-flow/outcome-lifecycle.mjs",
+    "scripts/orchestrator-flow/admission-outcome.test.mjs",
+    "scripts/db-coordination-events.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "docs/verification/throughput-guard-truth-audit-20260828.json"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "No weakening, bypassing, deleting or allowlisting around the preflight guard; its missing-reference detection must still refuse after this change.",
-    "No shared database reads or writes by this worker.",
-    "No migration file and no reserved migration version; this work ships none.",
-    "No edits to issue 2482's claim, branch, worktree or migration."
+    "Never edit or delete an existing db-coordination-event comment; repair the ledger only by appending a superseding event.",
+    "Do not weaken, bypass, or delete any guard to make a check pass, and do not change REVIEW_OPERATION_REQUEST_LIMIT, REVIEW_MUTEX_SECTION_RESERVE, REVIEW_SILENT_RECLAIM_REQUEST_LIMIT or REVIEW_SILENT_RECLAIM_MUTEX_SECTION_RESERVE.",
+    "Do not run any production command, migration apply, or workflow dispatch, and do not dispatch the guarded merge for this pull request.",
+    "Do not touch issues #2705, #2709, #2290 or #2678, and do not run --repair-outcome-history against #2802 or #2848 without separate authorisation.",
+    "Do not assign a reviewer and do not merge this pull request; the orchestrator assigns the fresh exact-head review."
   ],
   "required_checks": [
-    "python -m unittest scripts.test_production_migration_guard",
-    "node scripts/check-throughput-truth-audit.mjs",
-    "git diff --check"
+    "node --test scripts/manage-migration-author-lanes.test.mjs",
+    "node --test scripts/orchestrator-flow/admission-outcome.test.mjs",
+    "node --test scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/orchestrator-flow/coordination-audit.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs"
   ],
   "assumptions": [
-    "The identical self-flag shape in `alter table ... rename to ...` is deliberately out of scope and is recorded in the pull request body as deserving its own issue.",
-    "Generation 4 records base c7465a75. Main moved twice while this branch waited, 485a0ba5 to 4da62786 to c7465a75. On the first step three paths conflicted: the two .agent evidence files, which every lane writes at the repo root and which were resolved wholesale to this lane's own evidence rather than hand-merged between lanes, and the throughput truth audit, an append-style registry resolved as a union of main's 282 dispositions plus the single entry this branch authored. On the second step only the .agent pair conflicted; main c7465a75 touched none of this lane's three paths, so the registry union stands unchanged at 283 sites.",
-    "This branch's registered call site moved from scripts/production_migration_guard.py:1969 to :2093 because main changed the same file. The site was recomputed from the merged tree; its line_sha256 is unchanged because the line content is unchanged. call_site_count 283 and call_site_sha256 were regenerated from the checker's own discover() inventory rather than hand-edited.",
-    "One entry present in the branch's previous copy of the registry, scripts/check-migration-ledger-drift.mjs:247, was not authored by this branch; it came from the superseded base 485a0ba5 and main has since changed that line away. It is dropped rather than resurrected."
+    "The bounded-backoff read-back pattern already used by the --claim dispatch path is the house pattern and is followed rather than reinvented.",
+    "outcomeHistory already skips events whose result is refused, so supersession can express a repair without any edit or deletion.",
+    "Making event_id deterministic from (issue, state) is out of scope because outcomeHistory records a duplicate event_id as a problem, so collapsing a re-post would invalidate the ledger it is meant to fix.",
+    "The wedge issue #2847 describes has exactly two problem shapes, both artefacts of the read-back race: the same event_id posted twice, and the state already reached re-posted under a new event_id. Every other replay problem is a real gap in the record and repair must refuse it.",
+    "Generation 3 records base da9ff0c6. Main moved from c7465a75 to da9ff0c6 while this branch waited, which left the pull request CONFLICTING and suppressed every pull_request-triggered check except one, because GitHub cannot build a merge ref for a conflicting pull request. The branch was refreshed by MERGE, not rebase. The only conflicting paths were the two .agent evidence files, which every lane writes at the repo root; main carried issue #2809 / PR #2810 evidence, another lane's artifact and not shared state. Main touched none of this lane's four implementation files, so no code conflicted. The merge commit deliberately takes main's .agent pair so the implementation diff against the new base stays exactly the four implementation files, and this lane's own evidence is then re-sealed in the dedicated evidence commit that follows it.",
+    "The refusal message added for HIGH 1 contains the word 'missing' and is therefore discovered as a new throughput-guard truth-audit call site, taking the inventory from 283 to 284. Main alone at da9ff0c6 is green at 283, so this lane introduced it. It is registered with an explicit 'excluded' disposition and the inventory count and digest are regenerated from the checker's own discover() output. The message was deliberately NOT reworded to dodge the audit pattern, because evading a review guard is not the same as satisfying it."
   ],
   "stop_conditions": [
-    "Stop if the one-line ordering change cannot be made without altering any other guard behaviour.",
-    "Stop if either negative control stops refusing, since that would mean the capability was lost rather than repaired.",
-    "Stop and report the exact refusal if a required tool refuses, rather than working around it."
+    "Stop if a fix would require editing or deleting an existing coordination comment.",
+    "Stop if a test can only be made green by weakening a guard or changing a reviewer or budget constant.",
+    "Stop before merging this pull request or dispatching any guarded merge or workflow."
   ],
   "generation": 4
 }
