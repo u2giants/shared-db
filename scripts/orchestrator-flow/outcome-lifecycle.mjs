@@ -59,49 +59,97 @@ export function trustedOutcomeComments(comments = []) {
   })
 }
 
+// A repair is expressible ONLY as a later appended event that names exact earlier
+// event_ids. `recovery_completed` is the only event type whose `supersedes` list
+// is honored here, so a routine lifecycle comment — or any other
+// OWNER-association comment — cannot suppress outcome history.
+export const OUTCOME_REPAIR_EVENT_TYPE = 'recovery_completed'
+
+// Problem classes. Exactly two of them are artefacts of the read-back race this
+// module exists to fix, and they are the ONLY two a supersession repair may
+// clear:
+//
+//   duplicate_event_id — the same event_id posted twice (a byte-identical re-post).
+//   state_repost       — the state already reached, recorded again under a NEW
+//                        event_id. This is the wedge issue #2847 actually
+//                        describes: an operator retried a write that had already
+//                        landed, and the retry carried a fresh timestamp.
+//
+// Retiring either leaves the ledger at exactly the state it was already in, so
+// nothing is hidden. Everything else is `lifecycle_violation` — a skipped state,
+// a move BACKWARD to an earlier state, a misused blocked/yielded pair. Those are
+// gaps in the record, and superseding one would manufacture a valid-looking
+// ledger that conceals it. Repair refuses on them.
+export const OUTCOME_PROBLEM_DUPLICATE = 'duplicate_event_id'
+export const OUTCOME_PROBLEM_REPOST = 'state_repost'
+export const OUTCOME_PROBLEM_LIFECYCLE = 'lifecycle_violation'
+const OUTCOME_RACE_PROBLEMS = Object.freeze([OUTCOME_PROBLEM_DUPLICATE, OUTCOME_PROBLEM_REPOST])
+
 // Replay the ordered outcome events, ignoring every event a later appended
-// supersession named. `offenders` records which exact event raised each problem,
-// so a governed repair can name the smallest set of events to supersede instead
-// of guessing — and never has to edit or delete an audit comment to do it.
+// supersession named. `offenders` records which exact event raised each problem
+// and `classes` records what KIND of problem it was, so a governed repair can
+// name the smallest set of events to supersede — and can refuse outright on a
+// class it was never designed to clear — instead of guessing. It never has to
+// edit or delete an audit comment to do it.
 function replayOutcomeEvents(events, superseded = new Set()) {
   const problems = []
   const offenders = []
-  const seen = new Set()
+  const classes = []
+  const totals = new Map()
+  for (const event of events) totals.set(event.event_id, (totals.get(event.event_id) ?? 0) + 1)
+  const occurrences = new Map()
   let highest = -1
   let blocked = false
-  const flag = (event, message) => { problems.push(message); offenders.push(event.event_id) }
+  const flag = (event, message, problemClass) => { problems.push(message); offenders.push(event.event_id); classes.push(problemClass) }
   for (const event of events) {
-    if (superseded.has(event.event_id)) continue
-    if (seen.has(event.event_id)) { flag(event, `duplicate outcome event ${event.event_id}`); continue }
-    seen.add(event.event_id)
+    const occurrence = (occurrences.get(event.event_id) ?? 0) + 1
+    occurrences.set(event.event_id, occurrence)
+    // A supersession names an event_id, but a duplicate post shares its id with
+    // the legitimate original. Retiring EVERY occurrence would erase the real
+    // event alongside the copy and regress the very state the repair was run to
+    // restore, so when an id was posted more than once only the repeated copies
+    // are retired. An id that occurs exactly once is retired outright.
+    if (superseded.has(event.event_id) && (occurrence > 1 || totals.get(event.event_id) === 1)) continue
+    if (occurrence > 1) { flag(event, `duplicate outcome event ${event.event_id}`, OUTCOME_PROBLEM_DUPLICATE); continue }
     if (event.result === 'refused') continue
     if (event.event_type === 'blocked') {
-      if(blocked)flag(event, 'blocked repeats before yielded')
+      if(blocked)flag(event, 'blocked repeats before yielded', OUTCOME_PROBLEM_LIFECYCLE)
       blocked = true; continue
     }
     if (event.event_type === 'yielded') {
-      if(!blocked)flag(event, 'yielded without an active blocked state')
+      if(!blocked)flag(event, 'yielded without an active blocked state', OUTCOME_PROBLEM_LIFECYCLE)
       blocked = false; continue
     }
     const index = LINEAR.indexOf(event.event_type)
     if (index < 0) continue
-    if (index > highest + 1) flag(event, `${event.event_type} skips ${LINEAR[highest + 1]}`)
-    if (index <= highest) flag(event, `${event.event_type} repeats or moves backward from ${LINEAR[highest]}`)
+    if (index > highest + 1) flag(event, `${event.event_type} skips ${LINEAR[highest + 1]}`, OUTCOME_PROBLEM_LIFECYCLE)
+    // Repeating the CURRENT state is the read-back-race re-post and is repairable.
+    // Moving back to an EARLIER state is a real violation and is not.
+    if (index === highest) flag(event, `${event.event_type} repeats ${LINEAR[highest]}`, OUTCOME_PROBLEM_REPOST)
+    if (index < highest) flag(event, `${event.event_type} moves backward from ${LINEAR[highest]}`, OUTCOME_PROBLEM_LIFECYCLE)
     highest = Math.max(highest, index)
   }
-  return { problems, offenders, highest, blocked }
+  return { problems, offenders, classes, highest, blocked }
 }
 
 export function outcomeHistory(comments = [], issue) {
   const expectedIssue = issue === undefined ? null : Number(issue)
   const parsed = trustedOutcomeComments(comments).flatMap((comment) => parseEventComment(comment?.body ?? ''))
     .filter((event) => expectedIssue === null || Number(event.work_issue) === expectedIssue)
-  const superseded = new Set(parsed.flatMap((event) => Array.isArray(event.supersedes) ? event.supersedes : []))
   const events = parsed
     .filter((event) => OUTCOME_STATES.includes(event.event_type))
     .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)
       || (LINEAR.indexOf(a.event_type)<0?LINEAR.length:LINEAR.indexOf(a.event_type))-(LINEAR.indexOf(b.event_type)<0?LINEAR.length:LINEAR.indexOf(b.event_type))
       || a.event_id.localeCompare(b.event_id))
+  // ONLY a SUCCEEDED repair event may retire outcome history, and it may retire
+  // ONLY an outcome-state event of this same issue. A named id that is not an
+  // outcome event here is not honored, so neither a phantom id nor a cross-type
+  // target can silently suppress anything.
+  const outcomeIds = new Set(events.map((event) => event.event_id))
+  const superseded = new Set(parsed
+    .filter((event) => event.event_type === OUTCOME_REPAIR_EVENT_TYPE && event.result === 'succeeded')
+    .flatMap((event) => Array.isArray(event.supersedes) ? event.supersedes : [])
+    .filter((id) => outcomeIds.has(id)))
   const { problems, highest, blocked } = replayOutcomeEvents(events, superseded)
   return {
     valid: problems.length === 0,
@@ -170,7 +218,6 @@ export function advanceOutcome({issue,state,actor,timestamp=new Date().toISOStri
 // This repairs ONLY by appending. It names the exact earlier event_ids that no
 // longer count and records who ran it and why. No existing coordination comment
 // is edited or deleted — that would be audit-history tampering.
-export const OUTCOME_REPAIR_EVENT_TYPE = 'recovery_completed'
 
 export function repairOutcomeHistory({issue,actor,reason,timestamp=new Date().toISOString(),evidenceUrls=[]},io){
   if(typeof actor!=='string'||!actor.trim())throw new OutcomeError('outcome history repair must record the actor that ran it')
@@ -182,13 +229,22 @@ export function repairOutcomeHistory({issue,actor,reason,timestamp=new Date().to
   for(let attempt=0;attempt<=history.events.length;attempt+=1){
     const replay=replayOutcomeEvents(history.events,dropped)
     if(!replay.problems.length)break
+    // REFUSE LOUDLY ON ANY PROBLEM CLASS THIS VERB WAS NOT DESIGNED FOR. A real
+    // lifecycle violation — a skipped state, a backward move, a misused
+    // blocked/yielded pair — is a GAP IN THE RECORD. Superseding the event that
+    // exposed it would leave a valid-looking ledger that hides the gap, which is
+    // worse than the wedge it replaced. Only the duplicate-event_id class, the
+    // byte-identical re-post left by the read-back race, may be cleared here.
+    const foreign=replay.classes.findIndex((problemClass)=>!OUTCOME_RACE_PROBLEMS.includes(problemClass))
+    if(foreign>=0)throw new OutcomeError(`outcome history for #${issue} has a lifecycle violation that repair must not hide: ${replay.problems[foreign]}; --repair-outcome-history supersedes only the duplicate or re-posted events left by the read-back race, so record the missing or corrected lifecycle event instead`)
     const offender=replay.offenders[0]
     if(!offender||dropped.has(offender))throw new OutcomeError(`outcome history for #${issue} cannot be repaired by supersession: ${replay.problems.join('; ')}`)
     dropped.add(offender)
   }
   const supersedes=[...dropped].filter((id)=>!history.superseded.includes(id))
   if(!supersedes.length)throw new OutcomeError(`outcome history for #${issue} names no superseding event that would repair it`)
-  if(replayOutcomeEvents(history.events,dropped).problems.length)throw new OutcomeError(`outcome history for #${issue} cannot be repaired by supersession`)
+  const settled=replayOutcomeEvents(history.events,dropped)
+  if(settled.problems.length)throw new OutcomeError(`outcome history for #${issue} cannot be repaired by supersession: ${settled.problems.join('; ')}`)
   const event=coordinationEvent({
     eventType:OUTCOME_REPAIR_EVENT_TYPE, workIssue:Number(issue), actor, timestamp,
     detail:`outcome history repair by ${actor}: ${reason.trim()}`,
@@ -270,10 +326,18 @@ export function completeOutcome({ issue, evidenceRef, actor, timestamp = new Dat
       'Authoritative outcome completion. Published only after live evidence was re-derived.', '',
       '```'+COMPLETION_FENCE, JSON.stringify(completion,null,2), '```',
     ].join('\n'))
-    completionReadBack=findCompletionRecord(trustedOutcomeComments(io.issueComments(Number(issue))))
   }
-  const readBack = outcomeHistory(io.issueComments(Number(issue)), issue)
-  if (!readBack.valid || !readBack.complete || completionReadBack?.outcome!=='live_verified') throw new OutcomeError('live_verified event or completion record did not read back as the authoritative completion')
+  // The SAME eventually-consistent listing race advanceOutcome now tolerates
+  // (issue #2847). A single read issued straight after a landed write can miss it
+  // and throw on a completion that actually succeeded, inviting exactly the retry
+  // that wedges the ledger. Confirm the final transition with the same bounded
+  // backoff so the fix is applied consistently across both write paths.
+  const {seen}=confirmOutcomeReadBack(io,issue,(current)=>{
+    if(!current.valid||!current.complete)return false
+    completionReadBack=completionReadBack??findCompletionRecord(trustedOutcomeComments(io.issueComments(Number(issue))))
+    return completionReadBack?.outcome==='live_verified'
+  })
+  if(!seen)throw new OutcomeError('live_verified event or completion record did not read back as the authoritative completion')
   if(String(io.getIssue(Number(issue))?.state??'').toLowerCase()==='open')io.updateIssue(Number(issue),{state:'closed'})
   if(String(io.getIssue(Number(issue))?.state??'').toLowerCase()!=='closed')throw new OutcomeError('authoritative outcome was verified but the issue did not close on exact readback')
   return { issue: Number(issue), state: 'live_verified', completed: true, evidence_digest: createHash('sha256').update(JSON.stringify(evidence)).digest('hex') }

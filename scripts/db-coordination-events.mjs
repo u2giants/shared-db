@@ -96,6 +96,13 @@ export function validateEvent(event) {
   // appending: an event may declare that named earlier event_ids no longer count.
   // It can never edit or delete the comment that carries the superseded event.
   if (event.supersedes !== undefined) {
+    // ONLY THE REPAIR EVENT TYPE MAY SUPERSEDE. Left open to every event type, a
+    // routine `dispatched` or `refused` comment could retire arbitrary earlier
+    // events, so any author who can post one event could suppress the history
+    // that contradicts it. `recovery_completed` is the single governed repair
+    // verb (OUTCOME_REPAIR_EVENT_TYPE in orchestrator-flow/outcome-lifecycle.mjs,
+    // named literally here to keep this module free of a circular import).
+    if (event.event_type !== 'recovery_completed') throw new EventError('only a recovery_completed event may supersede earlier events')
     if (!Array.isArray(event.supersedes) || !event.supersedes.length) throw new EventError('event supersedes must be a non-empty array of event_ids when present')
     if (event.supersedes.some((id) => typeof id !== 'string' || !id.trim())) throw new EventError('event supersedes must name each superseded event_id as a non-empty string')
     if (new Set(event.supersedes).size !== event.supersedes.length) throw new EventError('event supersedes must name each superseded event_id exactly once')
@@ -117,7 +124,13 @@ export function validateEvent(event) {
  * a duplicate rather than appearing as a second thing that happened.
  */
 export function eventId(event) {
-  const material = [event.event_type, event.work_issue, event.timestamp, event.actor, event.holder_id ?? '', event.generation ?? '', event.pr ?? ''].join('|')
+  // `supersedes` is part of the identity of a repair event: two repairs that
+  // differ only in WHICH events they retire are two different things that
+  // happened, and collapsing them onto one id would make the second read as a
+  // duplicate of the first. Appended only when present, so no event that carries
+  // no supersession changes the id it already derives.
+  const material = [event.event_type, event.work_issue, event.timestamp, event.actor, event.holder_id ?? '', event.generation ?? '', event.pr ?? '',
+    ...(Array.isArray(event.supersedes) ? [[...event.supersedes].sort().join(',')] : [])].join('|')
   return createHash('sha256').update(material).digest('hex').slice(0, 16)
 }
 

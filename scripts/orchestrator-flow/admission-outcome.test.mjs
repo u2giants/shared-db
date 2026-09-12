@@ -574,6 +574,88 @@ test('--repair-outcome-history repairs under the author mutex and names its acto
   assert.match(message,/--repair-outcome-history requires --reason/)
 })
 
+test('repair refuses a genuine skipped state instead of superseding the event that exposed it (#2847 review)',()=>{
+  // entered then dispatched with no classified: a REAL gap, not a read-back re-post.
+  const comments=[eventComments('entered')[0],ownerComment(formatEventComment(outcomeEvent({issue:41,state:'dispatched',actor:'runner',timestamp:'2026-09-11T00:05:00Z'})))]
+  assert.equal(outcomeHistory(comments,41).valid,false)
+  const before=comments.map((row)=>row.body)
+  let posted=0
+  const io={issueComments:()=>comments,commentIssue:()=>{posted++},wait:()=>{}}
+  assert.throws(()=>repairOutcomeHistory({issue:41,actor:'albert',reason:'paper over a skip',timestamp:'2026-09-12T00:00:00Z'},io),/lifecycle violation that repair must not hide: dispatched skips classified/)
+  assert.equal(posted,0,'a refused repair must append nothing')
+  assert.deepEqual(comments.map((row)=>row.body),before)
+  assert.equal(outcomeHistory(comments,41).valid,false,'the gap must remain visible, not be hidden')
+})
+
+test('repair refuses every non-race problem class and leaves the ledger untouched (#2847 review)',()=>{
+  const strayYield=[...eventComments('classified'),ownerComment(formatEventComment(outcomeEvent({issue:41,state:'yielded',actor:'t',timestamp:'2026-09-11T00:09:00Z'})))]
+  const doubleBlock=[...eventComments('classified'),
+    ownerComment(formatEventComment(outcomeEvent({issue:41,state:'blocked',actor:'t',timestamp:'2026-09-11T00:09:00Z'}))),
+    ownerComment(formatEventComment(outcomeEvent({issue:41,state:'blocked',actor:'t',timestamp:'2026-09-11T00:10:00Z'})))]
+  const backward=[...eventComments('dispatched'),ownerComment(formatEventComment(outcomeEvent({issue:41,state:'entered',actor:'t',timestamp:'2026-09-11T00:09:00Z'})))]
+  for(const comments of [strayYield,doubleBlock,backward]){
+    let posted=0
+    const io={issueComments:()=>comments,commentIssue:()=>{posted++},wait:()=>{}}
+    assert.throws(()=>repairOutcomeHistory({issue:41,actor:'albert',reason:'x',timestamp:'2026-09-12T00:00:00Z'},io),/lifecycle violation that repair must not hide/)
+    assert.equal(posted,0)
+  }
+})
+
+test('repair retires the re-posted copy and keeps the legitimate original state (#2847 review)',()=>{
+  const comments=eventComments('classified',41)
+  // A byte-identical re-post (same event_id, posted twice) AND a retried re-post
+  // of the state already reached under a fresh event_id: both race artefacts.
+  const identical=parseEventComment(comments.at(-1).body)[0]
+  comments.push(ownerComment(formatEventComment(identical)))
+  const retried=outcomeEvent({issue:41,state:'classified',actor:'runner',timestamp:'2026-09-11T05:52:21Z'})
+  comments.push(ownerComment(formatEventComment(retried)))
+  assert.equal(outcomeHistory(comments,41).valid,false)
+  const io={issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body)),wait:()=>{}}
+  const result=repairOutcomeHistory({issue:41,actor:'albert',reason:'duplicate classified from the #2847 read-back race',timestamp:'2026-09-12T00:00:00Z'},io)
+  assert.deepEqual([...result.supersedes].sort(),[identical.event_id,retried.event_id].sort())
+  const after=outcomeHistory(comments,41)
+  assert.equal(after.valid,true)
+  // THE ORIGINAL SURVIVES. Superseding a duplicated event_id must not erase the
+  // real event with it, so the state must not regress from classified to entered.
+  assert.equal(after.state,'classified');assert.equal(result.state,'classified')
+})
+
+test('only a recovery_completed event may carry supersedes (#2847 review)',()=>{
+  for(const eventType of ['dispatched','classified','claim_acquired','review_completed']){
+    assert.throws(()=>coordinationEvent({eventType,workIssue:41,actor:'attacker',timestamp:'2026-09-12T00:00:00Z',detail:'suppress the record',supersedes:['aaaaaaaaaaaaaaaa']}),/only a recovery_completed event may supersede/,eventType)
+  }
+  assert.equal(coordinationEvent({eventType:'recovery_completed',workIssue:41,actor:'albert',timestamp:'2026-09-12T00:00:00Z',detail:'governed repair',supersedes:['aaaaaaaaaaaaaaaa']}).supersedes.length,1)
+})
+
+test('a repair event cannot suppress a phantom or non-outcome event id (#2847 review)',()=>{
+  const comments=eventComments('classified',41)
+  const before=outcomeHistory(comments,41)
+  comments.push(ownerComment(formatEventComment(coordinationEvent({eventType:'recovery_completed',workIssue:41,actor:'attacker',timestamp:'2026-09-12T00:00:00Z',detail:'names an id that is not an outcome event of this issue',supersedes:['deadbeefdeadbeef']}))))
+  const after=outcomeHistory(comments,41)
+  assert.deepEqual(after.superseded,[],'an unmatched supersession target is never honored')
+  assert.equal(after.state,before.state);assert.equal(after.valid,true)
+})
+
+test('two repairs superseding different events do not collide on one event_id (#2847 review)',()=>{
+  const base={eventType:'recovery_completed',workIssue:41,actor:'albert',timestamp:'2026-09-12T00:00:00Z',detail:'governed repair'}
+  const first=coordinationEvent({...base,supersedes:['aaaaaaaaaaaaaaaa']})
+  const second=coordinationEvent({...base,supersedes:['bbbbbbbbbbbbbbbb']})
+  assert.notEqual(first.event_id,second.event_id)
+})
+
+test('completion tolerates delayed visibility of its own completion record (#2847 review)',()=>{
+  const {io,comments}=completionFixture()
+  let hide=0,waits=0
+  const listing=()=>hide>0?(hide--,comments.filter((row)=>!row.body.includes('Authoritative outcome completion'))):comments
+  io.issueComments=listing
+  const normal=io.commentIssue
+  io.commentIssue=(number,body)=>{normal(number,body);if(body.includes('Authoritative outcome completion'))hide=2}
+  io.wait=()=>{waits++}
+  assert.equal(completeOutcome({issue:41,evidenceRef:'https://github.com/u2giants/shared-db/issues/41#issuecomment-9',actor:'test',timestamp:'2026-09-11T02:00:00Z'},io).completed,true)
+  assert.equal(waits,1,'the completion read-back must retry instead of throwing on a landed write')
+  assert.equal(comments.filter((row)=>row.body.includes('Authoritative outcome completion')).length,1)
+})
+
 test('outcome status ignores trusted lifecycle events for a different issue',()=>{
   const comments=[...eventComments('classified',41),...eventComments('live_verified',42)]
   let printed='';const old=console.log;console.log=(value)=>{printed=String(value)}
