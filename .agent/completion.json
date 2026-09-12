@@ -1,47 +1,45 @@
 {
   "schema_version": 1,
-  "work_issue": 2716,
+  "work_issue": 2847,
   "outcome": "ready-for-merge",
-  "pr": 2736,
+  "pr": 2849,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2716/4",
-  "contract_sha256": "1d0e80edc35e9fd891a9df7c65cbf2e39cc551dfa618a1dc7336736dfbb73537",
-  "head_sha": "c29cdfa5ab3df82f600ae70489d76caf04f39466",
+  "contract_ref": "refs/db-contracts/2847/2",
+  "contract_sha256": "f135dc95abe3ad14f190a8d8470da4505e09438126288e84f9e848174088f534",
+  "head_sha": "f8a83b089f202e7471266b5e61be71ba5898e6da",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/production-promotion-procedure.md",
-    "scripts/production_apply_review_evidence.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_apply_review_evidence.py",
-    "scripts/test_production_business_risk_gate.py"
+    "scripts/db-coordination-events.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/orchestrator-flow/admission-outcome.test.mjs",
+    "scripts/orchestrator-flow/outcome-lifecycle.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "Ran 163 tests, OK, exit 0, observed at merge commit c29cdfa5 on base 4da62786."
+      "evidence": "tests 536 / suites 0 / pass 536 / fail 0 / cancelled 0 / skipped 0 / todo 0, measured at this implementation tree. Unchanged from the 536 measured at both c7465a75 and the previously reviewed head, so the review fixes cost the CLI suite no test."
     },
     {
-      "command": "python production-policy regression suite",
+      "command": "node --test scripts/orchestrator-flow/admission-outcome.test.mjs",
       "exit_code": 0,
-      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 63.249s, OK (skipped=8), exit 0. Counts re-measured at this head, not carried forward from generation 3."
+      "evidence": "tests 68 / pass 68 / fail 0 / cancelled 0 / skipped 0 / todo 0, up from the 61 at the reviewed head b8f9ce7b: seven new tests, one or more per review finding. Red-first proved by control run: with only scripts/orchestrator-flow/outcome-lifecycle.mjs and scripts/db-coordination-events.mjs reverted to b8f9ce7b and the new tests in place, the suite reported tests 68 / pass 61 / fail 7 — exactly the seven new tests failed and all 61 pre-existing tests still passed."
     },
     {
-      "command": "YAML parse and git diff --check",
+      "command": "node --test scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/orchestrator-flow/coordination-audit.test.mjs",
       "exit_code": 0,
-      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check 4da62786..HEAD reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; AST confirms one definition and one call site of enforce_automatic_risk_decision."
+      "evidence": "tests 49 / pass 49 / fail 0 / cancelled 0 / skipped 0 / todo 0, proving that restricting the supersedes field to the recovery_completed event type and folding supersedes into the derived event_id tightened the v2 schema without breaking any existing event or the coordination audit."
     }
   ],
   "assumptions_resolved": [
-    "Live issue and pull-request inventory found no existing owner or duplicate implementation for #2716.",
-    "Owner authority activates only this exact automatic shared-db workflow path; no preview or production database write occurred.",
-    "The #2727 admission interface is pinned as --resolve-admitted-issue-for-pr and --admit-issue; absence fails before dispatch."
+    "The bounded read-back follows the existing --claim dispatch recovery loop in scripts/manage-migration-author-lanes.mjs rather than a new pattern, with the same injectable wait so the retries are testable without real sleeps. completeOutcome now uses that same bounded confirmation instead of the single read the pull request exists to fix.",
+    "Repair is strictly append-only: a new recovery_completed event names the offending event_ids in a validated supersedes array, and a test asserts every pre-existing comment body is byte-identical after the repair runs, including on every path where repair now refuses.",
+    "HIGH 1 resolved by a three-class problem taxonomy in replayOutcomeEvents. duplicate_event_id (the same event_id posted twice) and state_repost (the state already reached, re-recorded under a new event_id) are the two artefacts of the read-back race; retiring either leaves the ledger at exactly the state it already held, so nothing is hidden. Everything else — a skipped state, a move backward, a misused blocked/yielded pair — is classed lifecycle_violation, and repairOutcomeHistory now throws before appending anything, naming the violation and telling the operator to record the missing or corrected lifecycle event instead. It no longer drops replay.offenders[0] for an unexamined problem class.",
+    "HIGH 2 resolved in two layers. validateEvent in scripts/db-coordination-events.mjs now refuses a supersedes field on any event whose event_type is not recovery_completed, so no routine lifecycle comment can carry one at all. outcomeHistory then honours supersedes only from a recovery_completed event whose result is succeeded, and only for ids that are themselves outcome-state events of the same work issue, so neither a cross-type target nor a phantom id can suppress anything.",
+    "Deterministic event_id from (issue, state) was deliberately not implemented, for the reason recorded at generation 1. The narrower collision the review found was fixed instead: eventId now folds a sorted supersedes list into the derived material when present, so two repairs that retire different events cannot collapse onto one id. detail was deliberately NOT added, because appending it unconditionally would change the derived id of every existing event that carries one; the supersedes append is conditional and therefore has zero blast radius.",
+    "The duplicate-event_id repair no longer erases the legitimate original alongside the copy: when an id was posted more than once only the repeated occurrences are retired, so the state the repair was run to restore does not regress."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Second refresh of this lane. Main moved to 4da62786 when PR #2842 merged, returning #2736 to CONFLICTING/DIRTY. Refreshed by MERGE from main (not rebase), so history is extended rather than rewritten. git merge-tree against real main showed the only conflicting paths were .agent/contract.json and .agent/completion.json; no code file conflicted. Both were resolved wholesale to this lane's own evidence pair (main carried PR #2842 / work_issue 2843 evidence, another lane's artifact, not shared state) and are re-sealed here at contract generation 4. Verified the merged tree is byte-identical to the pre-refresh head 07913fc3 for all seven code files, and byte-identical to main 4da62786 for the three files main contributed, so the merge regressed nothing in either direction. Re-verified the duplicate --admit-issue trap that merged clean and silent three times on the previous pass: exactly two occurrences remain, both $ADMITTED_ISSUE, and AST reports exactly one definition and one call site of enforce_automatic_risk_decision. head_sha is the merge commit c29cdfa5, the implementation commit; this evidence commit sits on top of it and cannot describe itself."
+  "evidence_note": "head_sha is the implementation commit f8a83b08, which is what the governed review reads; this evidence pair sits in its own commit on top of it and cannot describe itself. files_changed lists implementation files only, never the .agent pair. The branch was rebuilt so that the implementation commit precedes the evidence commit: the superseded generation-1 evidence commit b8f9ce7b had come to sit BEFORE the new implementation work, which would have put the .agent pair inside the base-to-head_sha diff and broken the git evidence rule that only those two files may follow head_sha. The implementation content is unchanged by that rebuild. Every change in this generation makes the tool STRICTER: repair refuses more problem classes than before, and supersession is honoured from fewer sources than before. No guard was weakened, bypassed or deleted, no coordination comment was edited or deleted, no reviewer or budget constant was changed, no production command, migration apply, or workflow dispatch was run, and issues #2705, #2709, #2290 and #2678 were not touched. The curative verb --repair-outcome-history has NOT been run against #2802 or #2848; that remains unauthorised until this pull request lands. No reviewer was assigned and the pull request was not merged."
 }
