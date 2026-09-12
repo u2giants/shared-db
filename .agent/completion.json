@@ -1,54 +1,21 @@
 {
-  "assumptions_resolved": [
-    "api.db_data_admin_scraped_properties is byte-for-byte unchanged: it is not in files_changed, and the contract test asserts it still exists and still carries its review fields.",
-    "The Property arm reuses the existing licensor authority derivation, so the two functions cannot disagree about row attribution.",
-    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are excluded; the contract test fails if any appears in the function definition.",
-    "Each capture-backed family reads one latest complete capture, so issue #2744's performance repair is untouched.",
-    "app.require_licensing_manager_access() is called before any read and is otherwise unmodified."
-  ],
-  "checks": [
-    {
-      "command": "bash scripts/check-sql.sh",
-      "evidence": "Static checks passed. Guard B compared against base newest version 20260911210709; Guard B2 disclosed no live-ledger source configured.",
-      "exit_code": 0
-    },
-    {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "evidence": "{\"status\":\"OK\",\"sidecars\":49} - version 20260911221304 requires no production verification sidecar.",
-      "exit_code": 0
-    },
-    {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "evidence": "Migration claim verified: #2807, version 20260911221304.",
-      "exit_code": 0
-    },
-    {
-      "command": "git diff --check",
-      "evidence": "No whitespace errors and no conflict markers reported in the diff.",
-      "exit_code": 0
-    }
-  ],
-  "contract_ref": "refs/db-contracts/2797/1",
-  "contract_sha256": "bd9cca28ae5bae161a346f00a25d5f6743af26f7ecdfd23819e5810222795b45",
-  "db_reads": [
-    "function api.db_data_admin_scraped_properties",
-    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
-    "character and style-guide source landing tables in the same approved captures"
-  ],
-  "db_writes": [
-    "function api.db_data_admin_scraped_source_inventory"
-  ],
-  "files_changed": [
-    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
-    "supabase/tests/db_data_admin_scraped_source_inventory.sql"
-  ],
-  "head_sha": "b4ad90b8c2715192195cc636501697fd86de65e2",
-  "migration_versions": [
-    "20260911221304"
-  ],
-  "outcome": "ready-for-merge",
-  "pr": 2808,
   "schema_version": 1,
-  "stop_conditions_hit": [],
-  "work_issue": 2797
+  "work_issue": 2690,
+  "outcome": "ready-for-merge",
+  "pr": 2840,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2690/10",
+  "contract_sha256": "db9122c694952231f723dda128feed0dbbf374b89cce29d7df1a6a22f26f4a59",
+  "head_sha": "ccc76db500dbb9b5f2fa7af4601324e5e36d2cfd",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", ".github/workflows/coldlion-landing-sync.yml", "docs/verification/coldlion-api-parameters-20260909T022136Z.json", "docs/verification/coldlion-merch-group-details-probe-20260909T0224Z.json", "tools/coldlion-landing-masters.test.mjs", "tools/coldlion-landing/README.md", "tools/coldlion-landing/lib/db.mjs", "tools/coldlion-landing/lib/load-masters.mjs", "tools/coldlion-landing/lib/master-http.mjs", "tools/coldlion-landing/lib/master-specs.mjs", "tools/coldlion-landing/lib/project-masters.mjs", "tools/coldlion-landing/sync-masters.mjs"],
+  "db_reads": [],
+  "db_writes": [],
+  "checks": [
+    {"command":"node --test tools/coldlion-landing-masters.test.mjs","exit_code":0,"evidence":"37 focused synthetic tests passed; 0 failed, skipped, or todo."},
+    {"command":"node --test tools/*.test.mjs","exit_code":0,"evidence":"875 offline tests passed; 0 failed, skipped, or todo."},
+    {"command":"npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml","exit_code":0,"evidence":"Workflow YAML parsed successfully."},
+    {"command":"protected read-only ColdLion collection","exit_code":0,"evidence":"All requested endpoints completed and itemDetails company identity equalled the per-division union; repository evidence retains no payload values."}
+  ],
+  "assumptions_resolved": ["Issues #2621 and #2622 are live in production per owner confirmation.", "Owner ruling #906 permanently accepts the documented ColdLion HTTP transport risk.", "No database write occurred in the authoring session; production access remains workflow-only."],
+  "stop_conditions_hit": []
 }
