@@ -44,11 +44,16 @@ export function runSql(sql, { url = databaseUrl() } = {}) {
   });
   if (psql.error) throw clientSpawnFaultError("psql", psql.error);
   if (psql.status !== 0) {
-    const error = new Error("Database command failed; sensitive row details suppressed");
+    const error = new Error(redactPsqlError(psql.stderr));
     error.code = "DATABASE_COMMAND_FAILED";
     throw error;
   }
   return psql.stdout;
+}
+
+export function redactPsqlError(stderr) {
+  const first=String(stderr??"").split(/\r?\n/).find((line)=>/ERROR:|FATAL:|PANIC:/.test(line)) ?? "Database command failed";
+  return first.replace(/postgres(?:ql)?:\/\/\S+/gi,"[redacted-url]").replace(/'[^'\r\n]*'|"[^"\r\n]*"/g,"[redacted-value]").slice(0,1000);
 }
 
 /** A single scalar-or-tabular read, returned as rows of trimmed strings. */

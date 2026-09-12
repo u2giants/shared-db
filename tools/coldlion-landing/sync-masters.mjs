@@ -37,6 +37,7 @@ async function fetchVariants(spec, baseParams, apiKey, options) {
     const params={...baseParams,active}; const variant=await fetchMasterSpec(spec,params,apiKey,options);
     assertRequestedScope(spec,variant,params); rows.push(...variant);
   }
+  if (rows.length===0) throw Object.assign(new Error(`${spec.endpoint} returned an unprovable empty combined snapshot`),{endpoint:spec.endpoint,requestParams:baseParams});
   return rows;
 }
 
@@ -79,6 +80,7 @@ export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOp
   source.merch_group_detail = await fetchVariants(MASTER_SPECS.merch_group_detail, { companyCode }, apiKey, options);
   source.item_header = await fetchMasterSpec(ITEM_SPECS.item_header, { companyCode }, apiKey, options);
   source.item_detail = await fetchMasterSpec(ITEM_SPECS.item_detail, { companyCode }, apiKey, options);
+  if (source.item_header.length===0 || source.item_detail.length===0) throw Object.assign(new Error("ColdLion item masters returned an unprovable empty snapshot"),{endpoint:source.item_header.length===0?ITEM_SPECS.item_header.endpoint:ITEM_SPECS.item_detail.endpoint,requestParams:{companyCode}});
   assertRequestedScope(ITEM_SPECS.item_header,source.item_header,{companyCode});
   assertRequestedScope(ITEM_SPECS.item_detail,source.item_detail,{companyCode});
 

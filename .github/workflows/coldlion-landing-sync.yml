@@ -25,7 +25,7 @@ on:
         required: false
         default: '3'
       dry_run:
-        description: 'Fetch and validate current source data without writing'
+        description: 'Validate masters live; report history work; write nothing'
         type: boolean
         required: false
         default: false
@@ -82,5 +82,7 @@ jobs:
           ARGS=(--windows "$WINDOWS")
           MASTER_ARGS=()
           if [ "${DRY_RUN:-false}" = "true" ]; then ARGS+=(--dry-run); MASTER_ARGS+=(--dry-run); fi
-          node tools/coldlion-landing/sync-masters.mjs "${MASTER_ARGS[@]}"
+          MASTER_STATUS=0
+          node tools/coldlion-landing/sync-masters.mjs "${MASTER_ARGS[@]}" || MASTER_STATUS=$?
           node tools/coldlion-landing/sync-history.mjs "${ARGS[@]}"
+          exit "$MASTER_STATUS"

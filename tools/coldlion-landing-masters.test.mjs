@@ -6,7 +6,7 @@ import { ITEM_SPECS, MASTER_SPECS, knownApiFields } from "./coldlion-landing/lib
 import { assertKnownShape, projectCurrentRows, projectItemSlots } from "./coldlion-landing/lib/project-masters.mjs";
 import { buildMasterLoadSql } from "./coldlion-landing/lib/load-masters.mjs";
 import { assertRequestedScope, dedupeSlots, main, parseArgs } from "./coldlion-landing/sync-masters.mjs";
-import { assertExpectedTarget, masterFailureSql } from "./coldlion-landing/lib/db.mjs";
+import { assertExpectedTarget, masterFailureSql, redactPsqlError } from "./coldlion-landing/lib/db.mjs";
 
 const RUN="11111111-1111-4111-8111-111111111111";
 const NOW="2026-09-09T00:00:00.000Z";
@@ -60,9 +60,9 @@ test("plain-array endpoints refuse a paged envelope",async()=>{
   await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),/plain array/);
 });
 
-test("plain-array endpoints refuse an unprovable empty snapshot",async()=>{
+test("plain-array endpoints preserve a legitimate empty variant",async()=>{
   const fetchImpl=async()=>({ok:true,status:200,text:async()=>"[]"});
-  await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),/unprovable empty snapshot/);
+  assert.deepEqual(await fetchArrayMaster("/merchGroupDetails",{active:"N"},"hidden",{fetchImpl,pauseMs:0}),[]);
 });
 
 test("paged masters refuse envelopes missing required pagination evidence",async()=>{
@@ -126,7 +126,7 @@ test("generated SQL is a re-runnable upsert, reconciles cleared slots, and never
   const loads=order.map((table)=>{ const spec=MASTER_SPECS[table]??ITEM_SPECS[table]; const source=sourceFor(spec); const rows=projectCurrentRows(spec,[source],{runId:RUN,fetchedAt:NOW}).rows; return {table,spec,rows,run:{id:RUN,endpoint:spec.endpoint,companyCode:"SYNCO",requestParams:{fullSnapshot:true},requestedBy:"test",startedAt:NOW,finishedAt:NOW,durationMs:0,rowsFetched:1}}; });
   const source=sourceFor(ITEM_SPECS.item_header,{companyCode:"SYNCO",divisionCode:"SD001",itemNo:"ITEM-A"});
   const sql=buildMasterLoadSql({loads,itemSlots:projectItemSlots([source],{runId:RUN,fetchedAt:NOW}),affectedItemGrains:[{company_code:"SYNCO",division_code:"SD001",item_no:"ITEM-A",item_pkey:null,run_id:RUN}]});
-  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/source_raw jsonb/i); assert.match(sql,/select cl\.new_raw from coldlion\.change_log/i); assert.match(sql,/t\.company_code is not null and t\.source_hash <> s\.source_hash/i); assert.match(sql,/absent from current source snapshot/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
+  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/source_raw jsonb/i); assert.match(sql,/select cl\.new_raw from coldlion\.change_log/i); assert.match(sql,/case when t\.company_code is null then 'inserted'/i); assert.match(sql,/extensions\.digest/i); assert.match(sql,/absent from current source snapshot/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
 });
 
 test("an empty item snapshot still generates valid reconciliation SQL",()=>{
@@ -139,6 +139,11 @@ test("terminal master failures produce a failed run and alert without payload da
   const error=Object.assign(new Error("synthetic failure"),{httpStatus:503,bodyStatus:91,requestParams:{active:"N",divisionCode:"SD001",page:2,size:2000}});
   const sql=masterFailureSql({endpoint:"/customers",companyCode:"SYNCO",requestedBy:"test",error});
   assert.match(sql,/coldlion\.sync_run/i); assert.match(sql,/'failed'/); assert.match(sql,/active.*N.*divisionCode.*SD001.*page.*2.*size.*2000/); assert.match(sql,/503, 91/); assert.match(sql,/pg_notify\('coldlion_sync_alert'/i);
+});
+
+test("database errors retain diagnosis while redacting row values and URLs",()=>{
+  const redacted=redactPsqlError(`DETAIL: Key (customer_code)=(PRIVATE) already exists.\npsql: ERROR: invalid input syntax for numeric: "PRIVATE" at postgresql://user:secret@host/db`);
+  assert.match(redacted,/invalid input syntax for numeric/); assert.doesNotMatch(redacted,/PRIVATE|secret@host/);
 });
 
 test("requested company, division, and active scope are positively checked",()=>{
@@ -213,5 +218,5 @@ test("workflow is the sole live path and runs masters before history",()=>{
   const yaml=readFileSync(".github/workflows/coldlion-landing-sync.yml","utf8");
   assert.match(yaml,/SUPABASE_DB_URL_PRODUCTION/); assert.match(yaml,/COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai/); assert.match(yaml,/COLDLION_API_KEY/); assert.doesNotMatch(yaml,/pull_request:|push:/);
   assert.ok(yaml.indexOf("sync-masters.mjs")<yaml.indexOf("sync-history.mjs")); assert.match(yaml,/coldlion-landing-masters\.test\.mjs/);
-  assert.match(yaml,/Fetch and validate current source data without writing/);
+  assert.match(yaml,/Validate masters live; report history work; write nothing/); assert.match(yaml,/MASTER_STATUS=[\s\S]*sync-history\.mjs[\s\S]*exit "\$MASTER_STATUS"/);
 });

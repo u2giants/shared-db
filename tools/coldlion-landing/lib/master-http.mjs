@@ -68,7 +68,6 @@ export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = f
         throw error;
       }
       if (!Array.isArray(payload)) throw new Error(`${endpoint} did not return the required plain array`);
-      if (payload.length === 0) throw new Error(`${endpoint} returned an unprovable empty snapshot`);
       onResponse?.({ endpoint, params, httpStatus: response.status, bodyStatus: Number.isInteger(payload?.status) ? payload.status : null });
       return payload;
     } catch (error) {

@@ -33,8 +33,8 @@ export function projectCurrentRows(spec, sourceRows, { runId, fetchedAt, exclude
     if (text(source.divisionCode) === excludeDivision) { excluded += 1; continue; }
     const row = {};
     for (const field of spec.fields) row[field.column] = converters[field.type](source[field.api]);
-    // The schema contract requires a complete-record hash before projection so
-    // changes to declined fields remain detectable without retaining their values.
+    // The schema contract requires a complete-record hash and retains that record
+    // privately in change_log; public fixtures and logs never contain its values.
     row.source_hash = sourceHash(source);
     row.source_raw = source;
     row.run_id = runId;
