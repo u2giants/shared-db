@@ -37,7 +37,7 @@ export function projectCurrentRows(spec, sourceRows, { runId, fetchedAt, exclude
     const key = spec.key.map((column) => row[column] ?? "").join("\u001f");
     if (spec.key.some((column) => row[column] === null)) { const error=new Error(`${spec.endpoint} returned a blank natural key`); error.endpoint=spec.endpoint; throw error; }
     const prior = byKey.get(key);
-    if (prior && prior.source_hash !== row.source_hash) { const error=new Error(`${spec.endpoint} returned conflicting rows for one natural key`); error.endpoint=spec.endpoint; throw error; }
+    if (prior) { const error=new Error(`${spec.endpoint} returned duplicate rows for one natural key`); error.endpoint=spec.endpoint; throw error; }
     byKey.set(key, row);
   }
   return { rows: [...byKey.values()], excluded };

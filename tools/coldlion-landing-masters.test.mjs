@@ -88,19 +88,25 @@ test("unknown fields fail loudly before projection",()=>{
   assert.throws(()=>projectCurrentRows(MASTER_SPECS.vendor,[sourceFor(MASTER_SPECS.vendor,{newPrivateField:"x"})],{runId:RUN,fetchedAt:NOW}),/unreviewed field/);
 });
 
-test("current rows normalize sentinels, hash complete records, dedupe replay, and exclude EP001",()=>{
+test("current rows normalize sentinels, hash complete records, and exclude EP001",()=>{
   const spec=MASTER_SPECS.season;
   const good=sourceFor(spec,{companyCode:"SYNCO",divisionCode:"SD001",seasonCode:"S1",createdTime:"1900-01-01"});
   const excluded=sourceFor(spec,{companyCode:"SYNCO",divisionCode:"EP001",seasonCode:"S2"});
-  const result=projectCurrentRows(spec,[good,good,excluded],{runId:RUN,fetchedAt:NOW});
+  const result=projectCurrentRows(spec,[good,excluded],{runId:RUN,fetchedAt:NOW});
   assert.equal(result.rows.length,1); assert.equal(result.excluded,1); assert.equal(result.rows[0].created_time,null); assert.match(result.rows[0].source_hash,/^[0-9a-f]{64}$/);
 });
 
-test("conflicting duplicate natural keys abort",()=>{
+test("every duplicate natural key aborts so shifted pages cannot hide omissions",()=>{
   const spec=MASTER_SPECS.vendor;
   const a=sourceFor(spec,{companyCode:"SYNCO",vendorCode:"V1",vendorDesc:"A"});
   const b={...a,vendorDesc:"B"};
-  assert.throws(()=>projectCurrentRows(spec,[a,b],{runId:RUN,fetchedAt:NOW}),/conflicting rows/);
+  assert.throws(()=>projectCurrentRows(spec,[a,a],{runId:RUN,fetchedAt:NOW}),/duplicate rows/);
+  assert.throws(()=>projectCurrentRows(spec,[a,b],{runId:RUN,fetchedAt:NOW}),/duplicate rows/);
+});
+
+test("itemDetails accepts the verified itemWeightUom spelling only",()=>{
+  assert.ok(knownApiFields(ITEM_SPECS.item_detail).has("itemWeightUom"));
+  assert.equal(knownApiFields(ITEM_SPECS.item_detail).has("weightUOM"),false);
 });
 
 test("item slots preserve header/detail grain and omit cleared slots",()=>{
