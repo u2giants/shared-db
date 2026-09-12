@@ -1,78 +1,78 @@
 {
-    "schema_version": 1,
-    "work_issue": 2794,
-    "generation": 1,
-    "work_type": "structural",
-    "route": "shared-db-orchestrator",
-    "goal": "Remove the retired DesignFlow PLM sync completely: drop the guarded importer plm.import_master_data(jsonb, jsonb), which #1090 Step 1.0 had already reduced to a raise-only retirement stub, and delete every runtime vestige (the sync tool and its test, the host wrapper script, the systemd plm-sync unit templates, the DesignFlow lane and cron in the Phase 6 workflow, and the DESIGNFLOW_API_KEY secret wiring), while leaving the unrelated licensing write-authority guard fully in force.",
-    "base_sha": "485a0ba5da8c43f2c7bddd85d2c29cfc1271452f",
-    "dispatcher": "claude shared-db orchestrator issue #2794",
-    "worker": "claude issue-2794 migration author lane (claim #2816)",
-    "branch": "claude/issue-2794-plm-sync-retire",
-    "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2794-plm-sync-retire",
-    "allowed_paths": [
-        ".agent/completion.json",
-        ".agent/contract.json",
-        ".github/workflows/coldlion-licensor-property-phase6-parallel.yml",
-        "AGENTS.md",
-        "README.md",
-        "docs/implementation/schema-implementation-notes.md",
-        "docs/verification/throughput-guard-truth-audit-20260828.json",
-        "supabase/migrations/20260911225801_remove_retired_designflow_plm_import.sql",
-        "supabase/tests/licensing_write_authority_guard_contracts.sql",
-        "systemd/plm-sync-alert.service",
-        "systemd/plm-sync.service",
-        "systemd/plm-sync.timer",
-        "tools/coldlion-licensor-property-phase6.test.mjs",
-        "tools/phase6-schedule-map.mjs",
-        "tools/phase6-schedule-map.test.mjs",
-        "tools/run-plm-master-data-sync.sh",
-        "tools/sync-plm-master-data.mjs",
-        "tools/sync-plm-master-data.test.mjs"
-    ],
-    "file_writes": [
-        ".agent/completion.json",
-        ".agent/contract.json",
-        ".github/workflows/coldlion-licensor-property-phase6-parallel.yml",
-        "AGENTS.md",
-        "README.md",
-        "docs/implementation/schema-implementation-notes.md",
-        "docs/verification/throughput-guard-truth-audit-20260828.json",
-        "supabase/migrations/20260911225801_remove_retired_designflow_plm_import.sql",
-        "supabase/tests/licensing_write_authority_guard_contracts.sql"
-    ],
-    "db_reads": [
-        "catalog pg_proc",
-        "catalog pg_depend",
-        "catalog pg_trigger"
-    ],
-    "db_writes": [
-        "function plm.import_master_data(jsonb,jsonb)"
-    ],
-    "prohibited_actions": [
-        "Never drop, alter or archive plm.licensing_write_authorization, plm.licensing_write_guard_audit, app.enforce_licensing_write_authority() or any *_licensing_write_guard trigger; the licensing write-authority guard is unrelated to the importer and must survive this issue intact.",
-        "Never delete audit rows, history rows, migration-ledger rows or lane locks.",
-        "Never drop any object that still has a live reader; prove absence of callers first and stop rather than break one.",
-        "Never run direct production DDL; production reaches the database only through the governed promotion lane.",
-        "Never weaken, bypass or delete a guard, test or check in order to make CI pass.",
-        "Never rebase this branch; refresh from main with a merge so the approval carry-forward survives.",
-        "Never recreate the removed DesignFlow sync tool, host wrapper or systemd unit templates."
-    ],
-    "required_checks": [
-        "bash scripts/check-sql.sh",
-        "node scripts/check-throughput-truth-audit.mjs",
-        "node --test tools/*.test.mjs"
-    ],
-    "assumptions": [
-        "The issue text authorises an outright drop rather than an archive, because plm.import_master_data(jsonb, jsonb) is a raise-only retirement stub left by #1090 Step 1.0 that holds no rows, history or audit trail, so there is no data to dispose of or preserve.",
-        "Production catalog evidence proves nothing still reads the importer: zero referencing functions, zero referencing views, zero non-normal pg_depend rows, and proacl limited to postgres, measured alongside a positive control of 2 so the zeros are genuine absences rather than a broken predicate.",
-        "Editing the Phase 6 workflow, its schedule map and their tests is forced rather than optional, because deleting the sync tool and its test would otherwise leave main red at steps that execute the deleted files.",
-        "Retiring the designflow cron lane is the coherent completion of the removal and is flagged in the pull request body for the governed review to adjudicate."
-    ],
-    "stop_conditions": [
-        "Stop and report if any live reader of plm.import_master_data(jsonb, jsonb) is found, rather than dropping it.",
-        "Stop if the function body is not the #1090 retirement stub, which would mean a working importer was revived and the premise of the removal is false.",
-        "Stop if removing the DesignFlow lane would require weakening or deleting a guard or contract test rather than legitimately updating it.",
-        "Stop if the migration author lane claim is refused for object collision, because another lane owns those objects."
-    ]
+  "schema_version": 1,
+  "work_issue": 2794,
+  "generation": 1,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Remove the retired DesignFlow PLM sync completely: drop the guarded importer plm.import_master_data(jsonb, jsonb), which #1090 Step 1.0 had already reduced to a raise-only retirement stub, and delete every runtime vestige (the sync tool and its test, the host wrapper script, the systemd plm-sync unit templates, the DesignFlow lane and cron in the Phase 6 workflow, and the DESIGNFLOW_API_KEY secret wiring), while leaving the unrelated licensing write-authority guard fully in force.",
+  "base_sha": "485a0ba5da8c43f2c7bddd85d2c29cfc1271452f",
+  "dispatcher": "claude shared-db orchestrator issue #2794",
+  "worker": "claude issue-2794 migration author lane (claim #2816)",
+  "branch": "claude/issue-2794-plm-sync-retire",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2794-plm-sync-retire",
+  "allowed_paths": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    ".github/workflows/coldlion-licensor-property-phase6-parallel.yml",
+    "AGENTS.md",
+    "README.md",
+    "docs/implementation/schema-implementation-notes.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "supabase/migrations/20260911225801_remove_retired_designflow_plm_import.sql",
+    "supabase/tests/licensing_write_authority_guard_contracts.sql",
+    "systemd/plm-sync-alert.service",
+    "systemd/plm-sync.service",
+    "systemd/plm-sync.timer",
+    "tools/coldlion-licensor-property-phase6.test.mjs",
+    "tools/phase6-schedule-map.mjs",
+    "tools/phase6-schedule-map.test.mjs",
+    "tools/run-plm-master-data-sync.sh",
+    "tools/sync-plm-master-data.mjs",
+    "tools/sync-plm-master-data.test.mjs"
+  ],
+  "file_writes": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    ".github/workflows/coldlion-licensor-property-phase6-parallel.yml",
+    "AGENTS.md",
+    "README.md",
+    "docs/implementation/schema-implementation-notes.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "supabase/migrations/20260911225801_remove_retired_designflow_plm_import.sql",
+    "supabase/tests/licensing_write_authority_guard_contracts.sql"
+  ],
+  "db_reads": [
+    "catalog pg_proc",
+    "catalog pg_depend",
+    "catalog pg_trigger"
+  ],
+  "db_writes": [
+    "function plm.import_master_data(jsonb,jsonb)"
+  ],
+  "prohibited_actions": [
+    "Never drop, alter or archive plm.licensing_write_authorization, plm.licensing_write_guard_audit, app.enforce_licensing_write_authority() or any *_licensing_write_guard trigger; the licensing write-authority guard is unrelated to the importer and must survive this issue intact.",
+    "Never delete audit rows, history rows, migration-ledger rows or lane locks.",
+    "Never drop any object that still has a live reader; prove absence of callers first and stop rather than break one.",
+    "Never run direct production DDL; production reaches the database only through the governed promotion lane.",
+    "Never weaken, bypass or delete a guard, test or check in order to make CI pass.",
+    "Never rebase this branch; refresh from main with a merge so the approval carry-forward survives.",
+    "Never recreate the removed DesignFlow sync tool, host wrapper or systemd unit templates."
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "node --test tools/*.test.mjs"
+  ],
+  "assumptions": [
+    "The issue text authorises an outright drop rather than an archive, because plm.import_master_data(jsonb, jsonb) is a raise-only retirement stub left by #1090 Step 1.0 that holds no rows, history or audit trail, so there is no data to dispose of or preserve.",
+    "Production catalog evidence proves nothing still reads the importer: zero referencing functions, zero referencing views, zero non-normal pg_depend rows, and proacl limited to postgres, measured alongside a positive control of 2 so the zeros are genuine absences rather than a broken predicate.",
+    "Editing the Phase 6 workflow, its schedule map and their tests is forced rather than optional, because deleting the sync tool and its test would otherwise leave main red at steps that execute the deleted files.",
+    "Retiring the designflow cron lane is the coherent completion of the removal and is flagged in the pull request body for the governed review to adjudicate."
+  ],
+  "stop_conditions": [
+    "Stop and report if any live reader of plm.import_master_data(jsonb, jsonb) is found, rather than dropping it.",
+    "Stop if the function body is not the #1090 retirement stub, which would mean a working importer was revived and the premise of the removal is false.",
+    "Stop if removing the DesignFlow lane would require weakening or deleting a guard or contract test rather than legitimately updating it.",
+    "Stop if the migration author lane claim is refused for object collision, because another lane owns those objects."
+  ]
 }

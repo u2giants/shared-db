@@ -8,7 +8,7 @@
   ],
   "contract_ref": "refs/db-contracts/2794/1",
   "contract_sha256": "33be5fb12e8c41b28007fa580942d1264563d72d0d0d50784d0b77ff15713d19",
-  "head_sha": "afb08c5579f8570ad1cd66b685bcbaeef3265028",
+  "head_sha": "ad683b208e7423141c7bb9d7b1e77e69b95d5a46",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -41,24 +41,29 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed at head afb08c55 on the tree merged up from origin/main (base 9eb1d587): 1 added migration, no prohibited verification read, expected-count guard and EOL reference guard both passed. Exit code observed directly, not through a pipe."
+      "evidence": "Static checks passed at head ad683b20, on the tree merged up from origin/main 5d89c5e2 (PR base). 1 added migration, no prohibited verification read, expected-count guard and EOL reference guard both passed. Guard B2 did not run (no ledger source configured) and is reported here as not-run rather than as a pass. Exit code observed directly, not through a pipe."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=276, re-run at head afb08c55. Removing the DesignFlow sync step deleted exactly one discovered call site (coldlion-licensor-property-phase6-parallel.yml:206); none was added and no surviving line hash changed, so the recorded semantic inventory was re-reviewed down from 277 to 276 rather than the guard being relaxed."
+      "evidence": "truth audit OK: call_sites=279, observed at head ad683b20. Main moved to 5d89c5e2 (PR #2738, a colliding lane) carrying 280. The file was re-derived from main's copy using scripts/rederive-truth-audit.mjs on branch claude/tooling-2794-rederive-truth-audit, which imports the checker's own discover() so the count and digest come from the code that validates them; neither was hand-edited. 280 -> 279 because THIS PR deletes exactly one discovered call site: the DESIGNFLOW_API_KEY guard at .github/workflows/coldlion-licensor-property-phase6-parallel.yml:206 on main, inside the retired PLM sync block. That line was read on origin/main directly to confirm the drop is this PR's own change and not collateral from the merge. All 279 surviving sites carried forward by content-keyed semantic_key, 0 sites needing judgement, so no disposition or reason was invented."
     },
     {
       "command": "node --test tools/*.test.mjs",
       "exit_code": 0,
-      "evidence": "828 tests, 828 pass, 0 fail, 0 skipped, 0 cancelled, re-run at head afb08c55 and read from the runner summary rather than inferred from an exit code. Includes the inverted DESIGNFLOW_API_KEY assertion, which now fails if the workflow ever regains a DesignFlow secret reference, and the phase6 schedule map assertion that the retired 30 3 * * * cron no longer resolves to a job."
+      "evidence": "828 pass, 0 fail, 0 skipped, 0 cancelled, 0 todo, read from the runner summary at head ad683b20 rather than inferred from an exit code. Includes the inverted DESIGNFLOW_API_KEY assertion, which now fails if the workflow ever regains a DesignFlow secret reference, and the phase6 schedule map assertion that the retired 30 3 * * * cron no longer resolves to a job."
+    },
+    {
+      "command": "python -c \"from migration_derivation import parse_declaration\"",
+      "exit_code": 0,
+      "evidence": "parse_declaration returns frozenset() for the corrected header at head ad683b20 -- the grammar's POSITIVE 'none' declaration -- run against the real file bytes. This closes the slot-1 REJECT at 6545928f, where the line named a filename plus issue prose: VERSION_RE requires a bare 14-digit version, so parse_declaration would have raised DerivationError during production classify and assert_declared_bases_present, after a preview apply had frozen the bytes against repair. A DROP re-derives no body and declaration_required() covers only create-or-replace, so no base is owed."
     }
   ],
   "assumptions_resolved": [
     "The drop is authorised rather than an archive: the issue says to remove the DesignFlow PLM sync completely and to drop the guarded importer once no callers remain, and the object is a raise-only #1090 retirement stub holding no rows, history or audit trail, so there is no data to dispose of.",
     "Nothing still reads the importer. Production catalog evidence recorded in the migration header shows zero referencing functions, zero referencing views, zero non-normal pg_depend rows and proacl limited to postgres, measured with a positive control of 2 so the zeros are genuine absences rather than a silently broken predicate.",
     "The migration re-proves this at apply time: it refuses to drop unless the body is still the #1090 retirement stub and no non-normal dependants exist, drops without cascade so an unexpected dependant fails loudly, and then verifies the licensing write-authority guard is still intact.",
-    "The licensing write-authority guard survives untouched, and its contract test was strengthened rather than weakened. The absence assertion is conditioned on its precondition: still present as the #1090 retirement stub stays a hard failure, because that would mean the migration did not do its job. Present with a pre-retirement body is recorded with an explicit notice, because the from-empty CI replay resurrects it via pass 2 (20260723183000 redeclares the routine after every pass-1 migration) and the pass-2 order repair cannot express absence, since a drop leaves no routine definition to snapshot. That harness gap is filed as #2833 rather than worked around here. The revived-importer replay block proving a rebuilt importer still cannot bypass the table guard is deliberately retained.",
+    "The licensing write-authority guard survives untouched and its contract test is unchanged in behaviour. Its comment previously claimed absence was 'asserted and enforced' and 'strictly stronger'; the slot-1 review was right that this overclaimed, because there is no else-raise and absence is the silent success path. The comment now states that plainly and points at the migration's own post-drop RAISE as the actual unconditional enforcement. Prose only: no test logic was changed and no guard was weakened. Still-present-as-the-#1090-stub remains a hard failure; present with a pre-retirement body is recorded with an explicit notice because the from-empty CI replay resurrects it via pass 2 (20260723183000 redeclares the routine after every pass-1 migration) and the pass-2 order repair cannot express absence, since a drop leaves no routine definition to snapshot. That harness gap is filed as #2833 rather than worked around here. The revived-importer replay block proving a rebuilt importer still cannot bypass the table guard is deliberately retained.",
     "The Phase 6 workflow, schedule map and test edits were forced rather than optional, because those steps executed the deleted tool and test file and would have left main red."
   ],
   "stop_conditions_hit": []
