@@ -1,47 +1,64 @@
 {
   "schema_version": 1,
-  "work_issue": 2716,
+  "work_issue": 2611,
   "outcome": "ready-for-merge",
-  "pr": 2736,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2716/4",
-  "contract_sha256": "1d0e80edc35e9fd891a9df7c65cbf2e39cc551dfa618a1dc7336736dfbb73537",
-  "head_sha": "c29cdfa5ab3df82f600ae70489d76caf04f39466",
+  "pr": 2823,
+  "migration_versions": [
+    "20260911230553"
+  ],
+  "contract_ref": "refs/db-contracts/2611/6",
+  "contract_sha256": "e63e2864f700594fbb899dcef272b68988630ddb6bb1d0a75ff74e1d7a3c3796",
+  "head_sha": "2ff6709be88e0d216203274d89e62206e222343e",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/production-promotion-procedure.md",
-    "scripts/production_apply_review_evidence.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_apply_review_evidence.py",
-    "scripts/test_production_business_risk_gate.py"
+    ".github/workflows/prepack-exclusion.yml",
+    "docs/business-rules/product-items-and-identifiers.md",
+    "docs/verification/prepack-exclusion-20260911.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-prepack-exclusion.mjs",
+    "scripts/check-prepack-exclusion.test.mjs",
+    "supabase/migrations/20260911230553_prepack_exclusion.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function plm.prepack_role",
+    "view plm.item_missing_attribution",
+    "table plm.item_missing_attribution"
+  ],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Ran 163 tests, OK, exit 0, observed at merge commit c29cdfa5 on base 4da62786."
+      "evidence": "Re-run green at 8b8f7ac3 after the refresh onto main 4da62786: Guard B found no migration sorting before the base branch newest version 20260911221304; the #1235 expected-count guard, the verify-cost guard (1 added migration, no prohibited verification read) and the #1684 EOL reference guard all passed. Guard B2 did not run because no live ledger source is configured in this environment, which is a standing environment notice and not a refusal."
     },
     {
-      "command": "python production-policy regression suite",
+      "command": "node scripts/check-prepack-exclusion.test.mjs",
       "exit_code": 0,
-      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 63.249s, OK (skipped=8), exit 0. Counts re-measured at this head, not carried forward from generation 3."
+      "evidence": "Re-run green at 8b8f7ac3 after the refresh: guard verified green on the merged tree and red on all 7 known-dirty variants. A guard never shown to fail is not evidence."
     },
     {
-      "command": "YAML parse and git diff --check",
+      "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check 4da62786..HEAD reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; AST confirms one definition and one call site of enforce_automatic_risk_decision."
+      "evidence": "Re-run green at 8b8f7ac3 after the refresh onto main 4da62786: Migration claim verified: #2819, version 20260911230553. The check requires PR_NUMBER; supplying 2823 is what turned an earlier REFUSED: PR number is unavailable into a pass, and that refusal was a missing input rather than a lease problem."
     }
   ],
   "assumptions_resolved": [
-    "Live issue and pull-request inventory found no existing owner or duplicate implementation for #2716.",
-    "Owner authority activates only this exact automatic shared-db workflow path; no preview or production database write occurred.",
-    "The #2727 admission interface is pinned as --resolve-admitted-issue-for-pr and --admit-issue; absence fails before dispatch."
+    "Version 20260911230553 is the version reserved by author claim #2819, and the permanent reservation ref was verified present by the lease check.",
+    "The issue's core claim was verified before any file was written and is still TRUE: no SQL implements the exclusion. A production scan of every non-system function body, view and materialized view matching prepack|pre_pack|assortment returns only DAM-order objects and api.plm_item_list, none of which filters a missing-attribution population. One issue detail is inaccurate - its pg_proc scan does not return empty, it returns unrelated matches.",
+    "The issue's named head source is WRONG rather than stale. public.erp_items_current is a frozen DesignFlow snapshot last synced 2026-05-21; of its 1,454 prepack rows, 1,437 are live prepack MEMBERS and exactly 1 is a live head. The implementation therefore sources from ColdLion and references neither erp_items_current nor api.plm_item_list, both of which open claim #2778 holds.",
+    "coldlion.prod_history_component was re-derived rather than assumed: every head-bearing row is self-referencing, so it is a flag meaning 'this ordered item is a prepack head', not a head-to-member explosion. An earlier reading as an explosion would have produced a confident but false 'the head/member labels are inverted' finding, and was discarded.",
+    "The re-derivation reproduced unmapped-licensor-population.md's licensed-division figure of 2,016 exactly, an independent validation of that settled document.",
+    "Re-scope, recorded for the reviewer: #2611 is framed entirely around heads, but within licensed divisions heads contribute 7 of the 1,770 rows the exclusion removes and members contribute 1,763, because 954 of 961 apparent heads sit in EH001/EP001 which the division rule removes first. Both roles are excluded behind one function and the regression guard covers both.",
+    "Two errors in docs/business-rules/product-items-and-identifiers.md that this work disproved were corrected: the head/member table mislabelled erp_items_current.prepack_code as heads, and a paragraph claimed an inventory row's prepack code identifies an assortment head when coldlion.inventory.prepack_code is empty on every production row.",
+    "The public-data-venue test failure is pre-existing and outside this contract: it fails identically on untouched origin/main and on other open pull requests, over eight docs/verification/database-efficiency CSVs this lane did not author. It is already owned by issues #2390 and #2391. No evidence file was deleted and no guard was relaxed.",
+    "The throughput truth audit refused this branch with 'found 288, recorded 277'. Verified NOT pre-existing: a pristine-main probe passes at 277. All 11 new sites are genuine prose about a missing-attribution population, so each received a hand-written 'excluded' disposition rather than being reworded to dodge the pattern, which would have left the guard green while defeating it. The count and digest were recomputed mechanically from the guard's own discover(), never hand-incremented. origin/main still read 277 immediately before the write, so no rival lane's edit was overwritten.",
+    "Refreshed from main by MERGE, never a rebase, after #2822 landed and flipped the PR to CONFLICTING. The only overlap was the shared .agent evidence pair, which main carried for lane #2817; that collision was resolved in favour of this lane's own #2611 evidence. head_sha is the merge commit because its tree already holds all seven implementation files unchanged, and 9eb1d587..f7037b84 yields exactly those seven.",
+    "Refreshed onto main tip bfdb19c9 by MERGE, never rebase, after PR #2826 landed. The throughput truth audit was re-derived mechanically from discover() against that new main rather than from any earlier baseline: 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a. Zero unresolved sites and zero stale sites dropped; the checker validates with truth audit OK: call_sites=291.",
+    "Refreshed a second time onto main tip d5cea0278208b801bbf83b112b25bae816e49817 by MERGE, never rebase, after the lane was stopped on the reviewer-budget refusal. head_sha is merge commit bea2edb7e064804d90ca709567450b903753c3f3. The truth audit legitimately did NOT move and stays at 291 with the same digest, because git diff bfdb19c9..d5cea027 shows main changed nothing under either discovery root; the incoming main commits added only a migration and its test. The sole conflicts were this lane's own .agent pair, resolved to this lane's side and then rebound by contract generation 4. All four checks were re-run green after the merge rather than carried forward from the previous head: truth audit 291, prepack guard with 7 fixture heads, check-sql static guards, and the lease check confirming claim #2819 version 20260911230553.",
+    "Refreshed a third time onto main tip 4da62786926c64fcc71e169aeae915d1958a227c by MERGE, never rebase, after PR #2842 landed and flipped this PR to CONFLICTING. head_sha is merge commit 8b8f7ac3140423aee83dc79903f5e24649c5f5f9, the implementation commit; the evidence commit that rebinds this pair sits on top of it and cannot describe itself. Git reported exactly three conflicting paths and no others. The .agent pair was resolved WHOLESALE to this lane own evidence, never hand-merged between two lanes, because main was carrying a different lane copy. The throughput truth audit legitimately DID move this time, unlike generation 4, and was resolved as a union rather than carried forward: a pristine-main probe at 4da62786 passes at 282, main had gained 2 dispositions from other lanes since the old base d5cea027, and those were kept while only the 11 dispositions this lane itself authored were re-added, giving 293 = 282 + 11 with digest b527503f95e2fffbac6776e0eeef659cc28bb8981229cdbd876c6d86fc813a77. Line numbers, count and digest were recomputed mechanically from the guard own discover() against the merged tree; zero stale dispositions were dropped and schema_version stays 3. files_changed was taken verbatim from git rather than hand-trimmed, so it includes the two .agent files because git reports them.",
+    "Refreshed a fourth time onto main tip c7465a7598fb2191e2df549ec63ba255360c484a by MERGE, never rebase, after PR #2736 landed while generation 5 was being sealed onto the now-stale tip 4da62786. head_sha is merge commit 2ff6709be88e0d216203274d89e62206e222343e, the implementation commit; the evidence commit that rebinds this pair sits on top of it and cannot describe itself. The conflicting path set was re-derived with git merge-tree against the NEW main rather than reused from the previous refresh, and it legitimately shrank from three paths to two: only the shared .agent evidence pair conflicted, and it was resolved WHOLESALE to this lane own evidence rather than hand-merged between two lanes. No path outside that pair conflicted. docs/verification/throughput-guard-truth-audit-20260828.json did NOT conflict this time and is byte-identical, because #2736 changed nothing under either guard discovery root; new main carries the same 282-site registry with the same digest as the previous tip, so the union built during the generation 5 refresh stands unchanged and was re-verified rather than rebuilt: truth audit OK at 293 = 282 + 11. All four required checks were re-run green at 2ff6709b after this merge rather than carried forward."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Second refresh of this lane. Main moved to 4da62786 when PR #2842 merged, returning #2736 to CONFLICTING/DIRTY. Refreshed by MERGE from main (not rebase), so history is extended rather than rewritten. git merge-tree against real main showed the only conflicting paths were .agent/contract.json and .agent/completion.json; no code file conflicted. Both were resolved wholesale to this lane's own evidence pair (main carried PR #2842 / work_issue 2843 evidence, another lane's artifact, not shared state) and are re-sealed here at contract generation 4. Verified the merged tree is byte-identical to the pre-refresh head 07913fc3 for all seven code files, and byte-identical to main 4da62786 for the three files main contributed, so the merge regressed nothing in either direction. Re-verified the duplicate --admit-issue trap that merged clean and silent three times on the previous pass: exactly two occurrences remain, both $ADMITTED_ISSUE, and AST reports exactly one definition and one call site of enforce_automatic_risk_decision. head_sha is the merge commit c29cdfa5, the implementation commit; this evidence commit sits on top of it and cannot describe itself."
+  "evidence_note": "Structural change implementing an owner ruling that had never been implemented in SQL. Two database objects plus an offline regression guard, a verification note recording every probe with its query per AGENTS.md 4.3, and two business-rule corrections. Awaiting two governed reviews at the final head, then preview apply, guarded merge and production promotion."
 }
