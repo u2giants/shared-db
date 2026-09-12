@@ -616,6 +616,75 @@ test('reviewer admission revalidates after its mutex is acquired',()=>{
   assert.equal(mutexCreates(),1);assert.equal(io.refs.has(MUTEX_REF),false);assert.equal(io.refs.has(REVIEW_CURSOR_REF),false)
 })
 
+// Issue #2802. The structural-admission gate landed on 2026-09-11, AFTER the reviewer
+// operation's 25-request ceiling was derived (docs/verification/
+// reviewer-assignment-api-budget-2026-08-28.md) for a draw that had no admission step.
+// Charged against that ceiling, every structural draw in the fleet refused with
+// "exhausted its derived 25-request budget before request 24 (2 held back as the
+// mutex-release reserve)". The fixtures above never reproduced it because they make no
+// REAL wire requests, and the budget only charges requests that go through the shared
+// transport. This one does, so the admission gate's reads are counted the way
+// production counts them.
+function wiredAdmittedReviewIo(options){
+  const fixture=admittedReviewIo(options),io=fixture.io,labels=[]
+  // The fixture PR carries many migration files so the wired read count is large. A
+  // production PR does carry many files and admission does read each one's content at
+  // the exact head -- but those content reads are NOT billed to the reviewer budget in
+  // production; see the wiring note below. Every file here writes the one structural
+  // object the fixture issue declares, so the change stays admissible; only the count grows.
+  const files=[{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'create table core.example(id bigint);'}]
+  for(let i=1;i<=30;i+=1)files.push({filename:`supabase/migrations/2026091112${String(i).padStart(4,'0')}_example_column.sql`,status:'added',content:`alter table core.example add column label_${i} text;`})
+  io.getPrFiles=()=>files
+  io.getFileAt=(path)=>files.find((row)=>row.filename===String(path))?.content??'create table core.example(id bigint);'
+  const wire=(label)=>runGitHubCommand(['api','fixture'],{executor:()=>{labels.push(label);return '{}'}})
+  // This is NOT a production-shaped request count, and must not be read as one. The
+  // fixture deliberately routes three admission reads onto the BUDGETED wire so that
+  // deleting withoutReviewRequestBudget makes this suite fail: it is a revert detector,
+  // not a measurement. Production charges fewer reads than this. In particular
+  // githubIo.getFileAt (and treeFiles) go through laneTreeReader -> createTreeReader in
+  // scripts/lib/github-tree.mjs, which calls runGitHubCommand from
+  // scripts/lib/github-transport.mjs -- the shared transport, which never reaches
+  // consumeReviewWireRequest -- so blob and tree reads are not charged to the reviewer
+  // budget in production at all. What production admission actually charges is getPr,
+  // getPrFiles (via ghPaginated), closingIssuesForPr, getIssue, and the comment/outcome
+  // history reads. The reviewer draw's own reads are left off the wire either way:
+  // charging them here too would refuse for a reason that has nothing to do with #2802.
+  for(const name of ['getPrFiles','getFileAt','closingIssuesForPr']){
+    const fn=io[name]
+    if(typeof fn!=='function')continue
+    io[name]=(...args)=>{wire(name);return fn(...args)}
+  }
+  return {...fixture,io,labels}
+}
+
+test('#2802 the structural-admission gate is not charged to the reviewer request budget',()=>{
+  const {io,headSha,labels,mutexCreates}=wiredAdmittedReviewIo()
+  const result=assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{admitIssue:41,pr:7}},io)
+  assert.ok(result.reviewer,'a structural draw must complete instead of refusing on the reviewer budget')
+  assert.equal(mutexCreates(),1)
+  assert.equal(io.refs.has(MUTEX_REF),false,'the reviewer mutex must still be released')
+  // Admission must still RUN. Only its accounting moves, so every read it makes has to
+  // still be observable on the wire.
+  for(const label of ['getPrFiles','getFileAt','closingIssuesForPr'])assert.ok(labels.includes(label),`the admission gate must still read ${label}: ${labels.join(',')}`)
+  // The proof: this one operation puts MORE wired requests through the budgeted executor
+  // than the reviewer ceiling allows, and still completes. That can only be true if the
+  // admission gate's requests are not charged to the reviewer operation.
+  assert.ok(labels.length>REVIEW_OPERATION_REQUEST_LIMIT,`this fixture made only ${labels.length} requests; it must exceed the ${REVIEW_OPERATION_REQUEST_LIMIT}-request reviewer ceiling or it proves nothing: ${labels.join(',')}`)
+  // ...and NOT because the ceiling or the reserve was widened to let it through, which
+  // is the shortcut issue #2075 exists to prevent.
+  assert.equal(REVIEW_OPERATION_REQUEST_LIMIT,25,'the reviewer ceiling must not be widened to make this pass (issue #2075)')
+  assert.equal(REVIEW_MUTEX_SECTION_RESERVE,15,'the mutex-release reserve must not be touched to make this pass')
+})
+
+test('#2802 an inadmissible issue is still refused when admission is not charged to the reviewer budget',()=>{
+  const {io,headSha,labels,mutexCreates}=wiredAdmittedReviewIo({closeOnMutex:true})
+  assert.throws(()=>assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{admitIssue:41,pr:7}},io),/closed and cannot be admitted/)
+  assert.equal(mutexCreates(),1)
+  assert.equal(io.refs.has(MUTEX_REF),false,'a refused admission must not strand the reviewer mutex')
+  assert.equal(io.refs.has(REVIEW_CURSOR_REF),false,'a refused admission must stop the draw before it consumes a sequence')
+  assert.ok(labels.includes('getPrFiles'),'the refusal must come from the admission gate actually running')
+})
+
 test('#2705 reviewer assignment skips a provider that reconciled preflight says is unusable',()=>{
   const io=reviewIo(), skipped=ACTIVE_REVIEWERS[0]
   io.reviewerUsability=(reviewers)=>new Map(reviewers.map((row)=>[row.provider,{provider:row.provider,status:row.name===skipped.name?'quarantined':'ready',failure_class:row.name===skipped.name?'live-qualification-required':null,usable:row.name!==skipped.name}]))
