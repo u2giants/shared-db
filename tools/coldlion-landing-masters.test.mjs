@@ -5,7 +5,7 @@ import { fetchArrayMaster, fetchPagedMaster, masterUrl } from "./coldlion-landin
 import { ITEM_SPECS, MASTER_SPECS, knownApiFields } from "./coldlion-landing/lib/master-specs.mjs";
 import { assertKnownShape, projectCurrentRows, projectItemSlots } from "./coldlion-landing/lib/project-masters.mjs";
 import { buildMasterLoadSql } from "./coldlion-landing/lib/load-masters.mjs";
-import { assertRequestedScope, dedupeSlots, main, parseArgs } from "./coldlion-landing/sync-masters.mjs";
+import { assertRequestedScope, assertSameIdentitySet, collectMasters, dedupeSlots, main, parseArgs } from "./coldlion-landing/sync-masters.mjs";
 import { assertExpectedTarget, masterFailureSql, redactPsqlError } from "./coldlion-landing/lib/db.mjs";
 
 const RUN="11111111-1111-4111-8111-111111111111";
@@ -214,9 +214,30 @@ test("master transport is pinned to the documented ColdLion origin",()=>{
   assert.equal(url.origin,"http://x5.coldlion.com"); assert.match(url.pathname,/^\/EhpApi\//);
 });
 
-test("workflow is the sole live path and runs masters before history",()=>{
+test("workflow is the sole live path and preserves history before masters",()=>{
   const yaml=readFileSync(".github/workflows/coldlion-landing-sync.yml","utf8");
   assert.match(yaml,/SUPABASE_DB_URL_PRODUCTION/); assert.match(yaml,/COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai/); assert.match(yaml,/COLDLION_API_KEY/); assert.doesNotMatch(yaml,/pull_request:|push:/);
-  assert.ok(yaml.indexOf("sync-masters.mjs")<yaml.indexOf("sync-history.mjs")); assert.match(yaml,/coldlion-landing-masters\.test\.mjs/);
-  assert.match(yaml,/Validate masters live; report history work; write nothing/); assert.match(yaml,/MASTER_STATUS=[\s\S]*sync-history\.mjs[\s\S]*exit "\$MASTER_STATUS"/);
+  assert.ok(yaml.indexOf("sync-history.mjs")<yaml.indexOf("sync-masters.mjs")); assert.match(yaml,/coldlion-landing-masters\.test\.mjs/);
+  assert.match(yaml,/Validate masters live; report history work; write nothing/);
+});
+
+test("itemDetails company snapshot must equal the per-division identity proof",()=>{
+  const spec=ITEM_SPECS.item_detail;
+  const row=sourceFor(spec,{companyCode:"SYNCO",divisionCode:"SD001",itemNo:"I1",itemPkey:"P1"});
+  assert.doesNotThrow(()=>assertSameIdentitySet(spec,[row],[row]));
+  assert.throws(()=>assertSameIdentitySet(spec,[row],[]),/does not match/);
+});
+
+test("collector fans seasons per division, merges active variants, and proves itemDetails",async()=>{
+  const byEndpoint=new Map([...Object.values(MASTER_SPECS),...Object.values(ITEM_SPECS)].map((spec)=>[spec.endpoint,spec]));
+  const calls=[];
+  const fetchImpl=async(rawUrl)=>{
+    const url=new URL(rawUrl), endpoint=url.pathname.replace("/EhpApi",""); const spec=byEndpoint.get(endpoint); calls.push(`${endpoint}?${url.searchParams}`);
+    const active=url.searchParams.get("active"); let rows=[];
+    if (active!=="N") rows=[sourceFor(spec,{companyCode:"EDGEHOME",...(spec.fields.some((field)=>field.api==="divisionCode")?{divisionCode:"SD001"}:{}),...(active?{active}:{}),...(endpoint==="/divisions"?{divisionCode:"SD001",active:"Y"}:{}),...(endpoint==="/itemDetails"?{itemNo:"I1",itemPkey:"P1"}:{}),...(endpoint==="/items"?{itemNo:"I1"}:{})})];
+    const body=spec.paged?{content:rows,number:0,size:2000,numberOfElements:rows.length,totalElements:rows.length,totalPages:1,last:true}:rows;
+    return{ok:true,status:200,text:async()=>JSON.stringify(body)};
+  };
+  const result=await collectMasters({companyCode:"EDGEHOME",apiKey:"hidden",fetchOptions:{fetchImpl,pauseMs:0}});
+  assert.equal(result.loads.length,9); assert.ok(calls.some((call)=>call.startsWith("/seasons?")&&call.includes("divisionCode=SD001"))); assert.equal(calls.filter((call)=>call.startsWith("/itemDetails?")).length,2);
 });

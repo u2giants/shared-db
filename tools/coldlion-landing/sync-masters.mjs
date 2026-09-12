@@ -37,7 +37,6 @@ async function fetchVariants(spec, baseParams, apiKey, options) {
     const params={...baseParams,active}; const variant=await fetchMasterSpec(spec,params,apiKey,options);
     assertRequestedScope(spec,variant,params); rows.push(...variant);
   }
-  if (rows.length===0) throw Object.assign(new Error(`${spec.endpoint} returned an unprovable empty combined snapshot`),{endpoint:spec.endpoint,requestParams:baseParams});
   return rows;
 }
 
@@ -80,7 +79,10 @@ export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOp
   source.merch_group_detail = await fetchVariants(MASTER_SPECS.merch_group_detail, { companyCode }, apiKey, options);
   source.item_header = await fetchMasterSpec(ITEM_SPECS.item_header, { companyCode }, apiKey, options);
   source.item_detail = await fetchMasterSpec(ITEM_SPECS.item_detail, { companyCode }, apiKey, options);
-  if (source.item_header.length===0 || source.item_detail.length===0) throw Object.assign(new Error("ColdLion item masters returned an unprovable empty snapshot"),{endpoint:source.item_header.length===0?ITEM_SPECS.item_header.endpoint:ITEM_SPECS.item_detail.endpoint,requestParams:{companyCode}});
+  const itemDetailsByDivision=[];
+  for (const divisionCode of divisions) itemDetailsByDivision.push(...await fetchMasterSpec(ITEM_SPECS.item_detail,{companyCode,divisionCode},apiKey,options));
+  assertSameIdentitySet(ITEM_SPECS.item_detail,source.item_detail,itemDetailsByDivision);
+  for (const name of Object.keys(source)) if (source[name].length===0) throw Object.assign(new Error(`${(MASTER_SPECS[name]??ITEM_SPECS[name]).endpoint} returned an unprovable empty full snapshot`),{endpoint:(MASTER_SPECS[name]??ITEM_SPECS[name]).endpoint,requestParams:{companyCode}});
   assertRequestedScope(ITEM_SPECS.item_header,source.item_header,{companyCode});
   assertRequestedScope(ITEM_SPECS.item_detail,source.item_detail,{companyCode});
 
@@ -100,6 +102,13 @@ export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOp
     ...byTable.item_detail.rows.map((r)=>({company_code:r.company_code,division_code:r.division_code,item_no:r.item_no,item_pkey:r.item_pkey,run_id:r.run_id})),
   ];
   return { loads, itemSlots, affectedItemGrains };
+}
+
+export function assertSameIdentitySet(spec, companyRows, scopedRows) {
+  const apiKeys=spec.key.map((column)=>spec.fields.find((field)=>field.column===column).api);
+  const identities=(rows)=>new Set(rows.map((row)=>apiKeys.map((key)=>String(row[key]??"")).join("\u001f")));
+  const company=identities(companyRows), scoped=identities(scopedRows);
+  if (companyRows.length!==company.size || scopedRows.length!==scoped.size || company.size!==scoped.size || [...company].some((key)=>!scoped.has(key))) throw Object.assign(new Error(`${spec.endpoint} company snapshot does not match the per-division identity proof`),{endpoint:spec.endpoint,requestParams:{companyCode:COMPANY_CODE,divisionProof:true}});
 }
 
 export function dedupeSlots(rows) {
@@ -126,7 +135,7 @@ export async function main(argv=process.argv.slice(2), dependencies={}) {
   try {
     result=await collect({companyCode:args.company,apiKey:readKey()});
   } catch (error) {
-    if (!args.dryRun) recordFailure({endpoint:error.endpoint ?? "/masters",companyCode:args.company,requestedBy:"coldlion-landing sync-masters",error});
+    if (!args.dryRun) try { recordFailure({endpoint:error.endpoint ?? "/masters",companyCode:args.company,requestedBy:"coldlion-landing sync-masters",error}); } catch { /* preserve the source failure */ }
     throw error;
   }
   for (const load of result.loads) console.log(`${load.run.endpoint}: fetched ${load.run.rowsFetched}, landing ${load.rows.length}, excluded ${load.excluded}`);
@@ -134,7 +143,7 @@ export async function main(argv=process.argv.slice(2), dependencies={}) {
   if (!args.dryRun) {
     try { execute(buildMasterLoadSql(result)); }
     catch (error) {
-      recordFailure({endpoint:"/masters-write",companyCode:args.company,requestedBy:"coldlion-landing sync-masters",error});
+      try { recordFailure({endpoint:"/masters-write",companyCode:args.company,requestedBy:"coldlion-landing sync-masters",error}); } catch { /* preserve the write failure */ }
       throw error;
     }
   }

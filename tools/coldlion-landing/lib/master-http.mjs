@@ -67,7 +67,7 @@ export async function fetchArrayMaster(endpoint, params, apiKey, { fetchImpl = f
         error.permanent = response.status >= 400 && response.status < 500 && ![408,429].includes(response.status);
         throw error;
       }
-      if (!Array.isArray(payload)) throw new Error(`${endpoint} did not return the required plain array`);
+      if (!Array.isArray(payload)) { const error=new Error(`${endpoint} did not return the required plain array`); error.permanent=true; throw error; }
       onResponse?.({ endpoint, params, httpStatus: response.status, bodyStatus: Number.isInteger(payload?.status) ? payload.status : null });
       return payload;
     } catch (error) {
