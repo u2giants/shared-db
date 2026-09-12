@@ -6,12 +6,13 @@
   "migration_versions": [
     "20260911222514"
   ],
-  "contract_ref": "refs/db-contracts/2744/9",
-  "contract_sha256": "8bae30c15125d3a8744e9273c3765514d0495605ce377e892ebb48ce535882cd",
-  "head_sha": "be9212505ec22288a7eb1c83481d4959dd03934b",
+  "contract_ref": "refs/db-contracts/2744/10",
+  "contract_sha256": "8a0be9a8f820adf214628243fb45bd461df218aac7db5d9217d066b6416fa5f3",
+  "head_sha": "34f01d350ef4100fd077f747e7199197a5a7b48c",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
     "scripts/production-verification-sidecars/20260911222514.json",
     "scripts/production_business_risk_gate.py",
     "scripts/production_catalog_verification.py",
