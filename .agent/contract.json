@@ -1,55 +1,51 @@
 {
   "schema_version": 1,
-  "work_issue": 2716,
+  "work_issue": 2809,
   "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Automatically promote one fully qualified structural migration after merged-main preview while preserving every production evidence gate and refusing non-structural or ambiguous work.",
-  "base_sha": "4da62786926c64fcc71e169aeae915d1958a227c",
-  "dispatcher": "popcre/ai-devops issue 401 programme",
-  "worker": "shared-db orchestrator subagent (marker #2758), refreshing the codex/issue-2716-auto-promotion lane by merge from main 4da62786",
-  "branch": "codex/issue-2716-auto-promotion",
-  "worktree": "C:/repos/shared-db-worktrees/cl2736-rb2",
+  "route": "shared-db-orchestrator",
+  "goal": "Book an `alter table ... set schema ...` removal at the END of its own statement so archiving a table stops self-flagging as a missing reference, without weakening the guard's genuine missing-reference detection.",
+  "base_sha": "c7465a7598fb2191e2df549ec63ba255360c484a",
+  "dispatcher": "Claude orchestrator #2758",
+  "worker": "claude-2758-2809",
+  "branch": "claude/issue-2809-guard-set-schema-ordering",
+  "worktree": "C:/repos/shared-db-worktrees/pr2810-refresh",
   "allowed_paths": [
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/production-promotion-procedure.md",
-    "scripts/production_apply_review_evidence.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_apply_review_evidence.py",
-    "scripts/test_production_business_risk_gate.py",
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
     ".agent/contract.json",
     ".agent/completion.json"
   ],
   "file_writes": [
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/production-promotion-procedure.md",
-    "scripts/production_apply_review_evidence.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_apply_review_evidence.py",
-    "scripts/test_production_business_risk_gate.py"
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not apply migrations or mutate preview or production databases.",
-    "Do not bypass immutable review, preview evidence, dry-run, target proof, or serial locking.",
-    "Do not admit documentation, application code or data, CI, reviewer tooling, workflows, or repository maintenance as structural work."
+    "No weakening, bypassing, deleting or allowlisting around the preflight guard; its missing-reference detection must still refuse after this change.",
+    "No shared database reads or writes by this worker.",
+    "No migration file and no reserved migration version; this work ships none.",
+    "No edits to issue 2482's claim, branch, worktree or migration."
   ],
   "required_checks": [
-    "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
-    "python production-policy regression suite",
-    "YAML parse and git diff --check"
+    "python -m unittest scripts.test_production_migration_guard",
+    "node scripts/check-throughput-truth-audit.mjs",
+    "git diff --check"
   ],
   "assumptions": [
-    "The issue 2727 admission resolver lands before any automatic promotion can qualify; until then this workflow fails closed before dispatch.",
-    "The existing activated production-risk policy remains valid and independently re-proved.",
-    "This change authorizes only the existing shared-db workflow, not manual production commands or other infrastructure mutations."
+    "The identical self-flag shape in `alter table ... rename to ...` is deliberately out of scope and is recorded in the pull request body as deserving its own issue.",
+    "Generation 4 records base c7465a75. Main moved twice while this branch waited, 485a0ba5 to 4da62786 to c7465a75. On the first step three paths conflicted: the two .agent evidence files, which every lane writes at the repo root and which were resolved wholesale to this lane's own evidence rather than hand-merged between lanes, and the throughput truth audit, an append-style registry resolved as a union of main's 282 dispositions plus the single entry this branch authored. On the second step only the .agent pair conflicted; main c7465a75 touched none of this lane's three paths, so the registry union stands unchanged at 283 sites.",
+    "This branch's registered call site moved from scripts/production_migration_guard.py:1969 to :2093 because main changed the same file. The site was recomputed from the merged tree; its line_sha256 is unchanged because the line content is unchanged. call_site_count 283 and call_site_sha256 were regenerated from the checker's own discover() inventory rather than hand-edited.",
+    "One entry present in the branch's previous copy of the registry, scripts/check-migration-ledger-drift.mjs:247, was not authored by this branch; it came from the superseded base 485a0ba5 and main has since changed that line away. It is dropped rather than resurrected."
   ],
   "stop_conditions": [
-    "Stop before any database write in this session.",
-    "Stop if exact structural admission cannot be independently derived from the source PR.",
-    "Stop if any existing production evidence gate, dry-run, or serial lock would be weakened."
+    "Stop if the one-line ordering change cannot be made without altering any other guard behaviour.",
+    "Stop if either negative control stops refusing, since that would mean the capability was lost rather than repaired.",
+    "Stop and report the exact refusal if a required tool refuses, rather than working around it."
   ],
   "generation": 4
 }

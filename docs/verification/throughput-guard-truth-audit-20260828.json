@@ -1987,9 +1987,16 @@
       "line_sha256": "c306e35745386b717b583be41a182e378d17ce899e352842a4d0cfbae51ccc3c",
       "disposition": "excluded",
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
+    },
+    {
+      "site": "scripts/production_migration_guard.py:2093",
+      "semantic_key": "scripts/production_migration_guard.py:50799e3f2862268507b004d60991c5c99a0c3324c03f871a8dbf0ceb31fa398d:1",
+      "line_sha256": "50799e3f2862268507b004d60991c5c99a0c3324c03f871a8dbf0ceb31fa398d",
+      "disposition": "excluded",
+      "reason": "#2809. This line is explanatory comment prose quoting the guard refusal text it fixes; it performs no missing-object detection and changes no refusal behaviour, so it carries no enrichment obligation."
     }
   ],
-  "call_site_count": 282,
-  "call_site_sha256": "72e62b7ecb106884257d21db6758557cff5e275b014d354358638c496be5c603",
+  "call_site_count": 283,
+  "call_site_sha256": "014700ca17452ac219a56c6e7f7c044426eacd1262a30a9888a3baf61c6cab78",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }

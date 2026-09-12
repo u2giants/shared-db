@@ -1,47 +1,42 @@
 {
   "schema_version": 1,
-  "work_issue": 2716,
+  "work_issue": 2809,
   "outcome": "ready-for-merge",
-  "pr": 2736,
+  "pr": 2810,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2716/4",
-  "contract_sha256": "1d0e80edc35e9fd891a9df7c65cbf2e39cc551dfa618a1dc7336736dfbb73537",
-  "head_sha": "c29cdfa5ab3df82f600ae70489d76caf04f39466",
+  "contract_ref": "refs/db-contracts/2809/4",
+  "contract_sha256": "0dd3e6769f48f080f9b318bc95a2ab44e0ca38410a3ef01929109a53db05b80a",
+  "head_sha": "a091c63c319067ececd2a5a74d8a69f667a885ac",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/production-promotion-procedure.md",
-    "scripts/production_apply_review_evidence.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_apply_review_evidence.py",
-    "scripts/test_production_business_risk_gate.py"
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
+      "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "Ran 163 tests, OK, exit 0, observed at merge commit c29cdfa5 on base 4da62786."
+      "evidence": "Ran 250 tests in 29.412s, OK, 0 failures, on the tree merged with main c7465a75 (implementation commit a091c63c). The suite grew 243 to 250 purely from cases main added while this branch waited; this lane's own two cases are still present and still pass, namely the archive-a-table case that now passes preflight and the negative control proving the OLD name after a move is still refused with 'DROPPED (or renamed away) by 20260102000000'. The capability was repaired, not removed."
     },
     {
-      "command": "python production-policy regression suite",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 63.249s, OK (skipped=8), exit 0. Counts re-measured at this head, not carried forward from generation 3."
+      "evidence": "truth audit OK: call_sites=283 on the tree merged with main c7465a75. Resolved as a union, not a side pick: main's 282 reviewed dispositions were kept verbatim and exactly ONE entry was re-added, the only one this branch itself authored, verified against the true merge base 485a0ba5 rather than against main. Its site moved from scripts/production_migration_guard.py:1969 to :2093 because main edited the same file, so the line number was recomputed from the merged tree; line_sha256 50799e3f is unchanged because the line content is unchanged. call_site_count and call_site_sha256 were regenerated from the checker's own discover() inventory, giving 283 and 014700ca17452ac219a56c6e7f7c044426eacd1262a30a9888a3baf61c6cab78. The checker reports 0 missing dispositions and 0 stale sites. schema_version remains 3. Main c7465a75 touched none of this lane's three paths, so this union is unchanged from the 4da62786 pass."
     },
     {
-      "command": "YAML parse and git diff --check",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check 4da62786..HEAD reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; AST confirms one definition and one call site of enforce_automatic_risk_decision."
+      "evidence": "No whitespace errors on the tree merged with main c7465a75."
     }
   ],
   "assumptions_resolved": [
-    "Live issue and pull-request inventory found no existing owner or duplicate implementation for #2716.",
-    "Owner authority activates only this exact automatic shared-db workflow path; no preview or production database write occurred.",
-    "The #2727 admission interface is pinned as --resolve-admitted-issue-for-pr and --admit-issue; absence fails before dispatch."
+    "The identical self-flag shape in `alter table ... rename to ...` was confirmed present and deliberately left out of scope; it is recorded in the pull request body as deserving its own issue.",
+    "A second entry in the branch's previous registry copy, scripts/check-migration-ledger-drift.mjs:247, was checked against the true base 485a0ba5 and was NOT authored by this branch; main has since changed that line away, so it was dropped rather than resurrected.",
+    "Main moved twice during this refresh. Each step was re-derived with git merge-tree against the real new tip rather than trusted from a prior prediction; on the second step only the shared .agent evidence pair conflicted."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Second refresh of this lane. Main moved to 4da62786 when PR #2842 merged, returning #2736 to CONFLICTING/DIRTY. Refreshed by MERGE from main (not rebase), so history is extended rather than rewritten. git merge-tree against real main showed the only conflicting paths were .agent/contract.json and .agent/completion.json; no code file conflicted. Both were resolved wholesale to this lane's own evidence pair (main carried PR #2842 / work_issue 2843 evidence, another lane's artifact, not shared state) and are re-sealed here at contract generation 4. Verified the merged tree is byte-identical to the pre-refresh head 07913fc3 for all seven code files, and byte-identical to main 4da62786 for the three files main contributed, so the merge regressed nothing in either direction. Re-verified the duplicate --admit-issue trap that merged clean and silent three times on the previous pass: exactly two occurrences remain, both $ADMITTED_ISSUE, and AST reports exactly one definition and one call site of enforce_automatic_risk_decision. head_sha is the merge commit c29cdfa5, the implementation commit; this evidence commit sits on top of it and cannot describe itself."
+  "stop_conditions_hit": []
 }
