@@ -12,7 +12,7 @@ import { gatherOpenPrObjects, normalizeObject, parseClaimBlock } from './check-d
 import { classifyDependencies, findCompletionRecord, findDependencyCycles, validateCompletionRecord, validateDependencyDeclaration, COMPLETION_FENCE, DependencyError } from './lib/work-dependencies.mjs'
 import { assertLease, evaluateRecovery, formatLeaseMessage, parseLeaseMessage, recoveredLeaseMetadata, LeaseError } from './lib/exclusive-lease.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment, auditTimeline, renderTimeline } from './db-coordination-events.mjs'
-import { reconcileFlow, persistInitialReady, preparePreviewDispatch, repairPreviewReady, terminalizeReady, readyRecord } from './orchestrator-flow/reconcile.mjs'
+import { reconcileFlow, persistInitialReady, preparePreviewDispatch, repairPreviewReady, terminalizeReady, readyRecord, MODE_SEQUENCE } from './orchestrator-flow/reconcile.mjs'
 import { MERGE_SELF_CONTEXT } from './lib/merge-self-context.mjs'
 
 // `Migration guarded merge authorization` is posted by the guarded merge ITSELF,
@@ -2099,7 +2099,26 @@ export function deriveLivePreviewCandidate(issue,io,{claimNumber=null}={}){
   // A merged pull request has no live author claim; do not name both."
   const claimFields=routeName==='merged_rehearsal'?{}:{claim_pr:String(pr.number),claim_head_sha:head}
   const manifest={target:'preview',preview_allowlist:versions.join(','),...claimFields,...(routeName==='merged_rehearsal'?{commit_sha:main,merged_preview_source_pr:String(pr.number)}:{}),...(routeName==='historical_rebind'?{commit_sha:main,historical_preview_source_pr:String(pr.number),historical_preview_original_run_map:versions.map((version)=>`${version}:${originalApplyEvidence.run_id}`).join(',')}:{})}
-  return {issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,route:routeName,route_context:routeContext,manifest}
+  // THE STORED INSTRUCTION MUST NAME ITS OWN MODES (#2796). The workflow's `mode`
+  // input defaults to dry-run, so an instruction that says nothing about mode gets
+  // dispatched verbatim and DRY-RUNS: it succeeds, uploads only
+  // `preview-migration-dry-run-<sha>`, applies nothing, and every downstream lane
+  // then reads that green run as preview proof. Run 34633793571 is exactly that.
+  //
+  // The mode is emitted BESIDE the manifest, never inside it. Phase 2 is explicit
+  // that "`mode` is a per-run phase, not part of ready identity or frozen-manifest
+  // equality", so folding it into the manifest would change manifest_digest and
+  // ready_id and freeze a phase into immutable identity.
+  //
+  // The sequence is route-specific, matching the existing workflow: ordinary and
+  // merged rehearsals "run `mode=dry-run` then `mode=apply`", while historical
+  // rebind "runs the existing recovery `mode=apply` only and must never dispatch a
+  // historical-input dry-run". A historical dry-run is refused outright by the
+  // workflow; the ordinary/merged dry-run is a REQUIRED first phase and stays legal.
+  // One source of truth, shared with the reconciler that re-derives it from the
+  // route when the record is read back, so the two layers cannot drift.
+  const modeSequence=MODE_SEQUENCE[routeName]
+  return {issue,pr:pr.number,head_sha:head,bundle_id:bundle.bundle_id,route:routeName,route_context:routeContext,mode_sequence:modeSequence,manifest}
 }
 
 export function terminalizeHistoricalPreviewReady({readyId,issue,runId,artifactId,artifactDigest,manifestDigest},io=githubIo){
