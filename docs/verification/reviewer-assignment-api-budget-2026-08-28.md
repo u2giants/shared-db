@@ -11,8 +11,13 @@ Issue: #1767. Scope: repository coordination only; no database, preview, product
 > work issue, the complete file list, file contents at the exact head, the
 > closing-issue link and the outcome history — were being billed against this
 > ceiling. Charged against it, a structural draw exhausted the budget at request
-> 24 (2 held back as the mutex-release reserve) and the entry gate refused
-> before the mutex was taken, blocking every migration author lane in the fleet.
+> 24 (2 held back as the mutex-release reserve). That refusal fired from INSIDE
+> the held mutex section — it was not a cheap fail-fast before the mutex was
+> taken. The mutex-release reserve is only subtracted once `acquireReviewMutex`
+> has marked the budget locked, and the admission step runs after that, so the
+> lane had already acquired the reviewer mutex and made admission's reads under
+> it before the refusal, and then had to unwind and release. Every migration
+> author lane in the fleet was blocked.
 > Admission now runs outside the reviewer operation's request accounting
 > (`withoutReviewRequestBudget`), which is how it is already accounted for at
 > every other call site — `acquireAuthorLane`, the guarded merge gate and

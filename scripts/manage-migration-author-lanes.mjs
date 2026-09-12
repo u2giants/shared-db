@@ -1079,9 +1079,14 @@ export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT,
 // reviewer operation's request ceiling. That ceiling is DERIVED in
 // docs/verification/reviewer-assignment-api-budget-2026-08-28.md for a draw that had NO
 // admission step: it predates this gate entirely. Charged against it, a structural draw
-// exhausted the budget at request 24 (2 held back as the mutex-release reserve), so the
-// entry gate refused before the mutex was even taken and every migration author lane in
-// the fleet was blocked.
+// exhausted the budget at request 24 (2 held back as the mutex-release reserve). That
+// refusal came out of consumeReviewWireRequest from INSIDE the held mutex section, not
+// as a cheap fail-fast before the mutex was taken: the mutex-release reserve is only
+// subtracted once acquireReviewMutex has set `locked` (see the cleanupReserve assignment
+// there), and requirePrOperationRoute -> requireAdmission runs after acquireReviewMutex
+// in assignNextReviewerOperation. So the lane had already taken the reviewer mutex and
+// made admission's reads under it, and then had to unwind and release it. Every
+// migration author lane in the fleet was blocked.
 //
 // The ceiling is NOT widened and the mutex-release reserve is NOT touched -- issue #2075
 // exists precisely to stop that shortcut. Admission still runs, still refuses exactly as

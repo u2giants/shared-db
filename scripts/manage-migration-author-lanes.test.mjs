@@ -627,17 +627,28 @@ test('reviewer admission revalidates after its mutex is acquired',()=>{
 // production counts them.
 function wiredAdmittedReviewIo(options){
   const fixture=admittedReviewIo(options),io=fixture.io,labels=[]
-  // A production PR carries many migration files, and admission reads each one's
-  // content at the exact head. Every file here writes the one structural object the
-  // fixture issue declares, so the change stays admissible; only the request count grows.
+  // The fixture PR carries many migration files so the wired read count is large. A
+  // production PR does carry many files and admission does read each one's content at
+  // the exact head -- but those content reads are NOT billed to the reviewer budget in
+  // production; see the wiring note below. Every file here writes the one structural
+  // object the fixture issue declares, so the change stays admissible; only the count grows.
   const files=[{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'create table core.example(id bigint);'}]
   for(let i=1;i<=30;i+=1)files.push({filename:`supabase/migrations/2026091112${String(i).padStart(4,'0')}_example_column.sql`,status:'added',content:`alter table core.example add column label_${i} text;`})
   io.getPrFiles=()=>files
   io.getFileAt=(path)=>files.find((row)=>row.filename===String(path))?.content??'create table core.example(id bigint);'
   const wire=(label)=>runGitHubCommand(['api','fixture'],{executor:()=>{labels.push(label);return '{}'}})
-  // Only the admission gate's own reads are put on the wire. Wrapping the reviewer
-  // draw's reads too would double-charge the reviewer half and refuse for a reason
-  // that has nothing to do with #2802.
+  // This is NOT a production-shaped request count, and must not be read as one. The
+  // fixture deliberately routes three admission reads onto the BUDGETED wire so that
+  // deleting withoutReviewRequestBudget makes this suite fail: it is a revert detector,
+  // not a measurement. Production charges fewer reads than this. In particular
+  // githubIo.getFileAt (and treeFiles) go through laneTreeReader -> createTreeReader in
+  // scripts/lib/github-tree.mjs, which calls runGitHubCommand from
+  // scripts/lib/github-transport.mjs -- the shared transport, which never reaches
+  // consumeReviewWireRequest -- so blob and tree reads are not charged to the reviewer
+  // budget in production at all. What production admission actually charges is getPr,
+  // getPrFiles (via ghPaginated), closingIssuesForPr, getIssue, and the comment/outcome
+  // history reads. The reviewer draw's own reads are left off the wire either way:
+  // charging them here too would refuse for a reason that has nothing to do with #2802.
   for(const name of ['getPrFiles','getFileAt','closingIssuesForPr']){
     const fn=io[name]
     if(typeof fn!=='function')continue
@@ -655,9 +666,9 @@ test('#2802 the structural-admission gate is not charged to the reviewer request
   // Admission must still RUN. Only its accounting moves, so every read it makes has to
   // still be observable on the wire.
   for(const label of ['getPrFiles','getFileAt','closingIssuesForPr'])assert.ok(labels.includes(label),`the admission gate must still read ${label}: ${labels.join(',')}`)
-  // The proof: this one operation makes MORE real requests than the reviewer ceiling
-  // allows, and still completes. That can only be true if the admission gate's requests
-  // are not charged to the reviewer operation.
+  // The proof: this one operation puts MORE wired requests through the budgeted executor
+  // than the reviewer ceiling allows, and still completes. That can only be true if the
+  // admission gate's requests are not charged to the reviewer operation.
   assert.ok(labels.length>REVIEW_OPERATION_REQUEST_LIMIT,`this fixture made only ${labels.length} requests; it must exceed the ${REVIEW_OPERATION_REQUEST_LIMIT}-request reviewer ceiling or it proves nothing: ${labels.join(',')}`)
   // ...and NOT because the ceiling or the reserve was widened to let it through, which
   // is the shortcut issue #2075 exists to prevent.
