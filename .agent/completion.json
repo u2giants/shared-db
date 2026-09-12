@@ -1,59 +1,61 @@
 {
   "schema_version": 1,
-  "work_issue": 2796,
+  "work_issue": 2843,
   "outcome": "ready-for-merge",
-  "pr": 2825,
-  "contract_ref": "refs/db-contracts/2796/6",
-  "contract_sha256": "5e166696179c4c3c10680e06d61e8e5e83db1ca7bc5347884720158863b6d082",
-  "head_sha": "478c391b56b20c4a7dad1b7bded4afe971cbc159",
+  "pr": 2842,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2843/5",
+  "contract_sha256": "4826f4337b3f4220c28aecd62b9fc8170b76c1e3122f5ff1808aae5f7ebc0c47",
+  "head_sha": "f108113aa0730340d6ba60af53ec344dd55802ba",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-workflow-preview-mode-guard.test.mjs",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/reconcile.mjs",
-    "scripts/orchestrator-flow/reconcile.test.mjs"
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "Re-run at 478c391b, directly and UNPIPED so the exit code is the script's own and not a pipe's: stdout \"truth audit OK: call_sites=282\", empty stderr, exit 0. The checker DERIVES both the call-site count and the semantic digest from the tree itself and compares them to the recorded file, so exit 0 is a re-derivation rather than a restatement of what the file already claims. This mattered here: the refresh from main auto-merged that file with no conflict while main's copy recorded 280 and this branch's recorded a different figure, which is exactly the shape that yields a count matching neither side. No number was adopted by hand; 282 is what the checker derived over the tree at this head."
-    },
-    {
-      "command": "node scripts/orchestrator-flow/reconcile.test.mjs",
-      "exit_code": 0,
-      "evidence": "Re-run at 478c391b, directly and UNPIPED: tests 14, pass 14, fail 0, cancelled 0, skipped 0, todo 0, exit 0, empty stderr. The suite includes the three named assertions this change turns on: 'every stored instruction names the modes its route must be dispatched with', 'the dispatch mode is a per-run phase, never part of ready identity', and 'stored ready digest is the whole record, and occupancy is judged on identity'. The replacement test was mutation-proven when it was written rather than trusted: narrowing the stored digest back to identity exits 1, and loosening the occupancy check to a tautology exits 1."
-    },
-    {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at 478c391b, directly and UNPIPED: tests 534, pass 534, fail 0, cancelled 0, skipped 0, todo 0, exit 0. Stderr is non-empty but carries only repeated pre-existing 'db-work-scope uses the deprecated objects: list' warnings from fixture data; it contains no failure. Includes the historical-terminalization fixture, which builds its preview-ready ref with the real writer instead of a hand-copied digest, so a producer/consumer divergence breaks the suite rather than hiding inside it."
+      "evidence": "tests 536, suites 0, pass 536, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself). This is the suite that carries both sides of the merge: the #2802 admission-budget tests and the #2796 mode_sequence tests from main all pass together."
     },
     {
-      "command": "node scripts/check-workflow-preview-mode-guard.test.mjs",
+      "command": "node scripts/orchestrator-flow/admission-outcome.test.mjs",
       "exit_code": 0,
-      "evidence": "Re-run at 478c391b, directly and UNPIPED: tests 8, pass 8, fail 0, cancelled 0, skipped 0, todo 0, exit 0, empty stderr. Runs the workflow's historical mode-guard block under a real shell in both directions, including inversion and deletion sabotage cases, and asserts the historical apply-only step gate rather than a refusal of merged_preview_source_pr. One of its cases, 'the workflow still defaults mode to dry-run, which is why the guard is required', is the positive evidence for the goal's corrected claim that mode_sequence alone closes no lane."
+      "evidence": "tests 57, suites 0, pass 57, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
+    },
+    {
+      "command": "node scripts/orchestrator-flow/coordination-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 1, suites 0, pass 1, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
+    },
+    {
+      "command": "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 6, suites 0, pass 6, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "reported truth audit OK: call_sites=282 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself). The count moved from 280 to 282 because the merge brought across the regenerated docs/verification/throughput-guard-truth-audit-20260828.json from main together with the new call sites from main; this lane did not edit that file and adds no call site of its own."
     }
   ],
   "assumptions_resolved": [
-    "WHAT THE GIT HISTORY ACTUALLY SHOWS: the branch was BOTH rebased and merged. Generation 5 of the contract said it was 'never rebased' and 'refreshed by merge only' while this report said a rebase happened, so the pair contradicted itself and neither file could be trusted on the point. It was settled from Git, not from either file. The rebase is proven by ancestry: implementation commits 1331ed7d and 225a7b62 still exist as objects but are NOT ancestors of the head, the branch carries replayed commits 67d81537 and da2344cd with identical subjects, and d5cea027 (the merge of PR #2808) IS an ancestor of the head. The merge is proven by 7663fe04, a real merge commit reading 'Merge remote-tracking branch origin/main into HEAD' and the only merge commit on the branch. Order: implement, rebase onto d5cea027, continue, then refresh by merge to 54e1e3c6. Both files now state this identically.",
-    "EVERY HEAD-BOUND FIELD WAS RE-ANCHORED, AND THE CHECKS WERE RE-MEASURED RATHER THAN CARRIED FORWARD. Generation 5 recorded head_sha 7663fe04 and evidenced all four checks 'at 7663fe04' -- a superseded head that no reviewer was reading -- and its contract recorded base_sha bfdb19c9, which is not this branch's merge base. head_sha is now 478c391b, the head this evidence commit describes and the head at which all four checks were actually run; base_sha is now 54e1e3c6, which is both the merge base and the pull request's base as GitHub reports it.",
-    "THE TWO CONTRADICTORY COUNTS WERE RESOLVED BY MEASUREMENT, NOT BY PICKING A SIDE. The pair disagreed on the truth-audit call sites (282 versus 279) and on the lane suite (534 versus 532). Neither figure was copied forward. At 478c391b the checker derives 282 call sites and the lane suite reports 534 tests, 534 passing; those are the observed values and they are what both files now record.",
-    "ACCURACY DEFECT RAISED BY REVIEW, CORRECTED IN PROSE ONLY: mode_sequence does not by itself stop an ordinary or merged stored instruction from dispatching at the workflow's mode input default of dry-run. Verified in the tree rather than accepted on the reviewer's word: the only non-test references to mode_sequence are its two producers (orchestrator-flow/reconcile.mjs:49 and manage-migration-author-lanes.mjs:2084), so no consumer reads it back and refuses a dispatch on its value. For the ordinary and merged routes a dry-run is a required first phase and remains legal, so no lane exists to close. The single lane this change closes is the historical one, closed by the workflow's historical apply-only guard. The contract goal previously implied otherwise and has been corrected. No code was changed to make this true.",
-    "ACCURACY DEFECT RAISED BY REVIEW, RECORDED AS A KNOWN CONSEQUENCE: because occupancy is now judged on identity, persistInitialReady compares readyIdentityDigest instead of the stored bytes, so a ref carrying a CORRUPTED stored digest whose identity is otherwise identical now CONVERGES at persistInitialReady rather than failing there. The corruption is still caught, but later and elsewhere: terminalizeHistoricalPreviewReady re-derives the whole-record digest and refuses on the mismatch (manage-migration-author-lanes.mjs:2094). Detection is deferred from the write path to the terminal path, not lost. This is the accepted price of letting the 117 pre-change refs converge, and it was deliberately NOT 'fixed' in code: narrowing the stored digest is exactly the generation-3 defect that two independent reviews rejected, so the whole-record stored digest stays.",
-    "THE SHIPPED DIGEST DESIGN IS UNCHANGED BY THIS GENERATION. Generation 3 narrowed the STORED digest to ready identity and both slots returned REVISE at head 20dabc75 (durable verdicts d7b36fff slot 1, 65d5945b slot 2), because consumers re-derive sha256(canonicalJson(<stored record>)) from the record they read back, so narrowing the writer would have repaired the 117 pre-change refs by making every newly written historical_rebind ref unreadable and fail-closing terminalization. Generation 4 kept the stored digest over the whole record and moved the compatibility concession into the occupancy check. This generation changes no code and leaves that design exactly as it stands.",
-    "The original #2796 lane is cold, not working: its last commit was 2026-09-11 19:31 EDT, there is no open db-claim naming the branch or worktree, and issue #2796 carries no lane comments. Liveness was never positively shown; the branch was adopted rather than assumed abandoned on silence alone.",
-    "No generator exists for the throughput truth-audit file. An earlier orchestrator notice told lanes to 'run the generator'; that instruction was wrong and was retracted. The checker derives count and digest but has no write mode by design.",
-    "No migration is carried by this pull request, so no version reservation or author lease is at stake and no open claim covers its files.",
-    "Issue #2796 had no db-work-scope block at all, which is why it was never dispatchable. The orchestrator classified it repo-maintenance / reviewer-tooling before this work was landed."
+    "Admission GitHub reads were billed to the reviewer operation derived 25-request budget; suspending accounting around the admission call in place keeps the requireOwnedRef mutex-ownership proof intact, which moving the call site would have destroyed.",
+    "REVIEW_OPERATION_REQUEST_LIMIT is unchanged at 25 and REVIEW_MUTEX_SECTION_RESERVE is unchanged at 15; the defect was the accounting boundary, not the size of the ceiling. The green-path test still asserts both constants, and both were re-verified in the merged tree.",
+    "Admission still runs, still refuses identically, and still runs under the same held mutex before the reviewer draw.",
+    "The generation-3 corrections stand unchanged: the old failure was a refusal raised from inside the held mutex section, not a fail-fast before the mutex was taken, and the #2802 green-path test is a revert detector rather than a production-shaped request count.",
+    "REFRESH: the guarded merge refused this pull request because origin/main bf7cc98c (the squash merge of #2825) and this branch both changed scripts/manage-migration-author-lanes.mjs and scripts/manage-migration-author-lanes.test.mjs. Resolved by MERGING origin/main into the branch, never by rebasing, because the approval carry-forward in this repository covers a merge that extends history and is voided by a rewrite.",
+    "REFRESH: the two sides are textually disjoint and both are kept in full. Git auto-merged both script files with no conflict. The #2796 content from main is present in the merged tree (the MODE_SEQUENCE import and the mode_sequence field on deriveLivePreviewCandidate, plus its two test assertions) and the #2802 content from this branch is present (withoutReviewRequestBudget and the requirePrOperationRoute and requireAdmission wrappers, plus its two tests). Neither side was taken wholesale and neither side behaviour was altered.",
+    "REFRESH: the only merge conflicts were .agent/completion.json and .agent/contract.json, the evidence of this lane against the copies of a foreign lane on main. They were resolved to the PR base content inside the implementation commit, so the implementation diff contains no hand-authored .agent change, and the pair is re-sealed in the single commit that follows it.",
+    "RE-SEAL: a NEW contract generation was published rather than editing an immutable one. refs/db-contracts/2843/5 (sha256 4826f4337b3f4220c28aecd62b9fc8170b76c1e3122f5ff1808aae5f7ebc0c47) anchors base_sha at bf7cc98c63c425817ae98ec023f90f0d8260c98f, the actual PR base reported by gh pr view 2842 --json baseRefOid and the value the agent work contract workflow passes to the evidence gate as github.event.pull_request.base.sha. Generation 4 was anchored at the pre-refresh base 54e1e3c6 and had to widen allowed_paths to cover files that the wider diff swept in from main; at the correct anchor that widening is unnecessary and is withdrawn, so allowed_paths and file_writes are back to exactly the five paths this lane owns.",
+    "head_sha is f108113aa0730340d6ba60af53ec344dd55802ba, the merge commit, which is the IMPLEMENTATION commit for this refresh; the evidence commit that follows it cannot describe itself.",
+    "files_changed is the literal Git diff from the real PR base bf7cc98c to the implementation head f108113a, verified with git diff --name-only. It contains .agent/completion.json and .agent/contract.json because main carries a foreign lane's copies of those two files, so this branch's copies differ from the base and Git reports them; both paths are declared in allowed_paths and file_writes. The evidence gate separately requires the diff from the implementation head to the PR head to be exactly those two metadata files, which it is.",
+    "All five required checks were re-run at the merged implementation head f108113a, each invoked directly with output redirected to a file rather than piped, so every exit code came from the check itself and not from a downstream pager. No guard, test, assertion or check was weakened, bypassed, quarantined or deleted to make anything pass.",
+    "docs/verification/throughput-guard-truth-audit-20260828.json was not edited by hand; the regenerated copy from main arrived through the merge."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "EVIDENCE-ACCURACY REPAIR ONLY; NO CODE, TEST OR WORKFLOW FILE WAS TOUCHED BY THIS GENERATION. Two independent reviewers found the same defect: the evidence pair was anchored to a superseded head (7663fe04) and to a base that was not the merge base, its four check results were measured at a head nobody was reviewing, and the two files contradicted each other about whether the branch had been rebased and about two check counts. This commit rewrites .agent/contract.json (published immutably as generation 6 at refs/db-contracts/2796/6) and .agent/completion.json, and changes nothing else. The four required checks were re-run unpiped at 478c391b and all four exit 0; every count above is observed, not carried forward. The two prose accuracy defects the reviewers raised -- the overstated mode_sequence claim and the unstated deferred-detection consequence of identity-based occupancy -- are corrected in the contract prose without altering the code they describe. Underlying work: the implementation is the original cold lane's; the adopting session contributed the rebase onto d5cea027, the generation-4 digest correction, the refresh by merge from main at 54e1e3c6, two truth-audit conflict resolutions by derivation, and this evidence pair. Awaiting the orchestrator's governed reviews at the new head, then guarded merge.",
-  "migration_versions": []
+  "stop_conditions_hit": []
 }

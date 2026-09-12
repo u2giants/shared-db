@@ -1072,6 +1072,43 @@ export function withReviewRequestBudget(fn,limit=REVIEW_OPERATION_REQUEST_LIMIT,
   reviewWireBudget={count:0,limit,operation}
   try{return fn(reviewWireBudget)}finally{reviewWireBudget=null;reviewCommitBase=null;freshDurableVerdictRefs=null}
 }
+// Issue #2802: the structural-admission gate (scripts/orchestrator-flow/admission.mjs,
+// landed in e7bec2fe on 2026-09-11) is NOT reviewer work, but its GitHub reads -- the
+// pull request, the linked work issue, the complete file list, file contents at the
+// exact head, the closing-issue link, the outcome history -- were charged to the
+// reviewer operation's request ceiling. That ceiling is DERIVED in
+// docs/verification/reviewer-assignment-api-budget-2026-08-28.md for a draw that had NO
+// admission step: it predates this gate entirely. Charged against it, a structural draw
+// exhausted the budget at request 24 (2 held back as the mutex-release reserve). That
+// refusal came out of consumeReviewWireRequest from INSIDE the held mutex section, not
+// as a cheap fail-fast before the mutex was taken: the mutex-release reserve is only
+// subtracted once acquireReviewMutex has set `locked` (see the cleanupReserve assignment
+// there), and requirePrOperationRoute -> requireAdmission runs after acquireReviewMutex
+// in assignNextReviewerOperation. So the lane had already taken the reviewer mutex and
+// made admission's reads under it, and then had to unwind and release it. Every
+// migration author lane in the fleet was blocked.
+//
+// The ceiling is NOT widened and the mutex-release reserve is NOT touched -- issue #2075
+// exists precisely to stop that shortcut. Admission still runs, still refuses exactly as
+// it did, and still runs under the SAME held mutex before the draw proceeds:
+// requireAdmission and requirePrOperationRoute prove continued mutex ownership while
+// they run, and that proof is what stops the route or the admission answer changing
+// between the check and the draw. Only the ACCOUNTING moves. Admission is charged to a
+// reviewer budget nowhere else it is called from either -- acquireAuthorLane, the
+// guarded merge gate and preview preparation all call it with no reviewer budget
+// installed at all -- so this makes the reviewer path consistent with every other
+// admission call site rather than inventing a new exemption for it.
+//
+// A budget object is still installed rather than `null`, so ghPaginated keeps its
+// reviewer-operation refusal of possible pagination, and `locked` is carried through so
+// the single-attempt policy for requests made while a mutex is held is unchanged. The
+// reviewer operation's own count, caches and reserve are restored untouched.
+function withoutReviewRequestBudget(fn){
+  if(!reviewWireBudget)return fn()
+  const suspended=reviewWireBudget
+  reviewWireBudget={count:0,limit:Number.MAX_SAFE_INTEGER,operation:`${suspended.operation??'reviewer-operation'}-admission-gate`,locked:suspended.locked,cleanup:suspended.cleanup}
+  try{return fn()}finally{reviewWireBudget=suspended}
+}
 // Issue #2342: the retry loop, the classifier and the stderr policy now live in
 // scripts/lib/github-transport.mjs, which is the ONE transport every governed
 // gate uses. What stays here is the part that is specific to this file: the
@@ -5646,8 +5683,14 @@ export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issu
   return {route:'repo-maintenance',issue:linkedNumber,pr:Number(pr),headSha:livePr.head.sha,changeType,legacy}
 }
 
-function requirePrOperationRoute(options,io,{pr,headSha,issue,mutexOwner,allowMerged=false,reviewSnapshot=false,resolveStructuralIssue=false}){
+// Issue #2802: routing and admission are one gate, and neither half is reviewer work.
+// The whole body runs outside the reviewer operation's request accounting; the mutex
+// ownership proof below is unchanged, so this still runs under the caller's held mutex.
+function requirePrOperationRoute(options,io,args){
   if(io.enforceAdmission!==true)return null
+  return withoutReviewRequestBudget(()=>requirePrOperationRouteGate(options,io,args))
+}
+function requirePrOperationRouteGate(options,io,{pr,headSha,issue,mutexOwner,allowMerged=false,reviewSnapshot=false,resolveStructuralIssue=false}){
   if(mutexOwner)requireOwnedRef(MUTEX_REF,mutexOwner,io)
   const snapshot=reviewSnapshot&&typeof io.readReviewerOperationRoute==='function'?io.readReviewerOperationRoute(pr):null
   const route=derivePrOperationRoute(pr,io,{headSha,issue,allowMerged,snapshot})
@@ -5670,9 +5713,15 @@ function requireAdmissionArguments(options,io,{pr=null}={}){
   if(pr===null&&(options.acquireExclusive||options.preparePreviewDispatch!==undefined))throw new LaneError('--pr <source pull request> is required so admission can inspect the actual shared-stage change')
 }
 
-function requireAdmission(options, io, { pr = null, timestamp, mutexOwner = null } = {}) {
-  requireAdmissionArguments(options,io,{pr})
+// Issue #2802: see withoutReviewRequestBudget. Admission's requests are not reviewer
+// requests, so they are not charged to a reviewer operation's derived ceiling. Argument
+// validation stays outside because it makes no GitHub request at all.
+function requireAdmission(options, io, args = {}) {
+  requireAdmissionArguments(options,io,{pr:args.pr??null})
   if (io.enforceAdmission !== true) return null
+  return withoutReviewRequestBudget(()=>requireAdmissionGate(options,io,args))
+}
+function requireAdmissionGate(options, io, { pr = null, timestamp, mutexOwner = null } = {}) {
   if(mutexOwner)requireOwnedRef(MUTEX_REF,mutexOwner,io)
   const admitted=mutexOwner
     ? admitIssue(Number(options.admitIssue), io, { pr, allowLegacy:pr!==null, timestamp })
