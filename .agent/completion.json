@@ -18,22 +18,22 @@
     {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 536, pass 536, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
+      "evidence": "tests 536, pass 536, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
     },
     {
       "command": "node scripts/orchestrator-flow/admission-outcome.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 57, pass 57, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
+      "evidence": "tests 57, pass 57, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
     },
     {
       "command": "node scripts/orchestrator-flow/coordination-audit.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 1, pass 1, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
+      "evidence": "tests 1, pass 1, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
     },
     {
       "command": "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 6, pass 6, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
+      "evidence": "tests 6, pass 6, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
     }
   ],
   "assumptions_resolved": [
