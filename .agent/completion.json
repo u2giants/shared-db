@@ -1,33 +1,39 @@
 {
   "schema_version": 1,
-  "work_issue": 2817,
+  "work_issue": 2357,
   "outcome": "ready-for-merge",
-  "pr": 2822,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2817/1",
-  "contract_sha256": "870d560334dd2fad505a0f20cabcedd584618b4001d07e728dd7a4393ad5625f",
-  "head_sha": "c0012ecd2e0704396b326384e3efda2e4469e30b",
-  "files_changed": [
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs"
+  "pr": 2835,
+  "migration_versions": [
+    "20260912000806"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2357/1",
+  "contract_sha256": "7f6ecce554be176ff140e6e2a3c9c916f70db5c0d6b1872fcebe1b29996880db",
+  "head_sha": "9cdf382020e0e514fa282ac8c85e684dc8ca9da7",
+  "files_changed": [
+    "supabase/migrations/20260912000806_licensing_candidate_and_review_apis.sql"
+  ],
+  "db_reads": [
+    "plm.source_resolution",
+    "plm.licensing_relationship_resolution",
+    "plm.licensing_source_scope",
+    "plm.opa_capture",
+    "plm.opa_property_character_capture"
+  ],
+  "db_writes": [
+    "api.licensing_entity_candidates",
+    "api.licensing_relationship_candidates",
+    "api.licensing_resolution_queue"
+  ],
   "checks": [
-    {
-      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
-      "exit_code": 0,
-      "evidence": "42 tests, 42 pass, 0 fail, 0 skipped, including the new 20260911221304 pin test."
-    },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed."
+      "evidence": "Static checks passed. Guard B confirmed no migration sorts before the base branch's newest version 20260911214438; the expected-count, verify-cost and EOL-reference guards all passed on the one added migration."
     },
     {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "command": "python -m pytest scripts/",
       "exit_code": 0,
-      "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."
+      "evidence": "1132 passed, 8 skipped, 724 subtests passed in 92.41s."
     },
     {
       "command": "git diff --check",
@@ -36,11 +42,13 @@
     }
   ],
   "assumptions_resolved": [
-    "Run 34655606553 confirmed from its own log: workflow_dispatch at headSha 916b8005f4588ece389f1f137faf651bd78ef0a2, conclusion success, PREVIEW_PROJECT_REF mvpkijzfmfcxhnzqogzs, PREVIEW_ALLOWLIST 20260911221304, and the version present in the preview migration record.",
-    "Digests recomputed independently from the file at 916b8005 using the registry's own normalization (CRLF to LF, trailing newline stripped for the statement): fileSha256 ecc847f602358edb27829cc49faba86b58e3788b6cf98c702eaccf8b8527904d, statementBytes 55149, statementSha256 a9171a6023e724b677655db8d89e572f4394ad8c1b4db41d37a52438b492d20e. All three match issue #2817.",
-    "The migration bytes are identical at the applied commit 916b8005 and at PR #2808 head 234647f3 (same sha256).",
-    "sourcePr and sourceMergeCommit are omitted, so validateHistoricalProductionProvenance still refuses this version and no production eligibility is granted."
+    "Base-table privileges read live from the authoritative catalog rather than information_schema: plm.source_resolution, plm.licensing_relationship_resolution and plm.licensing_source_scope each have rowsecurity=t, one policy, authenticated holding SELECT and anon holding nothing.",
+    "plm.opa_capture and plm.opa_property_character_capture have rowsecurity=t, zero policies, and grant SELECT to service_role only; authenticated holds nothing. Confirmed a browser role cannot read them at all.",
+    "That asymmetry was resolved by exposing OPA corroboration as a bounded aggregate guarded by has_table_privilege and labelled opa_evidence_readable, so an unauthorized caller sees false and NULL rather than a zero that would misstate the source data.",
+    "Row counts at authoring time were source_resolution 0, licensing_relationship_resolution 0, licensing_source_scope 0, opa_capture 2, opa_property_character_capture 10454. Because the resolution tables are empty, the security proof rests entirely on privilege probes and never on an empty read.",
+    "The migration's verification block carries positive controls proving the privilege probe can return false (anon must not hold SELECT on the OPA capture table) and true (authenticated must hold SELECT on plm.source_resolution), so a green run means the check was exercised rather than vacuously satisfied.",
+    "Exactly three database objects are created, matching claim #2834's declared objects; no helper function was added, and no review decision or curated row is written."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Registry-only change; ready for exact-head governed review, CI, and guarded merge."
+  "evidence_note": "Three api views at reserved version 20260912000806 under claim #2834. Ready for exact-head governed review, CI, and guarded merge. No preview apply attempted: the preview database is blocked until PR #2808 lands."
 }
