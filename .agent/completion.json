@@ -3,10 +3,12 @@
   "work_issue": 2796,
   "outcome": "ready-for-merge",
   "pr": 2825,
-  "contract_ref": "refs/db-contracts/2796/2",
-  "contract_sha256": "2a6de20d44d884757ff8274cfbcb30ef0e68d953c2697b48680c584b04927112",
-  "head_sha": "1cab933560b3a0d6eb959f87dfcfee16d7261de2",
+  "contract_ref": "refs/db-contracts/2796/3",
+  "contract_sha256": "baa73b7b49c71816d31ba324e4db77fae37155ddad4cb4d5d3d047938b38554f",
+  "head_sha": "7cad7283501093c415d3dc528765f924439de0cc",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/shared-supabase-migrations.yml",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/check-workflow-preview-mode-guard.test.mjs",
@@ -21,32 +23,33 @@
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=282. Before the resolution this refused with 'found 282, recorded 280'. The count and digest were written by the checker's own discover() and JSON.stringify digest, not by hand: two plausible alternatives I computed first (sorted semantic keys, newline join) both produced WRONG digests, which is why the guard's own exit 0 is the only evidence recorded here."
+      "evidence": "Ran at 7cad7283 against the rebased tree: \"truth audit OK: call_sites=282\", exit 0. The 282 count and its semantic digest were DERIVED by calling the checker's own discover() over the rebased tree, not chosen; the tool then confirmed both."
     },
     {
       "command": "node scripts/orchestrator-flow/reconcile.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 13, pass 13, fail 0, skipped 0, todo 0. Covers readyRecord attaching mode_sequence AFTER both digests and the historical lane never offering a dry-run. It does NOT cover a refusal of a manifest omitting mode: apply, because no such refusal exists in this change."
+      "evidence": "tests 14, pass 14, fail 0, skipped 0, todo 0, exit 0 at 7cad7283 (invoked via node --test). Includes the new digest-identity test. That test was also run against a sabotaged copy with the old one-line digest restored, where it FAILS, so it pins the fix in both directions."
     },
     {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 534, pass 534, fail 0, skipped 0, todo 0, run against the merged tree at 48457a20."
+      "evidence": "tests 534, pass 534, fail 0, skipped 0, todo 0, exit 0 at 7cad7283 (invoked via node --test)."
     },
     {
       "command": "node scripts/check-workflow-preview-mode-guard.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 8, pass 8, fail 0, skipped 0, todo 0. Runs the workflow guard block under a real shell in both directions with inversion and deletion sabotage cases. It asserts the historical step gate, not a refusal of merged_preview_source_pr."
+      "evidence": "tests 8, pass 8, fail 0, skipped 0, todo 0, exit 0 at 7cad7283 (invoked via node --test). Runs the workflow guard block under a real shell in both directions with inversion and deletion sabotage cases. It asserts the historical step gate, not a refusal of merged_preview_source_pr."
     }
   ],
   "assumptions_resolved": [
     "The original #2796 lane is cold, not working: its last commit was 2026-09-11 19:31 EDT, there is no open db-claim naming the branch or worktree, and issue #2796 carries zero comments. I first mistook three comments on PR #2825 for lane activity; they are my own orchestrator serialization notice, its retraction and its inversion correction, so they establish nothing about the lane. Liveness was therefore never positively shown, and the branch was adopted rather than assumed abandoned on silence alone.",
-    "The truth-audit conflict was a single block (lines 1962-2007) and was append-versus-append: main contributed five new sites and this branch two, with no semantic_key present on both sides and no disposition contested. The union preserved every reviewed judgement; none was invented, dropped or re-judged. This matters because the file is not fully derivable - each site needs a hand-written reviewed disposition with a 20+ character reason, so a 'regenerate' would have meant fabricating review judgements.",
+    "The truth-audit conflict recurred on rebase as a single append-versus-append block. It was resolved by DERIVATION, not by hand: the union was keyed on semantic_key, and call_site_count (282) plus call_site_sha256 were computed by importing the checker's own discover() over the rebased tree. Neither side's recorded numbers (280 on main, 279 on this branch) was adopted. One site was dropped because its line no longer exists in check-migration-ledger-drift.mjs, and one prose clash on documents-only-change.mjs was settled in favour of main's landed \"enriched\" disposition after reading the line itself and confirming it documents a fail-closed rule.",
     "No generator exists for this file. An earlier orchestrator notice told lanes to 'run the generator'; that instruction was wrong and was retracted. The checker derives count and digest but has no write mode by design.",
-    "The branch was refreshed by MERGE, never rebase, because it belongs to another session; the merge commit appends rather than rewriting its history.",
+    "CORRECTED. An earlier revision of this report said the branch was refreshed by merge and never rebased. That is no longer true: the branch was REBASED onto d5cea027 after PR #2808 merged, because it had become CONFLICTING against the new main. The rebase replayed the implementation, then the truth-audit conflict was re-resolved by derivation and the .agent pair was regenerated at the final head rather than reconstructed at intermediate replays, where every head-bound field would have been wrong by construction.",
     "No migration is carried by this PR, so no version reservation or author lease is at stake and no open claim covers its files.",
     "Issue #2796 had no db-work-scope block at all, which is why it was never dispatchable. The orchestrator classified it repo-maintenance / reviewer-tooling before landing this work, rather than leaving the work to land against an unclassified issue.",
-    "An independent reviewer found the published generation 1 contract described behaviour this change does not ship (a manifest-digest recording and a reconcile refusal). Verified in the tree: mode_sequence has no consumer outside its producers and tests, and reconcile.mjs states it is attached after both digests deliberately. Contract generation 2 was published with a corrected goal and two overstated evidence strings were rewritten."
+    "An independent reviewer found the published generation 1 contract described behaviour this change does not ship (a manifest-digest recording and a reconcile refusal). Verified in the tree: mode_sequence has no consumer outside its producers and tests, and reconcile.mjs states it is attached after both digests deliberately. Contract generation 2 was published with a corrected goal and two overstated evidence strings were rewritten.",
+    "An independent slot-2 review raised a High finding that persistInitialReady digested the record readyRecord returns, which now carries mode_sequence. I confirmed it in the source rather than accepting it on the reviewer's word: ready_id is taken before the field is attached, but the stored digest was taken after, so the same identity would hash differently once this shipped and re-preparing any pre-change ref would fail the inconsistent-data check. The blast radius was verified against the remote as 117 live refs/db-preview-ready/* refs, the reviewer's own figure. Fixed by digesting the identity record with mode_sequence omitted, which reproduces the pre-change digest exactly because canonicalJson sorts keys. Contract generation 3 was published to record this second enforced behaviour; generations 1 and 2 remain immutable and superseded."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Repository tooling fix adopted from a cold lane. The implementation is the original lane's; this session added only the merge from current main, the conflict resolution in the global throughput truth audit, and this evidence pair. Awaiting two governed reviews at the final head, then guarded merge.",
