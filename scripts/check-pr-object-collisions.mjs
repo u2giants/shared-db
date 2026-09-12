@@ -406,10 +406,10 @@ const DISPATCH_PATTERNS = [
   {
     kinds: ['table'],
     re: new RegExp(
-      String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED})`,
+      String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED}(?:\s*,\s*${QUALIFIED})*)`,
       'gi',
     ),
-    map: (m) => [{ action: 'drop', kind: 'table', target: canonical(m[1]) }],
+    map: (m) => [...m[1].matchAll(new RegExp(QUALIFIED,'g'))].map((target) => ({ action:'drop', kind:'table', target:canonical(target[0]) })),
   },
   {
     // `alter table` in ALL its forms. Per plan D9 this is TABLE-level: every
@@ -702,9 +702,11 @@ export function extractOperations(sql) {
   while ((temporaryMatch = temporaryCreate.exec(text)) !== null) {
     temporaryEvents.push({ offset: temporaryMatch.index, action: 'create', target: canonical(temporaryMatch[1]) })
   }
-  const tableDrop = new RegExp(String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED})`, 'gi')
+  const tableDrop = new RegExp(String.raw`\bdrop\s+table\s+(?:if\s+exists\s+)?(${QUALIFIED}(?:\s*,\s*${QUALIFIED})*)`, 'gi')
   while ((temporaryMatch = tableDrop.exec(text)) !== null) {
-    temporaryEvents.push({ offset: temporaryMatch.index, action: 'drop', target: canonical(temporaryMatch[1]) })
+    for(const target of temporaryMatch[1].matchAll(new RegExp(QUALIFIED,'g'))){
+      temporaryEvents.push({ offset:temporaryMatch.index, action:'drop', target:canonical(target[0]) })
+    }
   }
   temporaryEvents.sort((a,b)=>a.offset-b.offset)
   const liveTemporaryTables=new Set(),temporaryCleanupOffsets=new Set()
@@ -742,6 +744,29 @@ export function extractOperations(sql) {
       } else {
         add({ action: 'replace', kind, target: canonical(m[1]) })
       }
+    }
+  }
+
+  const multiDrop = new RegExp(String.raw`\bdrop\s+(materialized\s+view|function|procedure|view|index|type|domain|schema|sequence)\s+(?:concurrently\s+)?(?:if\s+exists\s+)?([^;]+)`, 'gi')
+  const splitTargets = (value) => {
+    const targets=[];let start=0,depth=0,quoted=false
+    for(let index=0;index<value.length;index++){
+      const char=value[index]
+      if(char==='"')quoted=!quoted
+      else if(!quoted&&char==='(')depth++
+      else if(!quoted&&char===')')depth=Math.max(0,depth-1)
+      else if(!quoted&&depth===0&&char===','){targets.push(value.slice(start,index));start=index+1}
+    }
+    targets.push(value.slice(start));return targets
+  }
+  let multiMatch
+  while((multiMatch=multiDrop.exec(text))!==null){
+    const parts=splitTargets(multiMatch[2].replace(/\s+(?:cascade|restrict)\s*$/i,''))
+    if(parts.length<2)continue
+    const rawKind=multiMatch[1].toLowerCase().replace(/\s+/g,' '),kind=rawKind==='domain'?'type':rawKind
+    for(const part of parts){
+      const target=new RegExp(String.raw`^\s*(${QUALIFIED})`,'i').exec(part)
+      if(target)add({action:'drop',kind,target:canonical(target[1])},multiMatch.index)
     }
   }
 
