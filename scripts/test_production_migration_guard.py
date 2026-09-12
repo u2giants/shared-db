@@ -27,6 +27,9 @@ from production_migration_guard import (  # noqa: E402
     assert_bounded,
     compute_content_manifest,
     classify_pending_version,
+    FOREIGN_TARGET_MIGRATIONS,
+    KNOWN_MIGRATION_TARGETS,
+    foreign_target_entry,
     created_objects,
     local_migrations,
     manifest_path,
@@ -3515,6 +3518,86 @@ class PendingVersionClassifierTest(unittest.TestCase):
         row = classify_pending_version("20260824135515", {"20260811030000"}, REPO, paths)
         self.assertEqual(row["kind"], "base-absent")
         self.assertIn("20260814223552", row["reason"])
+
+
+class ForeignTargetScopeTest(unittest.TestCase):
+    """Issue #2820 -- a migration authored for another database is not promotable here.
+
+    THE POSITIVE CONTROL IS THE POINT. An exclusion mechanism that quietly
+    swallows everything looks identical to one that works, and this repository
+    has repeatedly been burned by checks whose own predicate was inverted and
+    reported confident absence. Every test here that proves something IS excluded
+    is paired with a probe proving an in-scope migration is STILL reported.
+    """
+
+    IN_SCOPE_CONTROL = "20260911210844"
+    # The control declares `-- derived-from` bases. Supply them, exactly as the
+    # live production ledger does, so the control reaches the classifier as
+    # ordinary pending work rather than `base-absent` for an unrelated reason.
+    IN_SCOPE_APPLIED = {"20260816110750", "20260909220101"}
+
+    def test_hts_rag_split_is_out_of_scope_but_in_scope_work_is_still_pending(self) -> None:
+        paths = local_migrations(REPO)
+        row = classify_pending_version("20260909121403", set(), REPO, paths, "production")
+        self.assertEqual(row["kind"], "foreign-target")
+        self.assertIn("DesignFlow", row["reason"])
+        self.assertIn("#2403", row["reason"])
+
+        # POSITIVE CONTROL: the mechanism must not swallow ordinary work.
+        control = classify_pending_version(
+            self.IN_SCOPE_CONTROL, self.IN_SCOPE_APPLIED, REPO, paths, "production"
+        )
+        self.assertEqual(control["kind"], "genuinely-pending")
+
+    def test_scope_is_derived_from_the_target_not_hard_coded_per_version(self) -> None:
+        """A preview-targeted migration must STILL be reported on preview.
+
+        This is what makes the registry a target model rather than a skip list:
+        the same version gets different answers for different targets.
+        """
+        paths = local_migrations(REPO)
+        fixture = {
+            self.IN_SCOPE_CONTROL: {
+                "target": "preview",
+                "project": "the shared-db-schema-rehearsal preview branch",
+                "issue": "#0000",
+                "note": "Test fixture.",
+            }
+        }
+        with patch.dict(production_migration_guard.FOREIGN_TARGET_MIGRATIONS, fixture, clear=False):
+            excluded = classify_pending_version(
+                self.IN_SCOPE_CONTROL, self.IN_SCOPE_APPLIED, REPO, paths, "production"
+            )
+            self.assertEqual(excluded["kind"], "foreign-target")
+            still_reported = classify_pending_version(
+                self.IN_SCOPE_CONTROL, self.IN_SCOPE_APPLIED, REPO, paths, "preview"
+            )
+            self.assertEqual(still_reported["kind"], "genuinely-pending")
+
+    def test_unregistered_migration_is_in_scope_everywhere(self) -> None:
+        """Forgetting to register something must OVER-report, never hide work."""
+        for target in sorted(KNOWN_MIGRATION_TARGETS):
+            self.assertIsNone(foreign_target_entry(self.IN_SCOPE_CONTROL, target))
+
+    def test_every_registry_entry_names_a_known_target_and_cites_an_issue(self) -> None:
+        for version, entry in FOREIGN_TARGET_MIGRATIONS.items():
+            self.assertRegex(version, r"^\d{14}$")
+            self.assertIn(entry["target"], KNOWN_MIGRATION_TARGETS)
+            self.assertTrue(entry["issue"].startswith("#"), entry["issue"])
+            self.assertTrue(entry["project"].strip())
+
+    def test_an_unknown_target_is_refused_rather_than_silently_excluding(self) -> None:
+        paths = local_migrations(REPO)
+        with self.assertRaises(GuardError):
+            classify_pending_version("20260909121403", set(), REPO, paths, "not-a-database")
+
+    def test_a_foreign_target_migration_can_never_enter_a_production_allowlist(self) -> None:
+        with self.assertRaises(GuardError) as caught:
+            parse_allowlist("20260909121403")
+        self.assertIn("another database", str(caught.exception))
+
+        # POSITIVE CONTROL: the choke point still accepts in-scope work.
+        self.assertEqual(parse_allowlist(self.IN_SCOPE_CONTROL), [self.IN_SCOPE_CONTROL])
 
 
 if __name__ == "__main__":
