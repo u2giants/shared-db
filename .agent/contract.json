@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Enforce independent actual-change admission, safe urgent finish-first ordering, and an authoritative application outcome lifecycle through direct live proof without entering or weakening the database orchestrator.",
-  "base_sha": "485a0ba5da8c43f2c7bddd85d2c29cfc1271452f",
+  "base_sha": "9eb1d5879079c9feebf8ca46ca0623d667ebb273",
   "dispatcher": "Codex programme session for popcre/ai-devops issue 401",
   "worker": "Codex repository-maintenance session issue 2727",
   "branch": "codex/issue-2727-steps2-3",
@@ -96,12 +96,13 @@
     "Generation 45 integrates current main 26d9345b and repairs the guarded-operation routing boundary: structural and mixed or unknown pull requests still require two-sided DDL admission, while deterministic repository-maintenance code retains exact-head review, CI, and guarded merge without fabricated database admission or database stages.",
     "Generation 46 integrates current main e420cd86 after PR 2726, preserving its search-performance migration and merged truth-audit dispositions while retaining the generation 45 routing repair unchanged.",
     "Generation 47 integrates current main 485a0ba5 after PR 2804, preserving its FactoryTime migration and property-source coverage while retaining the routing repair unchanged.",
-    "Generation 48 keeps reviewer routing inside the unchanged request budget by replacing separate route reads with one complete fail-closed GraphQL snapshot; live schema and the exact PR 2738 inventory were verified read-only."
+    "Generation 48 keeps reviewer routing inside the unchanged request budget by replacing separate route reads with one complete fail-closed GraphQL snapshot; live schema and the exact PR 2738 inventory were verified read-only.",
+    "Generation 49 integrates current main 9eb1d587 and repairs the exact-head adversarial review findings: guarded merge derives and admits its single linked structural issue under the mutex, GraphQL MERGED state requires merge evidence, and copied or unknown file statuses remain structural and fail closed."
   ],
   "stop_conditions": [
     "Stop before any database, preview, production, or infrastructure mutation.",
     "Stop if repository-maintenance work can consume a database author, preview, or production lane; exact-head reviewer and guarded merge use remain required.",
     "Stop if exact-head review or the focused manager/event/orchestrator suite reports an unresolved defect."
   ],
-  "generation": 48
+  "generation": 49
 }
