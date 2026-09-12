@@ -5,6 +5,29 @@ import path from 'node:path'
 import { pathToFileURL } from 'node:url'
 
 export const HISTORICAL_RESTORATIONS = Object.freeze({
+  // #2797 / #2817. Preview applied these exact bytes in claim-mode run
+  // 34655606553, dispatched at and applied from PR #2808 commit
+  // 916b8005f4588ece389f1f137faf651bd78ef0a2 before the PR merged, because that
+  // lane dispatched the preview apply ahead of the merge. The migration blob is
+  // unchanged on the PR head. This pin exists only so the applied-migration-edit
+  // guard can tell "the exact applied bytes" from "an edit to an applied
+  // version". Production producer provenance is deliberately NOT registered:
+  // `sourcePr`/`sourceMergeCommit` are omitted, so
+  // `validateHistoricalProductionProvenance` refuses this version until a later
+  // change registers the real merge commit. No production eligibility is granted
+  // or changed here.
+  '20260911221304': Object.freeze({
+    filename: 'supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql',
+    name: 'db_data_admin_scraped_source_inventory',
+    previewProject: 'mvpkijzfmfcxhnzqogzs',
+    previewApplyRun: '34655606553',
+    previewDispatchCommit: '916b8005f4588ece389f1f137faf651bd78ef0a2',
+    previewAppliedCommit: '916b8005f4588ece389f1f137faf651bd78ef0a2',
+    statementBytes: 55149,
+    statementSha256: 'a9171a6023e724b677655db8d89e572f4394ad8c1b4db41d37a52438b492d20e',
+    fileSha256: 'ecc847f602358edb27829cc49faba86b58e3788b6cf98c702eaccf8b8527904d',
+    objects: Object.freeze(['function api.db_data_admin_scraped_source_inventory']),
+  }),
   // #2744 / #2798. Preview applied these exact bytes in claim-mode run
   // 34636342626, dispatched at and applied from PR #2793 head commit
   // 1eae69db6ed5c938a109fde0c9040849ec30bffe before the PR merged. The migration
