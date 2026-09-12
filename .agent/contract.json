@@ -1,13 +1,13 @@
 {
   "schema_version": 1,
   "work_issue": 2794,
-  "generation": 1,
+  "generation": 2,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Remove the retired DesignFlow PLM sync completely: drop the guarded importer plm.import_master_data(jsonb, jsonb), which #1090 Step 1.0 had already reduced to a raise-only retirement stub, and delete every runtime vestige (the sync tool and its test, the host wrapper script, the systemd plm-sync unit templates, the DesignFlow lane and cron in the Phase 6 workflow, and the DESIGNFLOW_API_KEY secret wiring), while leaving the unrelated licensing write-authority guard fully in force.",
-  "base_sha": "485a0ba5da8c43f2c7bddd85d2c29cfc1271452f",
+  "base_sha": "c7465a7598fb2191e2df549ec63ba255360c484a",
   "dispatcher": "claude shared-db orchestrator issue #2794",
-  "worker": "claude issue-2794 migration author lane (claim #2816)",
+  "worker": "claude issue-2794 migration author lane (claim #2816), refreshed onto main c7465a75",
   "branch": "claude/issue-2794-plm-sync-retire",
   "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2794-plm-sync-retire",
   "allowed_paths": [
