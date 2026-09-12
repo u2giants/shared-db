@@ -3,9 +3,9 @@
   "work_issue": 2796,
   "outcome": "ready-for-merge",
   "pr": 2825,
-  "contract_ref": "refs/db-contracts/2796/1",
-  "contract_sha256": "b3f63c8c6432ee8e4edd3080321426bdab17723434d6c8fc6724e88f98f8d296",
-  "head_sha": "48457a207929c08afa77b1f851549400adead84f",
+  "contract_ref": "refs/db-contracts/2796/2",
+  "contract_sha256": "2a6de20d44d884757ff8274cfbcb30ef0e68d953c2697b48680c584b04927112",
+  "head_sha": "1cab933560b3a0d6eb959f87dfcfee16d7261de2",
   "files_changed": [
     ".github/workflows/shared-supabase-migrations.yml",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
@@ -26,7 +26,7 @@
     {
       "command": "node scripts/orchestrator-flow/reconcile.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 13, pass 13, fail 0, skipped 0, todo 0. Covers the added refusal of a write-route manifest that omits mode: apply."
+      "evidence": "tests 13, pass 13, fail 0, skipped 0, todo 0. Covers readyRecord attaching mode_sequence AFTER both digests and the historical lane never offering a dry-run. It does NOT cover a refusal of a manifest omitting mode: apply, because no such refusal exists in this change."
     },
     {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
@@ -36,7 +36,7 @@
     {
       "command": "node scripts/check-workflow-preview-mode-guard.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 8, pass 8, fail 0, skipped 0, todo 0. The new guard asserts the workflow refuses merged_preview_source_pr when mode is not apply."
+      "evidence": "tests 8, pass 8, fail 0, skipped 0, todo 0. Runs the workflow guard block under a real shell in both directions with inversion and deletion sabotage cases. It asserts the historical step gate, not a refusal of merged_preview_source_pr."
     }
   ],
   "assumptions_resolved": [
@@ -45,7 +45,8 @@
     "No generator exists for this file. An earlier orchestrator notice told lanes to 'run the generator'; that instruction was wrong and was retracted. The checker derives count and digest but has no write mode by design.",
     "The branch was refreshed by MERGE, never rebase, because it belongs to another session; the merge commit appends rather than rewriting its history.",
     "No migration is carried by this PR, so no version reservation or author lease is at stake and no open claim covers its files.",
-    "Issue #2796 had no db-work-scope block at all, which is why it was never dispatchable. The orchestrator classified it repo-maintenance / reviewer-tooling before landing this work, rather than leaving the work to land against an unclassified issue."
+    "Issue #2796 had no db-work-scope block at all, which is why it was never dispatchable. The orchestrator classified it repo-maintenance / reviewer-tooling before landing this work, rather than leaving the work to land against an unclassified issue.",
+    "An independent reviewer found the published generation 1 contract described behaviour this change does not ship (a manifest-digest recording and a reconcile refusal). Verified in the tree: mode_sequence has no consumer outside its producers and tests, and reconcile.mjs states it is attached after both digests deliberately. Contract generation 2 was published with a corrected goal and two overstated evidence strings were rewritten."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Repository tooling fix adopted from a cold lane. The implementation is the original lane's; this session added only the merge from current main, the conflict resolution in the global throughput truth audit, and this evidence pair. Awaiting two governed reviews at the final head, then guarded merge.",
