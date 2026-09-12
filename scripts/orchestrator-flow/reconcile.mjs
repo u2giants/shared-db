@@ -50,19 +50,25 @@ export function readyRecord(input){
 }
 
 function assertMarker(io){const marker=io.resolveMarker();if(!marker?.live||marker.calling_task!==marker.task)throw new ReconcileError('matching live sole-orchestrator marker is required')}
+// Ready IDENTITY, with the per-run phase removed. Refs written before mode_sequence
+// existed hash a record without it, so identity is the only comparison under which a
+// pre-change ref and a freshly prepared one for the SAME ready_id agree.
+function readyIdentityDigest(record){const {mode_sequence:_modeSequence,...identity}=record??{};return sha256(canonicalJson(identity))}
 function outcomeRef(id){return `${OUTCOME_PREFIX}/${id}`}
 function readyRef(id){return `${READY_PREFIX}/${id}`}
 
 export function persistInitialReady(input,io){
   assertMarker(io);const record=readyRecord(input),ref=readyRef(record.ready_id)
-  // The stored digest covers ready IDENTITY only. mode_sequence is a per-run phase that
-  // readyRecord attaches after the digests; folding it in here would give every ready ref
-  // written before it existed a different digest for the SAME ready_id, so re-preparing any
-  // pre-change identity would fail the inconsistent-data check below. Identity excludes it.
-  const {mode_sequence:_modeSequence,...identity}=record,digest=sha256(canonicalJson(identity))
+  // The STORED digest must stay sha256(canonicalJson(<whole stored record>)): readers
+  // recompute it from the record they read back, so any narrower convention here makes
+  // every newly written ref unreadable to them (manage-migration-author-lanes.mjs:2094).
+  const digest=sha256(canonicalJson(record))
   const event=previewReadyEvent({workIssue:record.issue,actor:io.actor(),timestamp:io.now(),pr:record.pr,head_sha:record.head_sha,ready_id:record.ready_id,bundle_id:record.bundle_id,route:record.route,route_context:record.route_context,manifest_digest:record.manifest_digest})
   io.appendEvent(event)
-  if(!io.createRef(ref,digest,record)&&io.readRef(ref)?.digest!==digest)throw new ReconcileError('preview-ready ref is occupied by inconsistent data')
+  // Occupancy is judged on IDENTITY, not on the stored bytes. A ref written before
+  // mode_sequence existed holds the same identity under a different digest, and
+  // re-preparing that identity must converge rather than fail closed.
+  if(!io.createRef(ref,digest,record)&&readyIdentityDigest(io.readRef(ref)?.record)!==readyIdentityDigest(record))throw new ReconcileError('preview-ready ref is occupied by inconsistent data')
   return {status:'PREVIEW_READY',ref,record}
 }
 

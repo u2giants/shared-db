@@ -55,4 +55,25 @@ test('the dispatch mode is a per-run phase, never part of ready identity',()=>{
   assert.equal(readyRecord({...base,mode_sequence:['apply']}).ready_id,one.ready_id)
   assert.equal(readyRecord({...base,mode_sequence:['apply']}).manifest_digest,one.manifest_digest)
 })
-test('stored ready digest ignores mode_sequence so pre-change refs stay consistent',()=>{const io=fake();const {record}=persistInitialReady(base,io);const ref=io.refs.get(`refs/db-preview-ready/${record.ready_id}`);const {mode_sequence,...identity}=record;assert.ok(mode_sequence,'record must carry mode_sequence');assert.equal(ref.digest,sha256(canonicalJson(identity)));const legacy={...io,readRef:()=>({digest:sha256(canonicalJson(identity))}),createRef:()=>false};assert.doesNotThrow(()=>persistInitialReady(base,legacy))})
+// BOTH DIRECTIONS, deliberately. The first version of this test asserted only the
+// writer's own convention against itself, so it passed under WHICHEVER convention the
+// writer used and could not see that consumers recompute
+// sha256(canonicalJson(<whole stored record>)) from the record they read back
+// (manage-migration-author-lanes.mjs:2094). Each leg below fails for a different
+// mistake: narrowing the stored digest, reverting occupancy to raw digest equality,
+// and loosening occupancy into a tautology that accepts anything.
+test('stored ready digest is the whole record, and occupancy is judged on identity',()=>{
+  const io=fake(),{record}=persistInitialReady(base,io)
+  const ref=io.refs.get(`refs/db-preview-ready/${record.ready_id}`)
+  assert.ok(record.mode_sequence,'record must carry mode_sequence')
+  // Leg 1 -- the consumer's re-derivation. Narrowing the writer breaks every NEW ref.
+  assert.equal(ref.digest,sha256(canonicalJson(record)))
+  const {mode_sequence:_modeSequence,...identity}=record
+  // Leg 2 -- a ref written BEFORE mode_sequence existed holds the same identity under a
+  // different digest; re-preparing it must converge rather than fail closed.
+  const legacy={...io,readRef:()=>({digest:sha256(canonicalJson(identity)),record:identity}),createRef:()=>false}
+  assert.doesNotThrow(()=>persistInitialReady(base,legacy))
+  // Leg 3 -- and occupancy must still REFUSE a genuinely different identity at that ref.
+  const foreign={...io,readRef:()=>({digest:sha256(canonicalJson({...identity,issue:99})),record:{...identity,issue:99}}),createRef:()=>false}
+  assert.throws(()=>persistInitialReady(base,foreign),/occupied by inconsistent data/)
+})
