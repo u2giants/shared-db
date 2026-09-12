@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911230553"
   ],
-  "contract_ref": "refs/db-contracts/2611/4",
-  "contract_sha256": "b728c372c6a75ca9c298aee9c5e2696687c7e2391e41f2b5b7a37e925502a2d4",
-  "head_sha": "bea2edb7e064804d90ca709567450b903753c3f3",
+  "contract_ref": "refs/db-contracts/2611/5",
+  "contract_sha256": "7a112fcdeeb620fbc60142e986e3bf90648610cb681cc78a6ef12ed5573e9be0",
+  "head_sha": "8b8f7ac3140423aee83dc79903f5e24649c5f5f9",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -30,17 +30,17 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed: Guard B found no migration sorting before the base branch's newest version 20260911214438; the #1235 expected-count guard, the verify-cost guard (1 added migration, no prohibited verification read) and the #1684 EOL reference guard all passed."
+      "evidence": "Re-run green at 8b8f7ac3 after the refresh onto main 4da62786: Guard B found no migration sorting before the base branch newest version 20260911221304; the #1235 expected-count guard, the verify-cost guard (1 added migration, no prohibited verification read) and the #1684 EOL reference guard all passed. Guard B2 did not run because no live ledger source is configured in this environment, which is a standing environment notice and not a refusal."
     },
     {
       "command": "node scripts/check-prepack-exclusion.test.mjs",
       "exit_code": 0,
-      "evidence": "Guard verified green on the tree AND red on seven known-dirty variants: filter removed, role called but result ignored, member role dropped, head source swapped back to public.erp_items_current, transaction-attested head source lost, both non-licensed divisions dropped, and a commented-out filter. A guard never shown to fail is not evidence."
+      "evidence": "Re-run green at 8b8f7ac3 after the refresh: guard verified green on the merged tree and red on all 7 known-dirty variants. A guard never shown to fail is not evidence."
     },
     {
       "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "Initially REFUSED with 'migration writes undeclared objects: table plm.item_missing_attribution'. The refusal was correct: granting and revoking on a view registers as a write against 'table <name>' as well as 'view <name>'. Confirmed by running dispatchObjectKeys directly over the migration - removing the grants drops the table key, and spelling them 'on table' does not. Claim #2819 was expanded to declare all three objects rather than stripping the view's permission hardening or weakening the extractor."
+      "evidence": "Re-run green at 8b8f7ac3 after the refresh onto main 4da62786: Migration claim verified: #2819, version 20260911230553. The check requires PR_NUMBER; supplying 2823 is what turned an earlier REFUSED: PR number is unavailable into a pass, and that refusal was a missing input rather than a lease problem."
     }
   ],
   "assumptions_resolved": [
@@ -55,7 +55,8 @@
     "The throughput truth audit refused this branch with 'found 288, recorded 277'. Verified NOT pre-existing: a pristine-main probe passes at 277. All 11 new sites are genuine prose about a missing-attribution population, so each received a hand-written 'excluded' disposition rather than being reworded to dodge the pattern, which would have left the guard green while defeating it. The count and digest were recomputed mechanically from the guard's own discover(), never hand-incremented. origin/main still read 277 immediately before the write, so no rival lane's edit was overwritten.",
     "Refreshed from main by MERGE, never a rebase, after #2822 landed and flipped the PR to CONFLICTING. The only overlap was the shared .agent evidence pair, which main carried for lane #2817; that collision was resolved in favour of this lane's own #2611 evidence. head_sha is the merge commit because its tree already holds all seven implementation files unchanged, and 9eb1d587..f7037b84 yields exactly those seven.",
     "Refreshed onto main tip bfdb19c9 by MERGE, never rebase, after PR #2826 landed. The throughput truth audit was re-derived mechanically from discover() against that new main rather than from any earlier baseline: 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a. Zero unresolved sites and zero stale sites dropped; the checker validates with truth audit OK: call_sites=291.",
-    "Refreshed a second time onto main tip d5cea0278208b801bbf83b112b25bae816e49817 by MERGE, never rebase, after the lane was stopped on the reviewer-budget refusal. head_sha is merge commit bea2edb7e064804d90ca709567450b903753c3f3. The truth audit legitimately did NOT move and stays at 291 with the same digest, because git diff bfdb19c9..d5cea027 shows main changed nothing under either discovery root; the incoming main commits added only a migration and its test. The sole conflicts were this lane's own .agent pair, resolved to this lane's side and then rebound by contract generation 4. All four checks were re-run green after the merge rather than carried forward from the previous head: truth audit 291, prepack guard with 7 fixture heads, check-sql static guards, and the lease check confirming claim #2819 version 20260911230553."
+    "Refreshed a second time onto main tip d5cea0278208b801bbf83b112b25bae816e49817 by MERGE, never rebase, after the lane was stopped on the reviewer-budget refusal. head_sha is merge commit bea2edb7e064804d90ca709567450b903753c3f3. The truth audit legitimately did NOT move and stays at 291 with the same digest, because git diff bfdb19c9..d5cea027 shows main changed nothing under either discovery root; the incoming main commits added only a migration and its test. The sole conflicts were this lane's own .agent pair, resolved to this lane's side and then rebound by contract generation 4. All four checks were re-run green after the merge rather than carried forward from the previous head: truth audit 291, prepack guard with 7 fixture heads, check-sql static guards, and the lease check confirming claim #2819 version 20260911230553.",
+    "Refreshed a third time onto main tip 4da62786926c64fcc71e169aeae915d1958a227c by MERGE, never rebase, after PR #2842 landed and flipped this PR to CONFLICTING. head_sha is merge commit 8b8f7ac3140423aee83dc79903f5e24649c5f5f9, the implementation commit; the evidence commit that rebinds this pair sits on top of it and cannot describe itself. Git reported exactly three conflicting paths and no others. The .agent pair was resolved WHOLESALE to this lane own evidence, never hand-merged between two lanes, because main was carrying a different lane copy. The throughput truth audit legitimately DID move this time, unlike generation 4, and was resolved as a union rather than carried forward: a pristine-main probe at 4da62786 passes at 282, main had gained 2 dispositions from other lanes since the old base d5cea027, and those were kept while only the 11 dispositions this lane itself authored were re-added, giving 293 = 282 + 11 with digest b527503f95e2fffbac6776e0eeef659cc28bb8981229cdbd876c6d86fc813a77. Line numbers, count and digest were recomputed mechanically from the guard own discover() against the merged tree; zero stale dispositions were dropped and schema_version stays 3. files_changed was taken verbatim from git rather than hand-trimmed, so it includes the two .agent files because git reports them."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Structural change implementing an owner ruling that had never been implemented in SQL. Two database objects plus an offline regression guard, a verification note recording every probe with its query per AGENTS.md 4.3, and two business-rule corrections. Awaiting two governed reviews at the final head, then preview apply, guarded merge and production promotion."
