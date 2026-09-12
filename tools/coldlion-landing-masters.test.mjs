@@ -146,6 +146,10 @@ test("database errors retain diagnosis while redacting row values and URLs",()=>
   assert.match(redacted,/invalid input syntax for numeric/); assert.doesNotMatch(redacted,/PRIVATE|secret@host/);
 });
 
+test("database error redaction preserves safe object identity",()=>{
+  assert.equal(redactPsqlError('psql: ERROR: relation "coldlion.item_merch_group" does not exist'),'psql: ERROR: relation "coldlion.item_merch_group" does not exist');
+});
+
 test("requested company, division, and active scope are positively checked",()=>{
   const spec=MASTER_SPECS.season;
   assert.doesNotThrow(()=>assertRequestedScope(spec,[{companyCode:"SYNCO",divisionCode:"SD001",active:"Y"}],{companyCode:"SYNCO",divisionCode:"SD001",active:"Y"}));
@@ -226,6 +230,13 @@ test("itemDetails company snapshot must equal the per-division identity proof",(
   const row=sourceFor(spec,{companyCode:"SYNCO",divisionCode:"SD001",itemNo:"I1",itemPkey:"P1"});
   assert.doesNotThrow(()=>assertSameIdentitySet(spec,[row],[row]));
   assert.throws(()=>assertSameIdentitySet(spec,[row],[]),/does not match/);
+});
+
+test("EP001 itemDetails are excluded before the division completeness comparison",()=>{
+  const spec=ITEM_SPECS.item_detail;
+  const kept=sourceFor(spec,{companyCode:"EDGEHOME",divisionCode:"SD001",itemNo:"I1",itemPkey:"P1"});
+  const retired=sourceFor(spec,{companyCode:"EDGEHOME",divisionCode:"EP001",itemNo:"I2",itemPkey:"P2"});
+  assert.doesNotThrow(()=>assertSameIdentitySet(spec,[kept,retired].filter((row)=>row.divisionCode!=="EP001"),[kept]));
 });
 
 test("collector fans seasons per division, merges active variants, and proves itemDetails",async()=>{

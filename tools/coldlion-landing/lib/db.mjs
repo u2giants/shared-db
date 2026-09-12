@@ -53,7 +53,10 @@ export function runSql(sql, { url = databaseUrl() } = {}) {
 
 export function redactPsqlError(stderr) {
   const first=String(stderr??"").split(/\r?\n/).find((line)=>/ERROR:|FATAL:|PANIC:/.test(line)) ?? "Database command failed";
-  return first.replace(/postgres(?:ql)?:\/\/\S+/gi,"[redacted-url]").replace(/'[^'\r\n]*'|"[^"\r\n]*"/g,"[redacted-value]").slice(0,1000);
+  return first.replace(/postgres(?:ql)?:\/\/\S+/gi,"[redacted-url]")
+    .replace(/'[^'\r\n]*'/g,"[redacted-value]")
+    .replace(/"[^"\r\n]*"/g,(match,offset,line)=>/(relation|column|constraint|table|schema|function|type)\s*$/i.test(line.slice(0,offset))?match:"[redacted-value]")
+    .slice(0,1000);
 }
 
 /** A single scalar-or-tabular read, returned as rows of trimmed strings. */

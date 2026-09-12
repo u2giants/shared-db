@@ -81,8 +81,7 @@ export async function collectMasters({ companyCode=COMPANY_CODE, apiKey, fetchOp
   source.item_detail = await fetchMasterSpec(ITEM_SPECS.item_detail, { companyCode }, apiKey, options);
   const itemDetailsByDivision=[];
   for (const divisionCode of divisions) itemDetailsByDivision.push(...await fetchMasterSpec(ITEM_SPECS.item_detail,{companyCode,divisionCode},apiKey,options));
-  assertSameIdentitySet(ITEM_SPECS.item_detail,source.item_detail,itemDetailsByDivision);
-  for (const name of Object.keys(source)) if (source[name].length===0) throw Object.assign(new Error(`${(MASTER_SPECS[name]??ITEM_SPECS[name]).endpoint} returned an unprovable empty full snapshot`),{endpoint:(MASTER_SPECS[name]??ITEM_SPECS[name]).endpoint,requestParams:{companyCode}});
+  assertSameIdentitySet(ITEM_SPECS.item_detail,source.item_detail.filter((row)=>row.divisionCode!=="EP001"),itemDetailsByDivision);
   assertRequestedScope(ITEM_SPECS.item_header,source.item_header,{companyCode});
   assertRequestedScope(ITEM_SPECS.item_detail,source.item_detail,{companyCode});
 

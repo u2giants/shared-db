@@ -28,7 +28,7 @@ function currentTableSql(table, spec, rows) {
   const priorRaw = `coalesce((select cl.new_raw from coldlion.change_log cl where cl.table_name=${sqlText(table)} and cl.natural_key=${naturalKey} order by cl.changed_at desc limit 1), ${previous})`;
   const updates = [...data.filter((c) => !keys.includes(c)).map((c) => `${c} = excluded.${c}`), "run_id = excluded.run_id", "fetched_at = excluded.fetched_at", "source_hash = excluded.source_hash", "last_seen_at = excluded.last_seen_at"].join(",\n      ");
   return `${stageSql(stage, spec, rows)}
-create temp table _counts_${table} as
+create temp table _counts_${table} on commit drop as
 select count(*) filter (where t.${keys[0]} is null) as inserted,
        count(*) filter (where t.${keys[0]} is not null and t.source_hash <> s.source_hash) as updated,
        count(*) filter (where t.${keys[0]} is not null and t.source_hash = s.source_hash) as unchanged
