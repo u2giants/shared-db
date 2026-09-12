@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2611,
-  "generation": 3,
+  "generation": 4,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Implement the owner's prepack exclusion, which existed only as prose and was never implemented in SQL: add plm.prepack_role as the single authoritative assortment test (head, member or null, sourced from ColdLion) and plm.item_missing_attribution as the missing-Licensor/Property population that applies it, plus an offline regression guard that fails if the exclusion is dropped or weakened.",
-  "base_sha": "bfdb19c916d2f481f1b740d5ce1318b065c13045",
+  "base_sha": "d5cea0278208b801bbf83b112b25bae816e49817",
   "dispatcher": "albert hazan, autonomous migration author lane for #2611",
   "worker": "claude issue-2611 migration author lane (claim #2819)",
   "branch": "claude/issue-2611-prepack-exclusion",
@@ -59,7 +59,8 @@
     "Granting or revoking on a view legitimately registers as a write against both 'view' and 'table' under the object extractor, so claim #2819 declares all three objects; the grants are not removed, because the view's permission hardening is part of the deliverable.",
     "The public-data-venue test fails identically on untouched origin/main and on other open pull requests, so it is pre-existing and outside this contract.",
     "The 11 new call sites this lane adds to scripts/check-prepack-exclusion.mjs and .github/workflows/prepack-exclusion.yml are genuine prose about a missing-attribution population, so scripts/check-throughput-truth-audit.mjs correctly refused until each received a hand-written disposition. Generation 2 exists solely to bring docs/verification/throughput-guard-truth-audit-20260828.json into declared scope: the guard has no regenerate flag by design, its count and digest are global, and the file was edited under a coordinator-granted slot after confirming its count was still 277 on origin/main immediately before writing. Only the 11 dispositions, the count and the digest changed; the digest was recomputed mechanically from the guard's own discover() rather than hand-incremented.",
-    "Generation 3 exists because PR #2826 landed and main advanced 114 commits; the branch was refreshed by MERGE (never rebase) onto bfdb19c9, so base_sha names the tip the work is actually built on. The throughput truth audit was re-derived mechanically against that new main via discover(), giving 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a; no earlier count (277 or 288) was carried forward."
+    "Generation 3 exists because PR #2826 landed and main advanced 114 commits; the branch was refreshed by MERGE (never rebase) onto bfdb19c9, so base_sha names the tip the work is actually built on. The throughput truth audit was re-derived mechanically against that new main via discover(), giving 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a; no earlier count (277 or 288) was carried forward.",
+    "Generation 4 exists because main advanced to d5cea0278208b801bbf83b112b25bae816e49817 while this lane was stopped on the reviewer-budget refusal; the branch was refreshed by MERGE (never rebase) onto that tip as commit bea2edb7, so base_sha names the tip the work is actually built on. The throughput truth audit was NOT re-derived this time and legitimately stays at 291 sites with digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a, because git diff bfdb19c9..d5cea027 shows main changed nothing under either discovery root (scripts, .github/workflows); the only conflicts were this lane's own .agent pair, resolved to the lane's side and then rebound by this generation. All four required checks were re-run green at bea2edb7 after the merge: truth audit 291, prepack exclusion guard with 7 fixture heads, check-sql static guards, and the migration author lease check against claim #2819 version 20260911230553."
   ],
   "stop_conditions": [
     "Stop if a guard refusal could only be cleared by weakening the guard.",

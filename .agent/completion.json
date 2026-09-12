@@ -6,9 +6,9 @@
   "migration_versions": [
     "20260911230553"
   ],
-  "contract_ref": "refs/db-contracts/2611/3",
-  "contract_sha256": "05d83ddd27ca2bfcade21d38aac3576112f06aa37287f3d693a6a6609cb5a410",
-  "head_sha": "ad2cfb8caf8e9ec4251386f626e7506aa1517e97",
+  "contract_ref": "refs/db-contracts/2611/4",
+  "contract_sha256": "b728c372c6a75ca9c298aee9c5e2696687c7e2391e41f2b5b7a37e925502a2d4",
+  "head_sha": "bea2edb7e064804d90ca709567450b903753c3f3",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -54,7 +54,8 @@
     "The public-data-venue test failure is pre-existing and outside this contract: it fails identically on untouched origin/main and on other open pull requests, over eight docs/verification/database-efficiency CSVs this lane did not author. It is already owned by issues #2390 and #2391. No evidence file was deleted and no guard was relaxed.",
     "The throughput truth audit refused this branch with 'found 288, recorded 277'. Verified NOT pre-existing: a pristine-main probe passes at 277. All 11 new sites are genuine prose about a missing-attribution population, so each received a hand-written 'excluded' disposition rather than being reworded to dodge the pattern, which would have left the guard green while defeating it. The count and digest were recomputed mechanically from the guard's own discover(), never hand-incremented. origin/main still read 277 immediately before the write, so no rival lane's edit was overwritten.",
     "Refreshed from main by MERGE, never a rebase, after #2822 landed and flipped the PR to CONFLICTING. The only overlap was the shared .agent evidence pair, which main carried for lane #2817; that collision was resolved in favour of this lane's own #2611 evidence. head_sha is the merge commit because its tree already holds all seven implementation files unchanged, and 9eb1d587..f7037b84 yields exactly those seven.",
-    "Refreshed onto main tip bfdb19c9 by MERGE, never rebase, after PR #2826 landed. The throughput truth audit was re-derived mechanically from discover() against that new main rather than from any earlier baseline: 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a. Zero unresolved sites and zero stale sites dropped; the checker validates with truth audit OK: call_sites=291."
+    "Refreshed onto main tip bfdb19c9 by MERGE, never rebase, after PR #2826 landed. The throughput truth audit was re-derived mechanically from discover() against that new main rather than from any earlier baseline: 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a. Zero unresolved sites and zero stale sites dropped; the checker validates with truth audit OK: call_sites=291.",
+    "Refreshed a second time onto main tip d5cea0278208b801bbf83b112b25bae816e49817 by MERGE, never rebase, after the lane was stopped on the reviewer-budget refusal. head_sha is merge commit bea2edb7e064804d90ca709567450b903753c3f3. The truth audit legitimately did NOT move and stays at 291 with the same digest, because git diff bfdb19c9..d5cea027 shows main changed nothing under either discovery root; the incoming main commits added only a migration and its test. The sole conflicts were this lane's own .agent pair, resolved to this lane's side and then rebound by contract generation 4. All four checks were re-run green after the merge rather than carried forward from the previous head: truth audit 291, prepack guard with 7 fixture heads, check-sql static guards, and the lease check confirming claim #2819 version 20260911230553."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Structural change implementing an owner ruling that had never been implemented in SQL. Two database objects plus an offline regression guard, a verification note recording every probe with its query per AGENTS.md 4.3, and two business-rule corrections. Awaiting two governed reviews at the final head, then preview apply, guarded merge and production promotion."
