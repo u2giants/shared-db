@@ -4,6 +4,9 @@ export const MASTER_PAGE_SIZE = 2000;
 
 export function masterUrl(endpoint, params = {}) {
   const url = new URL(`${COLDLION_BASE_URL}${endpoint}`);
+  // ColdLion's documented API is an inherited HTTP-only vendor service (the
+  // HTTPS context returns 404). Refuse any drift to another clear-text host.
+  if (url.protocol !== "http:" || url.hostname !== "x5.coldlion.com" || !url.pathname.startsWith("/EhpApi/")) throw new Error("refusing an unapproved ColdLion API origin");
   for (const [key, value] of Object.entries(params)) {
     if (value !== null && value !== undefined && value !== "") url.searchParams.set(key, String(value));
   }

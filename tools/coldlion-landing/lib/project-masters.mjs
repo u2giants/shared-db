@@ -17,6 +17,11 @@ export function assertKnownShape(spec, rows) {
   const known = knownApiFields(spec);
   const unknown = [...new Set(rows.flatMap((row) => Object.keys(row)).filter((key) => !known.has(key)))].sort();
   if (unknown.length) throw new Error(`${spec.endpoint} returned unreviewed field(s): ${unknown.join(", ")}`);
+  const required = spec.fields.map((field)=>field.api);
+  for (const row of rows) {
+    const missing=required.filter((field)=>!(field in row));
+    if (missing.length) throw new Error(`${spec.endpoint} omitted approved field(s): ${missing.join(", ")}`);
+  }
 }
 
 export function projectCurrentRows(spec, sourceRows, { runId, fetchedAt, excludeDivision = "EP001" } = {}) {

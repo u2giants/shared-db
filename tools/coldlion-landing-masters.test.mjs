@@ -194,6 +194,17 @@ test("declined field changes remain observable through the complete-record hash"
   assert.doesNotMatch(buildMasterLoadSql({loads:[load],itemSlots:[],affectedItemGrains:[]}),/private-a/);
 });
 
+test("missing approved fields fail before they can null existing values",()=>{
+  const source=sourceFor(MASTER_SPECS.vendor,{companyCode:"SYNCO",vendorCode:"V1"});
+  delete source.vendorDesc;
+  assert.throws(()=>projectCurrentRows(MASTER_SPECS.vendor,[source],{runId:RUN,fetchedAt:NOW}),/omitted approved field.*vendorDesc/);
+});
+
+test("master transport is pinned to the documented ColdLion origin",()=>{
+  const url=masterUrl("/customers",{companyCode:"SYNCO"});
+  assert.equal(url.origin,"http://x5.coldlion.com"); assert.match(url.pathname,/^\/EhpApi\//);
+});
+
 test("workflow is the sole live path and runs masters before history",()=>{
   const yaml=readFileSync(".github/workflows/coldlion-landing-sync.yml","utf8");
   assert.match(yaml,/SUPABASE_DB_URL_PRODUCTION/); assert.match(yaml,/COLDLION_EXPECTED_PROJECT_REF: qsllyeztdwjgirsysgai/); assert.match(yaml,/COLDLION_API_KEY/); assert.doesNotMatch(yaml,/pull_request:|push:/);
