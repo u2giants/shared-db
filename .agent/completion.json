@@ -6,10 +6,12 @@
   "migration_versions": [
     "20260912000806"
   ],
-  "contract_ref": "refs/db-contracts/2357/1",
-  "contract_sha256": "7f6ecce554be176ff140e6e2a3c9c916f70db5c0d6b1872fcebe1b29996880db",
-  "head_sha": "9cdf382020e0e514fa282ac8c85e684dc8ca9da7",
+  "contract_ref": "refs/db-contracts/2357/2",
+  "contract_sha256": "0cd68234123fabb194121102c947174b4aaf3f2ae5495c076a6a2ced21e68753",
+  "head_sha": "70bda2f7a80a2280860d644c3f53a241bc44d338",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "supabase/migrations/20260912000806_licensing_candidate_and_review_apis.sql"
   ],
   "db_reads": [
@@ -28,17 +30,17 @@
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed. Guard B confirmed no migration sorts before the base branch's newest version 20260911214438; the expected-count, verify-cost and EOL-reference guards all passed on the one added migration."
+      "evidence": "Re-run at refreshed head 70bda2f7. Static checks passed. Issue #1235 expected-count guard passed; verify-cost guard passed on the 1 added migration; issue #1684 EOL reference guard passed."
     },
     {
       "command": "python -m pytest scripts/",
       "exit_code": 0,
-      "evidence": "1132 passed, 8 skipped, 724 subtests passed in 92.41s."
+      "evidence": "Re-run at refreshed head 70bda2f7: 1139 passed, 8 skipped, 5 warnings, 724 subtests passed in 101.26s."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors at the refreshed head."
     }
   ],
   "assumptions_resolved": [
@@ -47,8 +49,9 @@
     "That asymmetry was resolved by exposing OPA corroboration as a bounded aggregate guarded by has_table_privilege and labelled opa_evidence_readable, so an unauthorized caller sees false and NULL rather than a zero that would misstate the source data.",
     "Row counts at authoring time were source_resolution 0, licensing_relationship_resolution 0, licensing_source_scope 0, opa_capture 2, opa_property_character_capture 10454. Because the resolution tables are empty, the security proof rests entirely on privilege probes and never on an empty read.",
     "The migration's verification block carries positive controls proving the privilege probe can return false (anon must not hold SELECT on the OPA capture table) and true (authenticated must hold SELECT on plm.source_resolution), so a green run means the check was exercised rather than vacuously satisfied.",
-    "Exactly three database objects are created, matching claim #2834's declared objects; no helper function was added, and no review decision or curated row is written."
+    "Exactly three database objects are created, matching claim #2834's declared objects; no helper function was added, and no review decision or curated row is written.",
+    "Refresh onto main 4da62786 conflicted only in the shared repo-root evidence pair .agent/completion.json and .agent/contract.json, which main carried from a different lane (PR #2842). Both were resolved wholesale to this lane's own evidence rather than hand-merged, and the pair is re-sealed here at contract generation 2. The migration file itself merged without conflict and is byte-identical to the reviewed implementation at 9cdf3820."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Three api views at reserved version 20260912000806 under claim #2834. Ready for exact-head governed review, CI, and guarded merge. No preview apply attempted: the preview database is blocked until PR #2808 lands."
+  "evidence_note": "Three api views at reserved version 20260912000806 under claim #2834, refreshed onto main 4da62786. Implementation head is the refresh merge 70bda2f7; the evidence pair commit sits on top of it. Ready for exact-head governed review, CI, and guarded merge. No preview apply attempted: the preview database is blocked until PR #2808 lands."
 }

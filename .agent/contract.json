@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "work_issue": 2357,
-  "generation": 1,
+  "generation": 2,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Create exactly three api views over the licensing resolution tables -- api.licensing_entity_candidates, api.licensing_relationship_candidates and api.licensing_resolution_queue -- exposing ambiguity and evidence without licensed row leakage, preserving RLS via security_invoker, and proving browser-role reads succeed while unauthorized reads are denied.",
-  "base_sha": "9eb1d5879079c9feebf8ca46ca0623d667ebb273",
+  "base_sha": "4da62786926c64fcc71e169aeae915d1958a227c",
   "dispatcher": "claude shared-db orchestrator route local_ceb221ac-1746-4836-9306-6839c18dbced (marker #2758)",
   "worker": "claude issue-2357 licensing candidate and review API author",
   "branch": "claude/issue-2357-licensing-candidate-apis",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
+  "worktree": "C:/repos/shared-db-worktrees/pr2835-refresh",
   "allowed_paths": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -50,7 +50,8 @@
     "plm.opa_capture and plm.opa_property_character_capture grant SELECT to service_role only and carry no policy, so a browser role cannot read them at all.",
     "Because those two tables are unreadable by a browser role, joining them into a security_invoker view returns a silent zero rather than a denial, which is why OPA corroboration is exposed as a guarded aggregate with an explicit opa_evidence_readable flag.",
     "information_schema is permission-filtered in this project and under-reports, so every privilege assertion uses pg_class.relacl, has_table_privilege and pg_constraint instead.",
-    "The resolution tables are currently empty on production, so an empty read proves nothing and the security proof rests on privilege probes rather than row counts."
+    "The resolution tables are currently empty on production, so an empty read proves nothing and the security proof rests on privilege probes rather than row counts.",
+    "This generation re-seals the same authorized work after the branch was brought forward onto main 4da62786; the only conflicting paths were the shared repo-root evidence pair, which carries no logic from either lane."
   ],
   "stop_conditions": [
     "Stop if delivering the required result would need a fourth database object or any object outside the claim.",
