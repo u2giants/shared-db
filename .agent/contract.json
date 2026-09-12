@@ -1,49 +1,49 @@
 {
-    "schema_version": 1,
-    "work_issue": 2802,
-    "generation": 1,
-    "work_type": "structural",
-    "route": "shared-db-orchestrator",
-    "goal": "Add a nullable boolean column has_talent_likeness to dam.style_guide_file recording whether the style-guide file's source explicitly indicated talent likeness, as a tri-state where NULL means the source exposed no determination. Structure only.",
-    "base_sha": "e420cd8619f57933de5b35aa5065f7d9ea3cc9de",
-    "dispatcher": "Claude shared-db orchestrator",
-    "worker": "Claude issue2802 migration author lane",
-    "branch": "claude/issue-2802-talent-likeness",
-    "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2802-talent-likeness",
-    "allowed_paths": [
-        ".agent/contract.json",
-        ".agent/completion.json",
-        "supabase/migrations/20260911224952_dam_style_guide_file_has_talent_likeness.sql"
-    ],
-    "file_writes": [
-        ".agent/contract.json",
-        ".agent/completion.json",
-        "supabase/migrations/20260911224952_dam_style_guide_file_has_talent_likeness.sql"
-    ],
-    "db_reads": [
-        "table core.style_guide"
-    ],
-    "db_writes": [
-        "table dam.style_guide_file"
-    ],
-    "prohibited_actions": [
-        "backfilling or otherwise writing any row value into has_talent_likeness; this intake authorizes structure only",
-        "inferring the value from a filename, path, folder or title",
-        "declaring the column NOT NULL or giving it a default, which would destroy the third NULL state",
-        "altering or repurposing the existing raw source filename and label columns (title, relative_path, folder, metadata)",
-        "running production DDL directly instead of through the governed promotion workflow"
-    ],
-    "required_checks": [
-        "bash scripts/check-sql.sh"
-    ],
-    "assumptions": [
-        "The raw source filename and label remain preserved separately in the existing title, relative_path, folder and metadata columns, so no new column is needed to retain them.",
-        "NULL is a distinct third answer meaning the source exposed no determination, and is never to be read as FALSE."
-    ],
-    "stop_conditions": [
-        "the governed reviewer returns REVISE",
-        "any repository guard or required check fails and passing it would require weakening or bypassing the guard",
-        "the work would require writing row data rather than structure",
-        "the correct value for the column cannot be determined from the source without inference"
-    ]
+  "schema_version": 1,
+  "work_issue": 2802,
+  "generation": 1,
+  "work_type": "structural",
+  "route": "shared-db-orchestrator",
+  "goal": "Add a nullable boolean column has_talent_likeness to dam.style_guide_file recording whether the style-guide file's source explicitly indicated talent likeness, as a tri-state where NULL means the source exposed no determination. Structure only.",
+  "base_sha": "e420cd8619f57933de5b35aa5065f7d9ea3cc9de",
+  "dispatcher": "Claude shared-db orchestrator",
+  "worker": "Claude issue2802 migration author lane",
+  "branch": "claude/issue-2802-talent-likeness",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2802-talent-likeness",
+  "allowed_paths": [
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911224952_dam_style_guide_file_has_talent_likeness.sql"
+  ],
+  "file_writes": [
+    ".agent/contract.json",
+    ".agent/completion.json",
+    "supabase/migrations/20260911224952_dam_style_guide_file_has_talent_likeness.sql"
+  ],
+  "db_reads": [
+    "table core.style_guide"
+  ],
+  "db_writes": [
+    "table dam.style_guide_file"
+  ],
+  "prohibited_actions": [
+    "backfilling or otherwise writing any row value into has_talent_likeness; this intake authorizes structure only",
+    "inferring the value from a filename, path, folder or title",
+    "declaring the column NOT NULL or giving it a default, which would destroy the third NULL state",
+    "altering or repurposing the existing raw source filename and label columns (title, relative_path, folder, metadata)",
+    "running production DDL directly instead of through the governed promotion workflow"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh"
+  ],
+  "assumptions": [
+    "The raw source filename and label remain preserved separately in the existing title, relative_path, folder and metadata columns, so no new column is needed to retain them.",
+    "NULL is a distinct third answer meaning the source exposed no determination, and is never to be read as FALSE."
+  ],
+  "stop_conditions": [
+    "the governed reviewer returns REVISE",
+    "any repository guard or required check fails and passing it would require weakening or bypassing the guard",
+    "the work would require writing row data rather than structure",
+    "the correct value for the column cannot be determined from the source without inference"
+  ]
 }
