@@ -3,7 +3,7 @@
   "work_issue": 2796,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Make the stored preview dispatch instruction name its dispatch mode, so a write route cannot silently dry-run. The producer attaches mode_sequence to the ready record AFTER both digests are taken, deliberately leaving ready_id and manifest_digest unchanged; mode_sequence is carried for a later phase and no validator refuses a manifest that omits it today. Two things are enforced. The production gate's bare test -n checks gain named REFUSED messages instead of dying with only an exit code. And the digest stored beside each preview-ready ref covers ready IDENTITY only, with mode_sequence omitted, so the 117 ready refs written before this change keep the same digest for the same ready_id and can still be re-prepared; without that, the new field would have folded into the stored digest and made every pre-change identity fail the inconsistent-data check.",
+  "goal": "Make the stored preview dispatch instruction name its dispatch mode, so a write route cannot silently dry-run. The producer attaches mode_sequence to the ready record AFTER both digests are taken, deliberately leaving ready_id and manifest_digest unchanged; mode_sequence is carried for a later phase and no validator refuses a manifest that omits it today. Two things are enforced. The production gate's bare test -n checks gain named REFUSED messages instead of dying with only an exit code. And re-preparing a preview-ready identity written before this change still converges. Generation 3 attempted that second behaviour by narrowing the STORED digest to ready identity, which was wrong and was rejected by two independent reviews: consumers re-derive sha256(canonicalJson(<stored record>)) from the record they read back (manage-migration-author-lanes.mjs:2094), so narrowing the writer repaired the 117 pre-change refs by making every NEWLY written ref unreadable and fail-closing historical terminalization. The shipped fix keeps the stored digest over the whole record and instead judges OCCUPANCY on identity, comparing both sides with mode_sequence stripped, so a pre-change ref converges without changing what any reader recomputes.",
   "base_sha": "bfdb19c916d2f481f1b740d5ce1318b065c13045",
   "dispatcher": "shared-db orchestrator (marker #2758)",
   "worker": "shared-db orchestrator, adopting the cold claude/issue-2796-preview-mode-apply lane",
@@ -56,5 +56,5 @@
     "Stop if resolving the conflict would require choosing one side's count over the other rather than re-deriving.",
     "Stop if the original lane shows signs of life on this branch."
   ],
-  "generation": 3
+  "generation": 4
 }
