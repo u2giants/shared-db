@@ -4,9 +4,9 @@
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Automatically promote one fully qualified structural migration after merged-main preview while preserving every production evidence gate and refusing non-structural or ambiguous work.",
-  "base_sha": "bf7cc98c63c425817ae98ec023f90f0d8260c98f",
+  "base_sha": "4da62786926c64fcc71e169aeae915d1958a227c",
   "dispatcher": "popcre/ai-devops issue 401 programme",
-  "worker": "shared-db orchestrator subagent (marker #2758), rebasing the codex/issue-2716-auto-promotion lane onto current main",
+  "worker": "shared-db orchestrator subagent (marker #2758), refreshing the codex/issue-2716-auto-promotion lane by merge from main 4da62786",
   "branch": "codex/issue-2716-auto-promotion",
   "worktree": "C:/repos/shared-db-worktrees/cl2736-rb2",
   "allowed_paths": [
@@ -51,5 +51,5 @@
     "Stop if exact structural admission cannot be independently derived from the source PR.",
     "Stop if any existing production evidence gate, dry-run, or serial lock would be weakened."
   ],
-  "generation": 3
+  "generation": 4
 }

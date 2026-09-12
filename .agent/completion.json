@@ -4,10 +4,12 @@
   "outcome": "ready-for-merge",
   "pr": 2736,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2716/3",
-  "contract_sha256": "22b5a9b4bdc20a4fac7139cc8a4b534436162af847885762a6d7d60ca9f8c1a9",
-  "head_sha": "5c1c99463b25f3ab89afe4ca4841996954fdd09a",
+  "contract_ref": "refs/db-contracts/2716/4",
+  "contract_sha256": "1d0e80edc35e9fd891a9df7c65cbf2e39cc551dfa618a1dc7336736dfbb73537",
+  "head_sha": "c29cdfa5ab3df82f600ae70489d76caf04f39466",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/shared-supabase-migrations.yml",
     "AGENTS.md",
     "docs/production-promotion-procedure.md",
@@ -22,17 +24,17 @@
     {
       "command": "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
       "exit_code": 0,
-      "evidence": "Ran 163 tests, OK, observed at the rebased implementation commit 5c1c9946 on base bf7cc98c."
+      "evidence": "Ran 163 tests, OK, exit 0, observed at merge commit c29cdfa5 on base 4da62786."
     },
     {
       "command": "python production-policy regression suite",
       "exit_code": 0,
-      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 68.076s, OK (skipped=8), exit 0, no failures and no errors. Counts re-measured at this head, not carried forward from generation 2."
+      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 63.249s, OK (skipped=8), exit 0. Counts re-measured at this head, not carried forward from generation 3."
     },
     {
       "command": "YAML parse and git diff --check",
       "exit_code": 0,
-      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; zero occurrences of the superseded $WORK_ISSUE lane flag."
+      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check 4da62786..HEAD reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; AST confirms one definition and one call site of enforce_automatic_risk_decision."
     }
   ],
   "assumptions_resolved": [
@@ -41,5 +43,5 @@
     "The #2727 admission interface is pinned as --resolve-admitted-issue-for-pr and --admit-issue; absence fails before dispatch."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "This generation records a REBASE of the lane onto current main bf7cc98c (PR #2736 had gone mergeStateStatus DIRTY), not a merge from main. The four implementation commits were replayed; the five evidence commits in the original series were dropped and the pair re-sealed here at generation 3, because a head-bound evidence pair cannot be carried across a rewritten history. Five conflict regions were resolved across two files. In .github/workflows/shared-supabase-migrations.yml both route blocks took main's body in full, which carries the #2796 NAME THE MISSING INPUT named-refusal block and the #2758 EXACTLY ONE EVIDENCE ROUTE block, with only this lane's authored test -n \"$WORK_ISSUE\" guard inserted; taking this branch's side wholesale would have silently regressed #2796, so it was not taken. In scripts/production_business_risk_gate.py main's ephemeral-CI routing was kept in full and this lane's v2 source-PR binding and enforce_automatic_risk_decision were re-derived on top of it, leaving exactly one definition and one call site. The duplicate --admit-issue trap fired three separate times during the replay: git placed the superseded --admit-issue \"$WORK_ISSUE\" line OUTSIDE the conflict markers so it merged clean and silently, and it was removed each time; the file ends with exactly two occurrences, both $ADMITTED_ISSUE, matching both this branch's final pre-rebase state and main. The assertion at scripts/test_production_apply_review_evidence.py:285 was restored from $WORK_ISSUE to $ADMITTED_ISSUE: that correction was authored by merge commit f62fc95f, which git rebase discards, and the restored text is byte-identical to this branch's pre-rebase line and pins a string that exists in the resolved workflow. The migration supabase/migrations/20260911212849_shared_style_group_sku_key.sql is authored by issue #2478's lane and is already byte-identical on main; this lane authors no line of it and re-derived nothing inside it. No reviewer was drawn, no merge was performed, and no database was read or written."
+  "evidence_note": "Second refresh of this lane. Main moved to 4da62786 when PR #2842 merged, returning #2736 to CONFLICTING/DIRTY. Refreshed by MERGE from main (not rebase), so history is extended rather than rewritten. git merge-tree against real main showed the only conflicting paths were .agent/contract.json and .agent/completion.json; no code file conflicted. Both were resolved wholesale to this lane's own evidence pair (main carried PR #2842 / work_issue 2843 evidence, another lane's artifact, not shared state) and are re-sealed here at contract generation 4. Verified the merged tree is byte-identical to the pre-refresh head 07913fc3 for all seven code files, and byte-identical to main 4da62786 for the three files main contributed, so the merge regressed nothing in either direction. Re-verified the duplicate --admit-issue trap that merged clean and silent three times on the previous pass: exactly two occurrences remain, both $ADMITTED_ISSUE, and AST reports exactly one definition and one call site of enforce_automatic_risk_decision. head_sha is the merge commit c29cdfa5, the implementation commit; this evidence commit sits on top of it and cannot describe itself."
 }
