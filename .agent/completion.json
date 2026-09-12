@@ -6,14 +6,15 @@
   "migration_versions": [
     "20260911222514"
   ],
-  "contract_ref": "refs/db-contracts/2744/8",
-  "contract_sha256": "270d02096c6a233c84ca3fe0258115020869174a5067243519b4b0dd44def174",
-  "head_sha": "47b33be702fd972fa793df0cd6d17dccc85f11b1",
+  "contract_ref": "refs/db-contracts/2744/9",
+  "contract_sha256": "8bae30c15125d3a8744e9273c3765514d0495605ce377e892ebb48ce535882cd",
+  "head_sha": "be9212505ec22288a7eb1c83481d4959dd03934b",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
     "scripts/production-verification-sidecars/20260911222514.json",
     "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
     "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
     "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
     "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
@@ -43,7 +44,7 @@
     {
       "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
       "exit_code": 0,
-      "evidence": "status OK across 50 sidecars. Version 20260911222514 reports markers [89] with sidecar true; the single dynamic-execution marker is the EXECUTE that replays the derived CREATE OR REPLACE FUNCTION text, reviewed as no_durable_target and hash-bound to migration_sha256 33d55ffa432b09f476e6121fb380e3d676dc287c576a2aefdc03b813744fbaff."
+      "evidence": "status OK across 50 sidecars. Version 20260911222514 reports markers [89] with sidecar true, hash-bound to migration_sha256 33d55ffa432b09f476e6121fb380e3d676dc287c576a2aefdc03b813744fbaff. The marker is now reviewed as disposition checks, bound to catalog contract dcp_narrow_asset_style_map_v1 at expected_count 1. The earlier no_durable_target declaration was wrong and the slot 2 governed review caught it: the EXECUTE rewrites the body of api.db_data_admin_scraped_properties(text,text,integer) in pg_proc, derive_targets() cannot read a do-block, and an empty check list would have landed the enforcing production run on its own THIS STEP PROVED NOTHING branch."
     },
     {
       "command": "read-only production latency probe, role authenticated, statement_timeout 8s, inside begin; ... rollback;",
@@ -64,17 +65,27 @@
       "command": "supabase/tests against an ephemeral database",
       "exit_code": 0,
       "evidence": "GREEN in CI at d8bc0a03 (job 103453979387). It FAILED at 4ad729ff on db_data_admin_scraped_properties_opa_groups.sql, which is NOT quarantined. Cause was mine and real: that file asserted the function text still contained \"page_dcp_retained_assets as not materialized\" and \"join plm.dcp_asset a on a.id=r.asset_id\", both of which this migration rewrites. The assertions were re-pointed at the narrow map rather than deleted, and are strictly stronger: they still pin the retained-asset CTE, still ban dcp_asset_context, and additionally prove the style context is sourced from plm.dcp_asset via \"select a.id,a.style_guide_id from plm.dcp_asset a\". Only pre-existing quarantined failures remain. Verified by reading the check result back, not inferred from an exit code."
+    },
+    {
+      "command": "read-only production falsifiability probe of catalog contract dcp_narrow_asset_style_map_v1, inside begin read only; ... rollback;",
+      "exit_code": 0,
+      "evidence": "Proven able to fail before being trusted. On production (qsllyeztdwjgirsysgai), where migration 20260911222514 is not yet applied, the inherited half all_licensor_property_source_coverage_v1 evaluates TRUE while the new contract evaluates FALSE, so both outcomes are reachable and the only thing separating them is the set of assertions this migration adds. The probe SQL was generated directly from CATALOG_CONTRACTS so the text tested is byte-identical to the text the gate runs. Read-only, rolled back, nothing committed, no setting changed beyond a local statement_timeout. It must flip to TRUE after apply; that flip is NOT claimed yet."
+    },
+    {
+      "command": "python -m pytest scripts/test_production_catalog_verification.py",
+      "exit_code": 0,
+      "evidence": "189 passed, 65 subtests passed. Also verified locally that catalog_contract_objects() extracts an identical object set for the new contract and the one it supersedes, so supersession within one ordered batch lands on the same objects and nothing #2579, #2576 or #2449 proved silently loses protection."
     }
   ],
   "notes": [
     "Issue #2744 remains open and claim #2791 remains held; acceptance has not yet been re-run against production after this change.",
     "The reported 'Product pipeline could not load' outage is a different function: api.pm_pipeline_page('licensed', limit 100) measured 8235 ms cold as role authenticated and shares no objects with this migration. It needs its own issue and is reported on #2744 and #2758.",
-    "Per AGENTS.md this migration requires two independent governed reviewers, not one."
+    "Per AGENTS.md this migration requires two independent governed reviewers at the exact head. Both slots must be drawn before either runs, because the first verdict locks the second. NOT yet satisfied at this head."
   ],
   "assumptions_resolved": [
     "Narrow projection is load-bearing: materializing the retained-asset CTEs alone measured 4285/4226/4656 ms with no gain, and 12x work_mem measured no gain. Only the narrow (id, style_guide_id) map moved the number.",
     "Output parity confirmed: the unfiltered default page is 1,311,298 bytes byte-identical, and the four targeted controls are byte-identical.",
-    "The dynamic-execution marker has no durable target beyond the one pre-existing function, and is hash-bound in the sidecar."
+    "The dynamic-execution marker DOES have a durable target: the rewritten body of the one pre-existing function. It is witnessed by catalog contract dcp_narrow_asset_style_map_v1, built as a strict superset of all_licensor_property_source_coverage_v1, and proven falsifiable on production before being trusted."
   ],
   "stop_conditions_hit": []
 }
