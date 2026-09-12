@@ -1,98 +1,54 @@
 {
-  "schema_version": 1,
-  "work_issue": 2727,
-  "outcome": "ready-for-merge",
-  "pr": 2738,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2727/49",
-  "contract_sha256": "2cc973ba14e74019786b70874571ddf18f2badcdeb92d86b6c18558c7472c5a0",
-  "head_sha": "50b11b5f6c1d5442a0f58249d1a1496e05d9e595",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/guarded-migration-merge.yml",
-    ".github/workflows/preview-ledger-orphan-reconciliation.yml",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-pr-object-collisions.mjs",
-    "scripts/coordination-scenarios.test.mjs",
-    "scripts/db-coordination-events.mjs",
-    "scripts/lib/work-dependencies.mjs",
-    "scripts/lib/work-dependencies.test.mjs",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs",
-    "scripts/orchestrator-flow/admission-outcome.test.mjs",
-    "scripts/orchestrator-flow/admission.mjs",
-    "scripts/orchestrator-flow/outcome-lifecycle.mjs",
-    "scripts/orchestrator-flow/reconcile.mjs",
-    "scripts/orchestrator-flow/reconcile.test.mjs",
-    "scripts/test_production_owner_decision_evidence.py",
-    "scripts/test_production_migration_guard.py"
+  "assumptions_resolved": [
+    "api.db_data_admin_scraped_properties is byte-for-byte unchanged: it is not in files_changed, and the contract test asserts it still exists and still carries its review fields.",
+    "The Property arm reuses the existing licensor authority derivation, so the two functions cannot disagree about row attribution.",
+    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are excluded; the contract test fails if any appears in the function definition.",
+    "Each capture-backed family reads one latest complete capture, so issue #2744's performance repair is untouched.",
+    "app.require_licensing_manager_access() is called before any read and is otherwise unmodified."
   ],
-  "db_reads": [],
-  "db_writes": [],
   "checks": [
     {
+      "command": "bash scripts/check-sql.sh",
+      "evidence": "Static checks passed. Guard B compared against base newest version 20260911210709; Guard B2 disclosed no live-ledger source configured.",
+      "exit_code": 0
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "evidence": "{\"status\":\"OK\",\"sidecars\":49} - version 20260911221304 requires no production verification sidecar.",
+      "exit_code": 0
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "evidence": "Migration claim verified: #2807, version 20260911221304.",
+      "exit_code": 0
+    },
+    {
       "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "git diff --check 9eb1d587 50b11b5f reports no whitespace errors."
-    },
-    {
-      "command": "node --test scripts/agent-work-contract.test.mjs",
-      "exit_code": 0,
-      "evidence": "33 tests, 33 pass, 0 fail, 0 skipped at 50b11b5f."
-    },
-    {
-      "command": "node --test scripts/repository-maintenance-authorization.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/db-coordination-events.test.mjs scripts/check-pr-object-collisions.test.mjs scripts/orchestrator-flow/*.test.mjs scripts/lib/work-dependencies.test.mjs",
-      "exit_code": 0,
-      "evidence": "739 tests, 739 pass, 0 fail, 0 skipped at 50b11b5f; the production-faithful reviewer path used 22 of the unchanged 25-request ceiling."
-    },
-    {
-      "command": "python -m unittest scripts.test_production_owner_decision_evidence",
-      "exit_code": 0,
-      "evidence": "9 tests passed at 50b11b5f, including effective production job permission coverage."
-    },
-    {
-      "command": "python -m unittest scripts.test_production_migration_guard",
-      "exit_code": 0,
-      "evidence": "242 tests passed at 50b11b5f, including effective job-level permission and guarded-operation routing coverage."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=280 at 50b11b5f."
-    },
-    {
-      "command": "node scripts/check-github-transport-conformance.mjs",
-      "exit_code": 0,
-      "evidence": "221 files scanned at 50b11b5f; every GitHub call goes through scripts/lib/github-transport.mjs."
+      "evidence": "No whitespace errors and no conflict markers reported in the diff.",
+      "exit_code": 0
     }
   ],
-  "assumptions_resolved": [
-    "No database or production operation was performed; the work is repository policy and manager code only.",
-    "The sealed be971275 review REJECT is retained in PR evidence, and all three findings were repaired before this report.",
-    "PR 2737 and its successful prose-only canary are integrated; its mutex-only command remains outside claims, reviewer assignment, shared stages, and lifecycle events.",
-    "PR 2736 remains correctly held until this resolver and admission interface reaches main.",
-    "The sealed and parallel reviews rejected unadmitted legacy dispatch, unbound objects, linkage confusion, cross-issue or unidentified replay, unsafe partial writes, metadata-only production proof, incomplete multi-target DDL, clock inversion, and admission-to-dependent-write races; every finding is fixed and covered before this report.",
-    "The operational-PR binding work (exact linked issue, reopen only after a merged linked PR, and actual structural objects matching admitted writes at admission and completion) is finished with adversarial tests; the six CI failures at 35581fa4 were stale test fixtures, not product defects.",
-    "Reviewer assignment, reviewer replacement, shared-stage acquisition, and preview preparation now revalidate admission inside their own single mutex interval; preview preparation with --admit-issue executes preparation rather than silently returning after admission.",
-    "Dependency completion is trusted only from the explicitly identified repository owner; preview marker ownership is rechecked inside the mutex; lifecycle advances require durable references; and unsupported compound commands refuse before any operation runs.",
-    "Generation 26 takeover: merged main 9b02ad48 (#2767); the only code conflict was two lane-manager hunks, resolved by keeping requireAdmissionArguments and admissionOptions inside assignWithMutexRetry with enableReviewerQueue:false. No database, preview, or production operation was performed.",
-    "The governed review REJECT at 56ca196e (preview filename-only readiness, open-ended legacy admission, truncated patches) was repaired in 21d86cab with regression tests before this report.",
-    "Current main 72c299b8 is integrated; #2780 approval carry-over, #2777 unlimited author lanes, and #2767 reviewer queue removal remain active alongside the admission lifecycle.",
-    "Every workflow acquisition caller now supplies authoritative admission and PR identity; the resolver preserves the exact same bounded pre-cutover legacy path as PR-backed acquisition, while post-cutover omissions still refuse.",
-    "Closed-issue admission filters non-owner completion noise before parsing and counting; trusted malformed, duplicate, or mismatched completion evidence still refuses without mutation.",
-    "The three admission-calling workflow surfaces have issues write and static coverage, while unrelated workflows retain their narrower permissions; standalone PR-backed admission has the same pre-cutover success and post-cutover refusal as resolver and acquisition.",
-    "Current main 3ff51ae8 is integrated; only the sealed evidence pair conflicted, and the implementation repair remained unchanged.",
-    "Preview and production-apply now have effective job-level issues write permission, while production-apply-review remains read-only; the permission regression test is part of allowed paths, file writes, and changed-file evidence.",
-    "Current main 9ea5c664 is integrated; only the sealed evidence pair conflicted, and every substantive file merged without conflict.",
-    "The existing production owner decision regression now parses inline permission comments and requires effective issues write for production-apply while retaining issues read for production-apply-review.",
-    "The shared workflow defaults to issues read; only preview and production-apply override to issues write, while validate, production-dry-run, and production-apply-review remain effectively read-only for issues.",
-    "Current main 485a0ba5 is integrated. Guarded merge and reviewer assignment now rederive structural versus deterministic repository-maintenance routing from the exact live pull request and linked issue inside the held mutex; no caller-controlled bypass exists, and ambiguous or mixed routing refuses.",
-    "The reviewer routing snapshot uses one live GraphQL request under the existing mutex, proves complete file and linked-issue pagination, and preserves the fixed 25-request budget; PR 2738 returned all 21 files and linked issue 2727 in a live read-only query.",
-    "Grok exact-head review rejected 79a4e9ef because structural guarded merge lacked a reachable admission identity, GraphQL MERGED was rejected, and copied or unknown statuses could route as maintenance; all three findings are repaired at 50b11b5f with adversarial tests.",
-    "Current main 9eb1d587 is integrated; its unrelated historical-restoration registry change merged without substantive conflict, while this task's evidence pair was resealed."
+  "contract_ref": "refs/db-contracts/2797/1",
+  "contract_sha256": "bd9cca28ae5bae161a346f00a25d5f6743af26f7ecdfd23819e5810222795b45",
+  "db_reads": [
+    "function api.db_data_admin_scraped_properties",
+    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
+    "character and style-guide source landing tables in the same approved captures"
   ],
-  "stop_conditions_hit": []
+  "db_writes": [
+    "function api.db_data_admin_scraped_source_inventory"
+  ],
+  "files_changed": [
+    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
+    "supabase/tests/db_data_admin_scraped_source_inventory.sql"
+  ],
+  "head_sha": "53c13a2ea28fafbfd68eef2d1422a5f4f7494aaf",
+  "migration_versions": [
+    "20260911221304"
+  ],
+  "outcome": "ready-for-merge",
+  "pr": 2808,
+  "schema_version": 1,
+  "stop_conditions_hit": [],
+  "work_issue": 2797
 }
