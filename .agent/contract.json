@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "work_issue": 2843,
-  "generation": 2,
+  "generation": 3,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Stop charging the structural admission gate's GitHub reads to the reviewer operation's derived 25-request budget. Admission runs in the same place, in the same order, under the same held mutex, and refuses identically; only the request accounting is suspended around it, so every migration author lane can draw a reviewer again.",
-  "base_sha": "bfdb19c916d2f481f1b740d5ce1318b065c13045",
+  "goal": "Stop charging the structural admission gate's GitHub reads to the reviewer operation's derived 25-request budget. Admission runs in the same place, in the same order, under the same held mutex, and refuses identically; only the request accounting is suspended around it, so every migration author lane can draw a reviewer again. Generation 3 additionally corrects the prose this change introduced: the old failure was a refusal raised from INSIDE the held mutex section, not a fail-fast before the mutex was taken, and the new green-path test is a revert detector rather than a production-shaped request count.",
+  "base_sha": "54e1e3c62fc5615de2297e5e12cfd397be598ae4",
   "dispatcher": "shared-db orchestrator (marker #2758)",
   "worker": "shared-db orchestrator repair lane for #2843",
   "branch": "claude/issue-2802-admission-budget",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/2842-fix",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",
@@ -29,23 +29,27 @@
   "prohibited_actions": [
     "Do not widen REVIEW_OPERATION_REQUEST_LIMIT and do not shrink REVIEW_MUTEX_SECTION_RESERVE. The constant carries an explicit instruction to re-derive from a written measurement, and issue #2075 exists to stop exactly that shortcut.",
     "Do not move the admitIssue call site out of the mutex section: the budget wrapper encloses that section, so relocating the call would also strip its requireOwnedRef mutex-ownership proof.",
-    "Do not delete, re-point or weaken any existing assertion to make a suite pass.",
-    "Do not edit docs/verification/throughput-guard-truth-audit-20260828.json; nine open pull requests contend for its global count and digest and this change adds no call site."
+    "Do not delete, re-point or weaken any existing assertion to make a suite pass. In particular the #2802 green-path test keeps every assertion it has; only its explanatory comments are corrected.",
+    "Do not edit docs/verification/throughput-guard-truth-audit-20260828.json; open pull requests contend for its global count and digest and this change adds no call site."
   ],
   "required_checks": [
     "node scripts/manage-migration-author-lanes.test.mjs",
     "node scripts/orchestrator-flow/admission-outcome.test.mjs",
     "node scripts/orchestrator-flow/coordination-audit.test.mjs",
-    "node scripts/orchestrator-flow/reviewer-allocation.test.mjs"
+    "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
+    "node scripts/check-throughput-truth-audit.mjs"
   ],
   "assumptions": [
     "The 25-request ceiling was derived in docs/verification/reviewer-assignment-api-budget-2026-08-28.md for a reviewer draw with no admission step; it predates scripts/orchestrator-flow/admission.mjs, which landed in e7bec2fe on 2026-09-11.",
     "Suspending accounting rather than relocating the call keeps admission under the same held mutex, so a closed or unadmissible issue is still refused before any reviewer is spent.",
-    "Every other admission call site (acquireAuthorLane, the guarded merge gate, preview preparation) already runs with no reviewer budget installed, so this makes the reviewer path consistent with them rather than exceptional."
+    "Every other admission call site (acquireAuthorLane, the guarded merge gate, preview preparation) already runs with no reviewer budget installed, so this makes the reviewer path consistent with them rather than exceptional.",
+    "The observed order in assignNextReviewerOperation is requireReviewWireCapacity, then acquireReviewMutex, then requirePrOperationRoute -> requireAdmission. The exhaustion message naming the mutex-release reserve is only constructed in consumeReviewWireRequest when the budget is locked and not cleaning up, a state set by acquireReviewMutex, so that refusal can only have fired with the mutex already held.",
+    "Production githubIo.getFileAt and treeFiles read through laneTreeReader -> createTreeReader in scripts/lib/github-tree.mjs, which calls runGitHubCommand from scripts/lib/github-transport.mjs. That transport never calls consumeReviewWireRequest, so blob and tree reads are not charged to the reviewer budget in production; the #2802 fixture wires them onto the budgeted executor deliberately, as a revert detector."
   ],
   "stop_conditions": [
     "Stop if the fix cannot be made without widening the derived ceiling or touching the mutex reserve.",
     "Stop if suspending accounting would let admission run outside the mutex or change which issues it refuses.",
-    "Stop if a new green-path test cannot be shown to fail before the change."
+    "Stop if a new green-path test cannot be shown to fail before the change.",
+    "Stop and report if any required check fails; do not weaken a guard to make it pass."
   ]
 }

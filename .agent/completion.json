@@ -4,9 +4,9 @@
   "outcome": "ready-for-merge",
   "pr": 2842,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2843/2",
-  "contract_sha256": "586909b812497d641aa7ce14edb7fa8548127f84f2432ed46c1f7f9f2195dd36",
-  "head_sha": "8925a072bb218c77074168a1c479434db547c6a9",
+  "contract_ref": "refs/db-contracts/2843/3",
+  "contract_sha256": "3571b59fe6da82e130422343b4455c05ad59b1516d4636f9894683cd6505f32b",
+  "head_sha": "79c2f9616dbca4cc07ae76f463c8cb0c343a2a6c",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -20,33 +20,40 @@
     {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 536, suites 0, pass 536, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
+      "evidence": "tests 536, suites 0, pass 536, fail 0, cancelled 0, skipped 0, todo 0 at 79c2f9616dbca4cc07ae76f463c8cb0c343a2a6c (invoked directly, output redirected to a file, never piped; exit code read from the command itself)"
     },
     {
       "command": "node scripts/orchestrator-flow/admission-outcome.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 57, suites 0, pass 57, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
+      "evidence": "tests 57, suites 0, pass 57, fail 0, cancelled 0, skipped 0, todo 0 at 79c2f9616dbca4cc07ae76f463c8cb0c343a2a6c (invoked directly, output redirected to a file, never piped; exit code read from the command itself)"
     },
     {
       "command": "node scripts/orchestrator-flow/coordination-audit.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 1, suites 0, pass 1, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
+      "evidence": "tests 1, suites 0, pass 1, fail 0, cancelled 0, skipped 0, todo 0 at 79c2f9616dbca4cc07ae76f463c8cb0c343a2a6c (invoked directly, output redirected to a file, never piped; exit code read from the command itself)"
     },
     {
       "command": "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 6, suites 0, pass 6, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
+      "evidence": "tests 6, suites 0, pass 6, fail 0, cancelled 0, skipped 0, todo 0 at 79c2f9616dbca4cc07ae76f463c8cb0c343a2a6c (invoked directly, output redirected to a file, never piped; exit code read from the command itself)"
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "reported 'truth audit OK: call_sites=280' at 79c2f9616dbca4cc07ae76f463c8cb0c343a2a6c (invoked directly, output redirected to a file, never piped; exit code read from the command itself). This check is now declared in the contract's required_checks, resolving the generation-2 inconsistency where it was cited in assumptions_resolved but absent from checks[]."
     }
   ],
   "assumptions_resolved": [
     "Admission's GitHub reads were billed to the reviewer operation's derived 25-request budget; suspending accounting around the admission call in place keeps requireOwnedRef mutex-ownership proof intact, which moving the call site would have destroyed.",
-    "REVIEW_OPERATION_REQUEST_LIMIT is unchanged and REVIEW_MUTEX_SECTION_RESERVE is unchanged; the defect was the accounting boundary, not the size of the ceiling.",
-    "Admission still runs, still refuses identically, and still runs before the reviewer draw.",
-    "docs/verification/throughput-guard-truth-audit-20260828.json was not edited; nine open pull requests contend for its global count and digest.",
-    "The four required checks were re-run at the exact implementation head 8925a072bb218c77074168a1c479434db547c6a9, each invoked directly and unpiped, with the counts above read from the run output rather than recalled from an earlier head.",
-    "The branch was refreshed from origin/main at 54e1e3c62fc5615de2297e5e12cfd397be598ae4 by merge, not rebase, so no published commit was rewritten and no force push was needed. The only conflicts were .agent/contract.json and .agent/completion.json, where main carried a foreign lane's pair for issue #2690 on branch codex/coldlion-master-landing; this lane's side was taken wholesale for both single-slot files.",
-    "files_changed is the literal Git diff from origin/main at 54e1e3c6 to the implementation head 8925a072; it includes the two .agent paths because main's copies belong to the foreign #2690 lane and therefore differ.",
-    "node scripts/check-throughput-truth-audit.mjs was run after the merge and reported 'truth audit OK: call_sites=280' with exit code 0; docs/verification/throughput-guard-truth-audit-20260828.json was neither conflicted nor edited, and its count and digest were re-derived by the checker rather than hand-picked."
+    "REVIEW_OPERATION_REQUEST_LIMIT is unchanged at 25 and REVIEW_MUTEX_SECTION_RESERVE is unchanged at 15; the defect was the accounting boundary, not the size of the ceiling. The green-path test still asserts both constants.",
+    "Admission still runs, still refuses identically, and still runs under the same held mutex before the reviewer draw.",
+    "CORRECTED IN THIS GENERATION (reviewer finding 1): the prose this change added described the old failure as the entry gate refusing BEFORE the mutex was taken. That was wrong and contradicted the same paragraphs' statement that admission runs under the held mutex. The observed order in assignNextReviewerOperation is requireReviewWireCapacity, then acquireReviewMutex, then requirePrOperationRoute -> requireAdmission. The quoted exhaustion message naming the mutex-release reserve is only constructed in consumeReviewWireRequest when the budget is locked and not cleaning up, and acquireReviewMutex is what sets locked and cleanupReserve, so the refusal can only have fired with the mutex already held. Both the doc callout and the comment above withoutReviewRequestBudget now say so.",
+    "CORRECTED IN THIS GENERATION (reviewer finding 2): the #2802 green-path test's comments claimed a production-shaped request count. They no longer do. Production githubIo.getFileAt and treeFiles read through laneTreeReader -> createTreeReader in scripts/lib/github-tree.mjs, which calls runGitHubCommand from scripts/lib/github-transport.mjs; that shared transport never calls consumeReviewWireRequest, so blob and tree reads are not charged to the reviewer budget in production. Production admission charges getPr, getPrFiles via ghPaginated, closingIssuesForPr, getIssue and the comment/outcome-history reads. The fixture wires three admission reads onto the budgeted executor deliberately; the test is a revert detector, not a measurement. No assertion was weakened, removed or re-pointed: only comments changed in the test file.",
+    "docs/verification/throughput-guard-truth-audit-20260828.json was not edited; open pull requests contend for its global count and digest and this change adds no call site.",
+    "All five required checks were run at the exact implementation head 79c2f9616dbca4cc07ae76f463c8cb0c343a2a6c, each invoked directly with output redirected to a file rather than piped, so every exit code came from the check itself and not from a downstream pager.",
+    "contract.base_sha is now 54e1e3c62fc5615de2297e5e12cfd397be598ae4, the PR's actual base as reported by gh pr view 2842 --json baseRefOid, replacing generation 2's older bfdb19c9 anchor. The contract is immutable per published ref, so this was published as a NEW generation, refs/db-contracts/2843/3, and read back from GitHub at c1aff849c28cf76e4cf5323e57860bbfdea4d60f rather than edited in place.",
+    "files_changed is the literal Git diff from the PR base 54e1e3c6 to the implementation head 79c2f961; it includes the two .agent paths because main's copies belong to a foreign lane and therefore differ.",
+    "The evidence pair sits in exactly one commit after the implementation commit, so the diff from head_sha to the PR head is exactly .agent/completion.json and .agent/contract.json, as scripts/agent-work-contract-git-evidence.mjs requires."
   ],
   "stop_conditions_hit": []
 }
