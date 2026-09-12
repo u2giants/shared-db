@@ -1,6 +1,7 @@
 {
   "schema_version": 1,
   "work_issue": 2843,
+  "generation": 2,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
   "goal": "Stop charging the structural admission gate's GitHub reads to the reviewer operation's derived 25-request budget. Admission runs in the same place, in the same order, under the same held mutex, and refuses identically; only the request accounting is suspended around it, so every migration author lane can draw a reviewer again.",
@@ -8,7 +9,7 @@
   "dispatcher": "shared-db orchestrator (marker #2758)",
   "worker": "shared-db orchestrator repair lane for #2843",
   "branch": "claude/issue-2802-admission-budget",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2802-admission-budget",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
   "allowed_paths": [
     ".agent/contract.json",
     ".agent/completion.json",

@@ -4,10 +4,12 @@
   "outcome": "ready-for-merge",
   "pr": 2842,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2843/1",
-  "contract_sha256": "41f448e13bda0f323015d0881b249b0b90f995169c84308cfd6d6bba674ad186",
-  "head_sha": "8e189f42a09528e62bc47a9d8944fd13ea2bbe03",
+  "contract_ref": "refs/db-contracts/2843/2",
+  "contract_sha256": "586909b812497d641aa7ce14edb7fa8548127f84f2432ed46c1f7f9f2195dd36",
+  "head_sha": "8925a072bb218c77074168a1c479434db547c6a9",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs"
@@ -18,22 +20,22 @@
     {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 536, pass 536, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
+      "evidence": "tests 536, suites 0, pass 536, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
     },
     {
       "command": "node scripts/orchestrator-flow/admission-outcome.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 57, pass 57, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
+      "evidence": "tests 57, suites 0, pass 57, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
     },
     {
       "command": "node scripts/orchestrator-flow/coordination-audit.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 1, pass 1, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
+      "evidence": "tests 1, suites 0, pass 1, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
     },
     {
       "command": "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 6, pass 6, fail 0, skipped 0, todo 0 at f4a81d9e9ac0282efb348651a4efa9d898f80f80 (invoked via node --test)"
+      "evidence": "tests 6, suites 0, pass 6, fail 0, cancelled 0, skipped 0, todo 0 at 8925a072bb218c77074168a1c479434db547c6a9 (run directly, unpiped, exit code read from $LASTEXITCODE)"
     }
   ],
   "assumptions_resolved": [
@@ -41,8 +43,10 @@
     "REVIEW_OPERATION_REQUEST_LIMIT is unchanged and REVIEW_MUTEX_SECTION_RESERVE is unchanged; the defect was the accounting boundary, not the size of the ceiling.",
     "Admission still runs, still refuses identically, and still runs before the reviewer draw.",
     "docs/verification/throughput-guard-truth-audit-20260828.json was not edited; nine open pull requests contend for its global count and digest.",
-    "The four required checks were re-run at the exact head cdfd3091 rather than recalled from the earlier head 8dd6a8f7.",
-    "The .agent evidence pair is excluded from files_changed because the work contract check derives that list from the pull request diff with the evidence pair removed."
+    "The four required checks were re-run at the exact implementation head 8925a072bb218c77074168a1c479434db547c6a9, each invoked directly and unpiped, with the counts above read from the run output rather than recalled from an earlier head.",
+    "The branch was refreshed from origin/main at 54e1e3c62fc5615de2297e5e12cfd397be598ae4 by merge, not rebase, so no published commit was rewritten and no force push was needed. The only conflicts were .agent/contract.json and .agent/completion.json, where main carried a foreign lane's pair for issue #2690 on branch codex/coldlion-master-landing; this lane's side was taken wholesale for both single-slot files.",
+    "files_changed is the literal Git diff from origin/main at 54e1e3c6 to the implementation head 8925a072; it includes the two .agent paths because main's copies belong to the foreign #2690 lane and therefore differ.",
+    "node scripts/check-throughput-truth-audit.mjs was run after the merge and reported 'truth audit OK: call_sites=280' with exit code 0; docs/verification/throughput-guard-truth-audit-20260828.json was neither conflicted nor edited, and its count and digest were re-derived by the checker rather than hand-picked."
   ],
   "stop_conditions_hit": []
 }
