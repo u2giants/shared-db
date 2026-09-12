@@ -1,15 +1,15 @@
 {
   "schema_version": 1,
   "work_issue": 2744,
-  "generation": 10,
+  "generation": 11,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Return the unfiltered Scraped Properties / DCP identity listing to comfortably under eight seconds for role authenticated, without changing its output, its authorization gate, or any timeout, role or memory setting.",
-  "base_sha": "26d9345b3a0ee015d8d02c0705002dd10b7f3f4e",
+  "base_sha": "c7465a7598fb2191e2df549ec63ba255360c484a",
   "dispatcher": "Claude orchestrator marker 2758",
   "worker": "Claude issue 2744 migration-author lane",
   "branch": "claude/issue-2744-unfiltered-perf",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/recursing-poincare-85d3a9",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/wt2818-refresh",
   "allowed_paths": [
     ".agent/completion.json",
     ".agent/contract.json",
