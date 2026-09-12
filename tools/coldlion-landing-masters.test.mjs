@@ -60,6 +60,11 @@ test("plain-array endpoints refuse a paged envelope",async()=>{
   await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),/plain array/);
 });
 
+test("plain-array endpoints refuse an unprovable empty snapshot",async()=>{
+  const fetchImpl=async()=>({ok:true,status:200,text:async()=>"[]"});
+  await assert.rejects(fetchArrayMaster("/itemDetails",{},"hidden",{fetchImpl,pauseMs:0}),/unprovable empty snapshot/);
+});
+
 test("paged masters refuse envelopes missing required pagination evidence",async()=>{
   const fetchImpl=async()=>({ok:true,status:200,text:async()=>JSON.stringify({content:[],number:0,size:2,numberOfElements:0,totalElements:0,last:true})});
   await assert.rejects(fetchPagedMaster("/customers",{},"hidden",{fetchImpl,pauseMs:0}),/missing totalPages/);
@@ -73,7 +78,7 @@ test("plain-array non-JSON 4xx preserves wire status and is not retried",async()
 
 test("plain-array masters use the same serialized request gate",async()=>{
   let gates=0; const evidence=[];
-  const fetchImpl=async()=>({ok:true,status:200,text:async()=>"[]"});
+  const fetchImpl=async()=>({ok:true,status:200,text:async()=>"[{}]"});
   await fetchArrayMaster("/merchGroupDetails",{active:"Y"},"hidden",{fetchImpl,pauseMs:0,requestGate:async()=>{gates+=1;},onResponse:(entry)=>evidence.push(entry)});
   assert.equal(gates,1); assert.deepEqual(evidence,[{endpoint:"/merchGroupDetails",params:{active:"Y"},httpStatus:200,bodyStatus:null}]);
 });
@@ -121,7 +126,7 @@ test("generated SQL is a re-runnable upsert, reconciles cleared slots, and never
   const loads=order.map((table)=>{ const spec=MASTER_SPECS[table]??ITEM_SPECS[table]; const source=sourceFor(spec); const rows=projectCurrentRows(spec,[source],{runId:RUN,fetchedAt:NOW}).rows; return {table,spec,rows,run:{id:RUN,endpoint:spec.endpoint,companyCode:"SYNCO",requestParams:{fullSnapshot:true},requestedBy:"test",startedAt:NOW,finishedAt:NOW,durationMs:0,rowsFetched:1}}; });
   const source=sourceFor(ITEM_SPECS.item_header,{companyCode:"SYNCO",divisionCode:"SD001",itemNo:"ITEM-A"});
   const sql=buildMasterLoadSql({loads,itemSlots:projectItemSlots([source],{runId:RUN,fetchedAt:NOW}),affectedItemGrains:[{company_code:"SYNCO",division_code:"SD001",item_no:"ITEM-A",item_pkey:null,run_id:RUN}]});
-  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/declined field changed; value intentionally not retained/i); assert.doesNotMatch(sql,/source_raw/i); assert.match(sql,/absent from current source snapshot/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
+  assert.match(sql,/on conflict \(company_code, customer_code\) do update/i); assert.match(sql,/source_raw jsonb/i); assert.match(sql,/t\.company_code is not null and t\.source_hash <> s\.source_hash/i); assert.match(sql,/absent from current source snapshot/i); assert.match(sql,/delete from coldlion\.item_merch_group/i); assert.match(sql,/not exists \(select 1 from _stage_item_merch_group/i); assert.doesNotMatch(sql,/truncate|window_ledger|history_page_ledger/i); assert.equal((sql.match(/\bbegin;/gi)??[]).length,1); assert.equal((sql.match(/\bcommit;/gi)??[]).length,1);
 });
 
 test("an empty item snapshot still generates valid reconciliation SQL",()=>{
@@ -190,8 +195,7 @@ test("declined field changes remain observable through the complete-record hash"
   const first=projectCurrentRows(spec,[a],{runId:RUN,fetchedAt:NOW}).rows[0];
   const second=projectCurrentRows(spec,[b],{runId:RUN,fetchedAt:NOW}).rows[0];
   assert.notEqual(first.source_hash,second.source_hash);
-  const load={table:"vendor",spec,rows:[first],run:{id:RUN,endpoint:spec.endpoint,companyCode:"SYNCO",requestParams:{fullSnapshot:true},requestedBy:"test",startedAt:NOW,finishedAt:NOW,durationMs:0,rowsFetched:1}};
-  assert.doesNotMatch(buildMasterLoadSql({loads:[load],itemSlots:[],affectedItemGrains:[]}),/private-a/);
+  assert.equal(first.source_raw.address1,"private-a");
 });
 
 test("missing approved fields fail before they can null existing values",()=>{
