@@ -1,61 +1,47 @@
 {
   "schema_version": 1,
-  "work_issue": 2843,
+  "work_issue": 2716,
   "outcome": "ready-for-merge",
-  "pr": 2842,
+  "pr": 2736,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2843/5",
-  "contract_sha256": "4826f4337b3f4220c28aecd62b9fc8170b76c1e3122f5ff1808aae5f7ebc0c47",
-  "head_sha": "f108113aa0730340d6ba60af53ec344dd55802ba",
+  "contract_ref": "refs/db-contracts/2716/4",
+  "contract_sha256": "1d0e80edc35e9fd891a9df7c65cbf2e39cc551dfa618a1dc7336736dfbb73537",
+  "head_sha": "c29cdfa5ab3df82f600ae70489d76caf04f39466",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "docs/production-promotion-procedure.md",
+    "scripts/production_apply_review_evidence.py",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_apply_review_evidence.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node scripts/manage-migration-author-lanes.test.mjs",
+      "command": "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
       "exit_code": 0,
-      "evidence": "tests 536, suites 0, pass 536, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself). This is the suite that carries both sides of the merge: the #2802 admission-budget tests and the #2796 mode_sequence tests from main all pass together."
+      "evidence": "Ran 163 tests, OK, exit 0, observed at merge commit c29cdfa5 on base 4da62786."
     },
     {
-      "command": "node scripts/orchestrator-flow/admission-outcome.test.mjs",
+      "command": "python production-policy regression suite",
       "exit_code": 0,
-      "evidence": "tests 57, suites 0, pass 57, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
+      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 63.249s, OK (skipped=8), exit 0. Counts re-measured at this head, not carried forward from generation 3."
     },
     {
-      "command": "node scripts/orchestrator-flow/coordination-audit.test.mjs",
+      "command": "YAML parse and git diff --check",
       "exit_code": 0,
-      "evidence": "tests 1, suites 0, pass 1, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
-    },
-    {
-      "command": "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
-      "exit_code": 0,
-      "evidence": "tests 6, suites 0, pass 6, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "reported truth audit OK: call_sites=282 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself). The count moved from 280 to 282 because the merge brought across the regenerated docs/verification/throughput-guard-truth-audit-20260828.json from main together with the new call sites from main; this lane did not edit that file and adds no call site of its own."
+      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check 4da62786..HEAD reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; AST confirms one definition and one call site of enforce_automatic_risk_decision."
     }
   ],
   "assumptions_resolved": [
-    "Admission GitHub reads were billed to the reviewer operation derived 25-request budget; suspending accounting around the admission call in place keeps the requireOwnedRef mutex-ownership proof intact, which moving the call site would have destroyed.",
-    "REVIEW_OPERATION_REQUEST_LIMIT is unchanged at 25 and REVIEW_MUTEX_SECTION_RESERVE is unchanged at 15; the defect was the accounting boundary, not the size of the ceiling. The green-path test still asserts both constants, and both were re-verified in the merged tree.",
-    "Admission still runs, still refuses identically, and still runs under the same held mutex before the reviewer draw.",
-    "The generation-3 corrections stand unchanged: the old failure was a refusal raised from inside the held mutex section, not a fail-fast before the mutex was taken, and the #2802 green-path test is a revert detector rather than a production-shaped request count.",
-    "REFRESH: the guarded merge refused this pull request because origin/main bf7cc98c (the squash merge of #2825) and this branch both changed scripts/manage-migration-author-lanes.mjs and scripts/manage-migration-author-lanes.test.mjs. Resolved by MERGING origin/main into the branch, never by rebasing, because the approval carry-forward in this repository covers a merge that extends history and is voided by a rewrite.",
-    "REFRESH: the two sides are textually disjoint and both are kept in full. Git auto-merged both script files with no conflict. The #2796 content from main is present in the merged tree (the MODE_SEQUENCE import and the mode_sequence field on deriveLivePreviewCandidate, plus its two test assertions) and the #2802 content from this branch is present (withoutReviewRequestBudget and the requirePrOperationRoute and requireAdmission wrappers, plus its two tests). Neither side was taken wholesale and neither side behaviour was altered.",
-    "REFRESH: the only merge conflicts were .agent/completion.json and .agent/contract.json, the evidence of this lane against the copies of a foreign lane on main. They were resolved to the PR base content inside the implementation commit, so the implementation diff contains no hand-authored .agent change, and the pair is re-sealed in the single commit that follows it.",
-    "RE-SEAL: a NEW contract generation was published rather than editing an immutable one. refs/db-contracts/2843/5 (sha256 4826f4337b3f4220c28aecd62b9fc8170b76c1e3122f5ff1808aae5f7ebc0c47) anchors base_sha at bf7cc98c63c425817ae98ec023f90f0d8260c98f, the actual PR base reported by gh pr view 2842 --json baseRefOid and the value the agent work contract workflow passes to the evidence gate as github.event.pull_request.base.sha. Generation 4 was anchored at the pre-refresh base 54e1e3c6 and had to widen allowed_paths to cover files that the wider diff swept in from main; at the correct anchor that widening is unnecessary and is withdrawn, so allowed_paths and file_writes are back to exactly the five paths this lane owns.",
-    "head_sha is f108113aa0730340d6ba60af53ec344dd55802ba, the merge commit, which is the IMPLEMENTATION commit for this refresh; the evidence commit that follows it cannot describe itself.",
-    "files_changed is the literal Git diff from the real PR base bf7cc98c to the implementation head f108113a, verified with git diff --name-only. It contains .agent/completion.json and .agent/contract.json because main carries a foreign lane's copies of those two files, so this branch's copies differ from the base and Git reports them; both paths are declared in allowed_paths and file_writes. The evidence gate separately requires the diff from the implementation head to the PR head to be exactly those two metadata files, which it is.",
-    "All five required checks were re-run at the merged implementation head f108113a, each invoked directly with output redirected to a file rather than piped, so every exit code came from the check itself and not from a downstream pager. No guard, test, assertion or check was weakened, bypassed, quarantined or deleted to make anything pass.",
-    "docs/verification/throughput-guard-truth-audit-20260828.json was not edited by hand; the regenerated copy from main arrived through the merge."
+    "Live issue and pull-request inventory found no existing owner or duplicate implementation for #2716.",
+    "Owner authority activates only this exact automatic shared-db workflow path; no preview or production database write occurred.",
+    "The #2727 admission interface is pinned as --resolve-admitted-issue-for-pr and --admit-issue; absence fails before dispatch."
   ],
-  "stop_conditions_hit": []
+  "stop_conditions_hit": [],
+  "evidence_note": "Second refresh of this lane. Main moved to 4da62786 when PR #2842 merged, returning #2736 to CONFLICTING/DIRTY. Refreshed by MERGE from main (not rebase), so history is extended rather than rewritten. git merge-tree against real main showed the only conflicting paths were .agent/contract.json and .agent/completion.json; no code file conflicted. Both were resolved wholesale to this lane's own evidence pair (main carried PR #2842 / work_issue 2843 evidence, another lane's artifact, not shared state) and are re-sealed here at contract generation 4. Verified the merged tree is byte-identical to the pre-refresh head 07913fc3 for all seven code files, and byte-identical to main 4da62786 for the three files main contributed, so the merge regressed nothing in either direction. Re-verified the duplicate --admit-issue trap that merged clean and silent three times on the previous pass: exactly two occurrences remain, both $ADMITTED_ISSUE, and AST reports exactly one definition and one call site of enforce_automatic_risk_decision. head_sha is the merge commit c29cdfa5, the implementation commit; this evidence commit sits on top of it and cannot describe itself."
 }

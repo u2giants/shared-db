@@ -1,60 +1,55 @@
 {
   "schema_version": 1,
-  "work_issue": 2843,
-  "generation": 5,
+  "work_issue": 2716,
   "work_type": "repo-maintenance",
   "route": "repo-maintenance",
-  "goal": "Stop charging the structural admission gate GitHub reads to the reviewer operation derived 25-request budget. Admission runs in the same place, in the same order, under the same held mutex, and refuses identically; only the request accounting is suspended around it, so every migration author lane can draw a reviewer again. Generation 3 corrected the prose this change introduced: the old failure was a refusal raised from INSIDE the held mutex section, not a fail-fast before the mutex was taken, and the new green-path test is a revert detector rather than a production-shaped request count. Generation 5 changes no behaviour at all: the branch was refreshed by MERGING origin/main bf7cc98c (the squash merge of #2825) because main and this branch both touched scripts/manage-migration-author-lanes.mjs and its test suite, so the guarded merge refused to proceed without an update from main. The two changes are disjoint and both are kept in full. This generation re-anchors base_sha to bf7cc98c, the actual current PR base, which is what the evidence gate compares against; because the merge makes that base the merge-base, the files from main are no longer part of this pull request diff and allowed_paths needs no widening.",
-  "base_sha": "bf7cc98c63c425817ae98ec023f90f0d8260c98f",
-  "dispatcher": "shared-db orchestrator (marker #2758)",
-  "worker": "shared-db orchestrator repair lane for #2843",
-  "branch": "claude/issue-2802-admission-budget",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/wt2842merge",
+  "goal": "Automatically promote one fully qualified structural migration after merged-main preview while preserving every production evidence gate and refusing non-structural or ambiguous work.",
+  "base_sha": "4da62786926c64fcc71e169aeae915d1958a227c",
+  "dispatcher": "popcre/ai-devops issue 401 programme",
+  "worker": "shared-db orchestrator subagent (marker #2758), refreshing the codex/issue-2716-auto-promotion lane by merge from main 4da62786",
+  "branch": "codex/issue-2716-auto-promotion",
+  "worktree": "C:/repos/shared-db-worktrees/cl2736-rb2",
   "allowed_paths": [
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "docs/production-promotion-procedure.md",
+    "scripts/production_apply_review_evidence.py",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_apply_review_evidence.py",
+    "scripts/test_production_business_risk_gate.py",
     ".agent/contract.json",
-    ".agent/completion.json",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    ".agent/completion.json"
   ],
   "file_writes": [
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    ".github/workflows/shared-supabase-migrations.yml",
+    "AGENTS.md",
+    "docs/production-promotion-procedure.md",
+    "scripts/production_apply_review_evidence.py",
+    "scripts/production_business_risk_gate.py",
+    "scripts/test_production_apply_review_evidence.py",
+    "scripts/test_production_business_risk_gate.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": [
-    "Do not widen REVIEW_OPERATION_REQUEST_LIMIT and do not shrink REVIEW_MUTEX_SECTION_RESERVE. The constant carries an explicit instruction to re-derive from a written measurement, and issue #2075 exists to stop exactly that shortcut.",
-    "Do not move the admitIssue call site out of the mutex section: the budget wrapper encloses that section, so relocating the call would also strip its requireOwnedRef mutex-ownership proof.",
-    "Do not delete, re-point or weaken any existing assertion to make a suite pass. In particular the #2802 green-path test keeps every assertion it has; only its explanatory comments were corrected.",
-    "Do not edit docs/verification/throughput-guard-truth-audit-20260828.json by hand. The regenerated copy from main arrived through the merge and is not part of this pull request diff against its current base; this lane neither authored nor edited it and adds no call site of its own.",
-    "Do not resolve the refresh by rebasing. The approval carry-forward in this repository covers a merge, which extends history, and is voided by a rebase, which rewrites it."
+    "Do not apply migrations or mutate preview or production databases.",
+    "Do not bypass immutable review, preview evidence, dry-run, target proof, or serial locking.",
+    "Do not admit documentation, application code or data, CI, reviewer tooling, workflows, or repository maintenance as structural work."
   ],
   "required_checks": [
-    "node scripts/manage-migration-author-lanes.test.mjs",
-    "node scripts/orchestrator-flow/admission-outcome.test.mjs",
-    "node scripts/orchestrator-flow/coordination-audit.test.mjs",
-    "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
-    "node scripts/check-throughput-truth-audit.mjs"
+    "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
+    "python production-policy regression suite",
+    "YAML parse and git diff --check"
   ],
   "assumptions": [
-    "The 25-request ceiling was derived in docs/verification/reviewer-assignment-api-budget-2026-08-28.md for a reviewer draw with no admission step; it predates scripts/orchestrator-flow/admission.mjs, which landed in e7bec2fe on 2026-09-11.",
-    "Suspending accounting rather than relocating the call keeps admission under the same held mutex, so a closed or unadmissible issue is still refused before any reviewer is spent.",
-    "Every other admission call site (acquireAuthorLane, the guarded merge gate, preview preparation) already runs with no reviewer budget installed, so this makes the reviewer path consistent with them rather than exceptional.",
-    "The observed order in assignNextReviewerOperation is requireReviewWireCapacity, then acquireReviewMutex, then requirePrOperationRoute then requireAdmission. The exhaustion message naming the mutex-release reserve is only constructed in consumeReviewWireRequest when the budget is locked and not cleaning up, a state set by acquireReviewMutex, so that refusal can only have fired with the mutex already held.",
-    "Production githubIo.getFileAt and treeFiles read through laneTreeReader then createTreeReader in scripts/lib/github-tree.mjs, which calls runGitHubCommand from scripts/lib/github-transport.mjs. That transport never calls consumeReviewWireRequest, so blob and tree reads are not charged to the reviewer budget in production; the #2802 fixture wires them onto the budgeted executor deliberately, as a revert detector.",
-    "GENERATION 5: the #2796 change on main and the #2802 change on this branch are textually disjoint inside the two shared files. Main touches the import list and deriveLivePreviewCandidate, adding the MODE_SEQUENCE import and the mode_sequence field on the stored preview instruction; this branch touches withoutReviewRequestBudget and the requirePrOperationRoute and requireAdmission wrappers. Git auto-merged both with no conflict, and both sides are verified present in the merged tree, so keeping both required no hand reconciliation of either side logic.",
-    "GENERATION 5: base_sha is bf7cc98c, taken from gh pr view 2842 --json baseRefOid after the refresh. The agent work contract workflow passes github.event.pull_request.base.sha to the evidence gate, and because this branch MERGED that commit it is also the merge-base, so the pull request diff is only this lane own work. Generation 4 was anchored at the pre-refresh base 54e1e3c6 and therefore had to widen allowed_paths to cover files from main that the wider diff swept in; at the correct anchor that widening is unnecessary and is withdrawn.",
-    "GENERATION 5: .agent/completion.json and .agent/contract.json legitimately appear in files_changed. At the implementation commit they carry the PR base content while main carries a foreign lane copy of the same two files, so they differ from the base and Git reports them. They are named in allowed_paths, and the evidence gate separately requires the diff after the implementation head to be exactly those two files."
+    "The issue 2727 admission resolver lands before any automatic promotion can qualify; until then this workflow fails closed before dispatch.",
+    "The existing activated production-risk policy remains valid and independently re-proved.",
+    "This change authorizes only the existing shared-db workflow, not manual production commands or other infrastructure mutations."
   ],
   "stop_conditions": [
-    "Stop if the fix cannot be made without widening the derived ceiling or touching the mutex reserve.",
-    "Stop if suspending accounting would let admission run outside the mutex or change which issues it refuses.",
-    "Stop if a new green-path test cannot be shown to fail before the change.",
-    "Stop and report if any required check fails; do not weaken a guard to make it pass.",
-    "Stop if reconciling the merge would require changing either side behaviour rather than keeping both."
-  ]
+    "Stop before any database write in this session.",
+    "Stop if exact structural admission cannot be independently derived from the source PR.",
+    "Stop if any existing production evidence gate, dry-run, or serial lock would be weakened."
+  ],
+  "generation": 4
 }
