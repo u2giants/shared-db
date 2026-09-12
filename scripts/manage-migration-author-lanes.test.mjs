@@ -809,7 +809,7 @@ test('complete assignment stays inside the real wire-attempt budget',()=>{
   })
   const wire=(n=1)=>{for(let i=0;i<n;i++)runGitHubCommand(['api','fixture'],{executor:()=>{attempts++;return '{}'}})}
   io.getRateLimit=()=>{wire(2);return {remaining:5000,limit:5000,reset:1787943986,graphRemaining:5000,graphLimit:5000,graphReset:1787943986}}
-  io.readReviewerOperationRoute=()=>{wire();return {pr:{state:'open',head:{sha:'a'.repeat(40)}},files:[{filename:'scripts/reviewer-tool.mjs',status:'changed'}],linkedIssues:[{number:1767,state:'open',createdAt:'2026-09-11T17:00:00Z',body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance','change_type: reviewer-tooling','priority: 5','depends_on:','objects:','```'].join('\n')}]}}
+  io.readReviewerOperationRoute=()=>{wire();return {pr:{state:'open',head:{sha:'a'.repeat(40)}},files:[{filename:'scripts/reviewer-tool.mjs',status:'modified'}],linkedIssues:[{number:1767,state:'open',createdAt:'2026-09-11T17:00:00Z',body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance','change_type: reviewer-tooling','priority: 5','depends_on:','objects:','```'].join('\n')}]}}
   io.readActiveReviewLeases=()=>{wire();const snapshot=new Map(active);for(const [ref,sha] of io.refs)if(ref.startsWith(REVIEW_ACTIVE_REF_PREFIX))snapshot.set(ref,{sha,commit:rawGetCommit(sha)});return snapshot}
   io.readReviewStates=()=>{wire();return states}
   io.readReviewRefs=(refs)=>{wire();return new Map(refs.map((ref)=>[ref,io.refs.get(ref)??null]))}
@@ -2745,13 +2745,20 @@ test('guarded merge rederives deterministic repository maintenance inside its mu
   assert.equal([...io.refs.keys()].some((ref)=>ref.startsWith('refs/db-claims/')),false);assert.equal(io.refs.has(EXCLUSIVE_REFS.preview),false)
 })
 
-test('guarded merge cannot route migration or unknown inventory as repository maintenance',()=>{
+test('guarded merge derives and admits its one live linked structural issue',()=>{
+  const {io,headSha:head}=admittedReviewIo()
+  io.getPr=(number)=>({number:Number(number),state:'open',merged_at:null,head:{sha:head,ref:'codex/x'},base:{sha:'b'.repeat(40)}})
+  io.mainSha=()=> 'b'.repeat(40)
+  io.openClaims=()=>[{number:99,body:claimBody({version:'20260911120000',writes:['table core.example'],reads:[],owner:'author',branch:'codex/x',worktree:'C:/w/x',expiresAt:new Date('2026-09-13T00:00:00Z')})}]
+  const result=acquireExclusive('merge',{owner:'tooling',pr:7,headSha:head,admissionOptions:{pr:7}},io)
+  assert.ok(result.ownerSha);assert.ok(io.refs.has(EXCLUSIVE_REFS.merge));assert.equal(io.refs.has(MUTEX_REF),false)
+})
+
+test('guarded merge cannot route unknown inventory as repository maintenance',()=>{
   const io=memoryIo(),head='a'.repeat(40);io.enforceAdmission=true
   io.getPr=()=>({number:7,state:'open',head:{sha:head,ref:'codex/tooling'},base:{sha:'main'}})
   io.closingIssuesForPr=()=>[{number:41}]
   io.getIssue=()=>({number:41,state:'open',createdAt:'2026-09-11T17:00:00Z',body:['```db-work-scope','status: ready','work_type: repo-maintenance','route: repo-maintenance','service_class: maintenance','change_type: workflow','priority: 5','depends_on:','objects:','```'].join('\n')})
-  io.getPrFiles=()=>[{filename:'supabase/migrations/20260911120000_x.sql',status:'added'}]
-  assert.throws(()=>acquireExclusive('merge',{owner:'tooling',pr:7,headSha:head,admissionOptions:{pr:7}},io),/requires --admit-issue 41/)
   io.getPrFiles=()=>[]
   assert.throws(()=>acquireExclusive('merge',{owner:'tooling',pr:7,headSha:head,admissionOptions:{pr:7}},io),/empty or unreadable/)
   assert.equal(io.refs.has(EXCLUSIVE_REFS.merge),false);assert.equal(io.refs.has(MUTEX_REF),false)

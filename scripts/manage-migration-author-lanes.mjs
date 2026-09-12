@@ -5588,7 +5588,7 @@ export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issu
   if (!Number.isInteger(Number(pr)) || Number(pr) < 1) throw new LaneError('operation routing requires a pull request number')
   if(snapshot!==null&&(!snapshot||typeof snapshot!=='object'||!Array.isArray(snapshot.files)||!Array.isArray(snapshot.linkedIssues)))throw new LaneError('operation routing snapshot is unreadable')
   const livePr=snapshot?.pr??io.getPr(Number(pr))
-  const prState=String(livePr?.state??'open').toLowerCase(),eligibleState=prState==='open'||(allowMerged&&prState==='closed'&&Boolean(livePr?.merged_at))
+  const prState=String(livePr?.state??'open').toLowerCase(),eligibleState=prState==='open'||(allowMerged&&['closed','merged'].includes(prState)&&Boolean(livePr?.merged_at))
   if(!livePr||!eligibleState||!/^[0-9a-f]{40}$/i.test(String(livePr?.head?.sha??'')))throw new LaneError(`pull request #${pr} live head is unreadable or not eligible`)
   if(headSha!==null&&String(livePr.head.sha).toLowerCase()!==String(headSha).toLowerCase())throw new LaneError(`pull request #${pr} exact head changed before operation routing`)
   const files=snapshot?.files??io.getPrFiles(Number(pr))
@@ -5607,7 +5607,12 @@ export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issu
   const linkedNumber=Number(linked[0]?.number)
   if(!Number.isInteger(linkedNumber)||linkedNumber<1)throw new LaneError('pull request linked work issue identity is unreadable')
   if(issue!==null&&Number(issue)!==linkedNumber)throw new LaneError(`operation issue #${issue} does not match pull request #${pr} linked issue #${linkedNumber}`)
-  const structural=files.some((file)=>file.previous_filename!==undefined||String(file.status).toLowerCase()==='renamed')||paths.some((value)=>MIGRATION_PATH.test(String(value).replace(/\\/g,'/')))
+  // GraphQL exposes no prior filename. Only the statuses whose current path is
+  // a complete description can enter repository-maintenance routing; copies,
+  // renames, CHANGED/UNCHANGED, and future enum values stay structural so the
+  // DDL admission check either proves them or refuses them.
+  const completeCurrentPathStatuses=new Set(['added','modified','removed','deleted'])
+  const structural=files.some((file)=>file.previous_filename!==undefined||!completeCurrentPathStatuses.has(String(file.status).toLowerCase()))||paths.some((value)=>MIGRATION_PATH.test(String(value).replace(/\\/g,'/')))
   if(structural)return {route:'structural',issue:linkedNumber,pr:Number(pr),headSha:livePr.head.sha}
 
   const work=snapshot?.linkedIssues?.[0]??io.getIssue(linkedNumber),scope=parseQueueScope(work?.body??'')
@@ -5622,14 +5627,15 @@ export function derivePrOperationRoute(pr, io = githubIo, { headSha = null, issu
   return {route:'repo-maintenance',issue:linkedNumber,pr:Number(pr),headSha:livePr.head.sha,changeType,legacy}
 }
 
-function requirePrOperationRoute(options,io,{pr,headSha,issue,mutexOwner,allowMerged=false,reviewSnapshot=false}){
+function requirePrOperationRoute(options,io,{pr,headSha,issue,mutexOwner,allowMerged=false,reviewSnapshot=false,resolveStructuralIssue=false}){
   if(io.enforceAdmission!==true)return null
   if(mutexOwner)requireOwnedRef(MUTEX_REF,mutexOwner,io)
   const snapshot=reviewSnapshot&&typeof io.readReviewerOperationRoute==='function'?io.readReviewerOperationRoute(pr):null
   const route=derivePrOperationRoute(pr,io,{headSha,issue,allowMerged,snapshot})
   if(route.route==='repo-maintenance')return route
-  if(!Number.isInteger(Number(options?.admitIssue))||Number(options.admitIssue)!==route.issue)throw new LaneError(`structural pull request #${pr} requires --admit-issue ${route.issue}`)
-  requireAdmission(options,io,{pr,mutexOwner})
+  const admissionOptions=resolveStructuralIssue?{...options,admitIssue:route.issue}:options
+  if(!Number.isInteger(Number(admissionOptions?.admitIssue))||Number(admissionOptions.admitIssue)!==route.issue)throw new LaneError(`structural pull request #${pr} requires --admit-issue ${route.issue}`)
+  requireAdmission(admissionOptions,io,{pr,mutexOwner})
   return route
 }
 
@@ -6432,7 +6438,7 @@ export function acquireExclusive(kind, metadata, io = githubIo) {
   acquireMutex(ownerSha, io)
   try {
     if(metadata.admissionOptions){
-      if(kind==='merge')requirePrOperationRoute(metadata.admissionOptions,io,{pr:metadata.pr,headSha:metadata.headSha,issue:metadata.admissionOptions.issue??null,mutexOwner:ownerSha})
+      if(kind==='merge')requirePrOperationRoute(metadata.admissionOptions,io,{pr:metadata.pr,headSha:metadata.headSha,issue:metadata.admissionOptions.issue??null,mutexOwner:ownerSha,resolveStructuralIssue:true})
       else requireAdmission(metadata.admissionOptions,io,{pr:metadata.pr??null,mutexOwner:ownerSha})
     }
     if (kind === 'production') {

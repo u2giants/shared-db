@@ -79,12 +79,19 @@ test('shared operation routing fails closed for structural, mixed, and unknown i
   const base={getPr:()=>({state:'open',head:{sha:head}}),closingIssuesForPr:()=>[{number:41}],getIssue:()=>work}
   assert.equal(derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'supabase/migrations/20260911120000_x.sql',status:'added'}]},{headSha:head,issue:41}).route,'structural')
   assert.equal(derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',previous_filename:'supabase/migrations/20260911120000_x.sql',status:'renamed'}]},{headSha:head,issue:41}).route,'structural')
+  for(const status of ['copied','changed','unchanged','future-status'])assert.equal(derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status}]},{headSha:head,issue:41}).route,'structural',status)
   assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[]},{headSha:head,issue:41}),/empty or unreadable/)
   assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs'}]},{headSha:head,issue:41}),/unreadable entry/)
   assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}],closingIssuesForPr:()=>[{number:41},{number:42}]},{headSha:head,issue:41}),/exactly one work issue/)
   assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}]},{headSha:'b'.repeat(40),issue:41}),/exact head changed/)
   assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}],getIssue:()=>issue(scopeBody())},{headSha:head,issue:41}),/not deterministic ready repository-maintenance/)
   for(const change of ['migration','application-row','source-data','security-settings'])assert.throws(()=>derivePrOperationRoute(7,{...base,getPrFiles:()=>[{filename:'scripts/x.mjs',status:'modified'}],getIssue:()=>repoScopeBody({change})},{headSha:head,issue:41}),/recognized repository-maintenance/,change)
+})
+
+test('review routing accepts GitHub GraphQL MERGED only with merged evidence',()=>{
+  const head='a'.repeat(40),work=repoScopeBody(),files=[{filename:'scripts/x.mjs',status:'modified'}],linkedIssues=[work]
+  assert.equal(derivePrOperationRoute(7,{}, {headSha:head,issue:41,allowMerged:true,snapshot:{pr:{state:'merged',merged_at:'2026-09-11T18:00:00Z',head:{sha:head}},files,linkedIssues}}).route,'repo-maintenance')
+  assert.throws(()=>derivePrOperationRoute(7,{}, {headSha:head,issue:41,allowMerged:true,snapshot:{pr:{state:'merged',merged_at:null,head:{sha:head}},files,linkedIssues}}),/not eligible/)
 })
 
 test('only bounded pre-cutover repository-maintenance may omit change_type',()=>{
