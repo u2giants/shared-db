@@ -254,6 +254,82 @@ PREVIEW_ONLY_HISTORICAL_RESTORATIONS = {
     "20260824150630",
 }
 
+# ---------------------------------------------------------------------------
+# MIGRATION TARGET SCOPE (issue #2820)
+#
+# THE GAP THIS CLOSES. Until now nothing in this repository recorded WHICH
+# DATABASE a merged migration is for. Every merged file was implicitly "for the
+# shared Supabase projects", so a migration authored against a DIFFERENT
+# database appeared in the ledger-drift report as ordinary promotable work: it
+# is absent from the production ledger for a legitimate reason, but the checker
+# could not tell that apart from a genuinely overdue migration. Acting on one
+# would apply schema to a database it was never reviewed against.
+#
+# THIS IS A TARGET REGISTRY, NOT A SKIP LIST. Each entry names the migration's
+# ACTUAL target. Exclusion is DERIVED by comparing that target with the target
+# being checked -- it is not asserted per version. A future migration aimed at
+# `preview` would therefore still be reported as outstanding on `preview` and
+# excluded only on `production`. A bare "skip this version" list would leave the
+# next cross-project migration in exactly the same trap.
+#
+# NEVER SILENT. `classify_pending_version` returns the kind `foreign-target`
+# with a reason naming the real target and the issue, and the drift checker
+# prints those entries in their own clearly-labelled section. A reader must be
+# able to SEE the claim and challenge it; an invisible exclusion is its own
+# hazard.
+#
+# ADDING AN ENTRY IS A SCOPE CLAIM. Record it only when the migration's own
+# header and its issue both say so, and cite the issue here.
+# ---------------------------------------------------------------------------
+
+# Every target name the repository knows. A registry entry naming anything else
+# is a typo or an invented database, and fails closed rather than silently
+# excluding a version from a target that does not exist.
+KNOWN_MIGRATION_TARGETS = frozenset({"production", "preview", "designflow-nonprod"})
+
+FOREIGN_TARGET_MIGRATIONS = {
+    "20260909121403": {
+        "target": "designflow-nonprod",
+        "project": (
+            "the DesignFlow consolidated non-production Supabase project "
+            "(reached by the DB_*_SANDBOX settings in GCP project "
+            "lithe-breaker-323913) -- neither shared production nor the "
+            "shared-db-schema-rehearsal preview branch"
+        ),
+        "issue": "#2403",
+        "note": (
+            "Creates the empty, isolated `hts_rag_split` schema transcribed from the "
+            "read-only structure dump of the live DesignFlow non-production database, "
+            "as the second physical target for the designflow-backend "
+            "HTS_RAG_DB_ENABLED pilot. It was never reviewed against shared production."
+        ),
+    },
+}
+
+for _version, _entry in FOREIGN_TARGET_MIGRATIONS.items():
+    # ValueError, not GuardError: this runs at IMPORT time and GuardError is
+    # defined further down the module. A bad entry must fail loudly on import.
+    if _entry["target"] not in KNOWN_MIGRATION_TARGETS:
+        raise ValueError(
+            f"migration {_version} declares unknown target {_entry['target']!r}; "
+            f"known targets: {', '.join(sorted(KNOWN_MIGRATION_TARGETS))}"
+        )
+del _version, _entry
+
+
+def foreign_target_entry(version: str, target: str) -> dict[str, str] | None:
+    """The scope record for ``version`` when it is NOT meant for ``target``.
+
+    Returns ``None`` when the version has no recorded target (the normal case --
+    an unregistered migration is treated as in scope, so forgetting to register
+    something can only ever OVER-report, never hide work) or when its recorded
+    target IS the one being checked.
+    """
+    entry = FOREIGN_TARGET_MIGRATIONS.get(version)
+    if entry is None or entry["target"] == target:
+        return None
+    return entry
+
 # The four unblocked above. This is ENFORCED, not documentary: `parse_allowlist`
 # requires an allowlist to contain either ALL FOUR or NONE of them. AGENTS.md
 # section 6.8 forbids unblocking them "one at a time, a few at a time, or just
@@ -974,6 +1050,23 @@ def parse_allowlist(raw: str, remote: set[str] | frozenset[str] = frozenset()) -
             "preview-only historical restoration may never enter a production allowlist: "
             + ", ".join(preview_only)
         )
+    # Issue #2820: a migration whose recorded target is a DIFFERENT database may
+    # never enter a production allowlist by any route. Enforced in the same
+    # single choke point every promotion subcommand must call, so no subcommand
+    # can route around it. Derived from the registry, never a version literal.
+    foreign = sorted(
+        value for value in values if foreign_target_entry(value, "production") is not None
+    )
+    if foreign:
+        details = "; ".join(
+            f"{value} targets {FOREIGN_TARGET_MIGRATIONS[value]['project']} "
+            f"(issue {FOREIGN_TARGET_MIGRATIONS[value]['issue']})"
+            for value in foreign
+        )
+        raise GuardError(
+            "migration authored for another database may never enter a production allowlist: "
+            + details
+        )
     if values != sorted(values):
         raise GuardError("production allowlist must be in migration order")
     # AGENTS.md section 6.8: all four or none. Enforced here, in the one function
@@ -1167,12 +1260,23 @@ def classify_pending_version(
     applied_versions: set[str] | frozenset[str],
     repo: Path,
     migration_paths: dict[str, Path] | None = None,
+    target: str = "production",
 ) -> dict[str, str]:
     """Return the one authoritative pending-status classification.
 
     Keep every registry behind this function. Callers in other languages must
     consume its answer rather than importing the sets and rebuilding policy.
+
+    ``target`` is the database being CHECKED (see ``KNOWN_MIGRATION_TARGETS``).
+    It defaults to ``production`` so every existing caller keeps the strictest
+    behaviour. It exists so scope can be DERIVED from a comparison against each
+    migration's recorded target rather than asserted per version.
     """
+    if target not in KNOWN_MIGRATION_TARGETS:
+        raise GuardError(
+            f"unknown migration target {target!r}; known targets: "
+            f"{', '.join(sorted(KNOWN_MIGRATION_TARGETS))}"
+        )
     applied = set(applied_versions)
     if version in RETIRED_VERSIONS:
         reason = RETIRED_VERSION_REASONS.get(
@@ -1192,6 +1296,26 @@ def classify_pending_version(
         return {
             "kind": "retired",
             "reason": "production_migration_guard.HARD_BLOCKED: the general production lane refuses this version outright. Do not apply it.",
+        }
+    # SCOPE IS CHECKED AFTER the two never-apply branches on purpose. "Retired"
+    # and "hard-blocked" are the stricter statements -- they mean "never apply
+    # this anywhere" -- and a strictly-true sentence must win over "not for this
+    # database". Both outcomes are excluded from actionable drift either way, so
+    # only the sentence a human reads differs. Scope is checked BEFORE the hold,
+    # batch and base-absent branches below, because those all reason about THIS
+    # database's ledger and none of them is meaningful for a migration whose
+    # target is a different database entirely.
+    foreign = foreign_target_entry(version, target)
+    if foreign is not None:
+        return {
+            "kind": "foreign-target",
+            "reason": (
+                f"NOT IN SCOPE FOR {target.upper()}. This migration targets {foreign['project']}. "
+                f"{foreign['note']} Recorded under issue {foreign['issue']}. Its absence from this "
+                "database's ledger is the intended end state, not overdue work: do not promote it "
+                "here. If this scope claim is wrong, correct FOREIGN_TARGET_MIGRATIONS in "
+                "scripts/production_migration_guard.py rather than promoting it by hand."
+            ),
         }
     if version in HELD_VERSIONS or version in FR_SHIP_SET_HOLD or version in FR_REMOVAL_VERSIONS:
         suffix = (

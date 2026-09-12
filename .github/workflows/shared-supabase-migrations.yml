@@ -100,6 +100,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 concurrency:
   # Pull requests get a PER-REF group so PR validations run in parallel and can never
@@ -173,6 +174,12 @@ jobs:
       # one-iteration loop, because the defect was in this workflow's shell.
       - name: Test the post-merge rehearsal map parsing
         run: node --test scripts/check-workflow-rehearsal-map-parse.test.mjs
+      # Runs the historical lane's OWN mode guard under a real shell, in both
+      # directions. A stored instruction silent about `mode` dispatches at the
+      # input's dry-run default and, on the historical lane, runs neither the
+      # recovery proof nor a bounded dry-run -- green, and empty (#2796).
+      - name: Test the preview mode guard
+        run: node --test scripts/check-workflow-preview-mode-guard.test.mjs
       # ISSUE #731: this step used to NAME its Python test files one by one. That is
       # exactly how scripts/test_post_batch_app_verification.py (141 tests, merged in
       # PR #719) came to sit in the repository for a whole session without executing
@@ -279,7 +286,7 @@ jobs:
     timeout-minutes: 90
     permissions:
       contents: write
-      issues: read
+      issues: write # admission may reopen the validated merge-closed source issue
       pull-requests: read
     env:
       # CONFIGURED, not hard-coded. The preview branch is rebuilt from time to time and its
@@ -458,8 +465,22 @@ jobs:
           ORIGINAL_RUN_MAP: ${{ inputs.historical_preview_original_run_map }}
           MAIN_SHA: ${{ inputs.commit_sha }}
           PREVIEW_ALLOWLIST: ${{ inputs.preview_allowlist }}
+          MODE: ${{ inputs.mode }}
         run: |
           set -euo pipefail
+          # >>> BEGIN historical-mode-guard (covered by scripts/check-workflow-preview-mode-guard.test.mjs)
+          # HISTORICAL RECOVERY IS APPLY-ONLY (#2796, AGENTS.md 4: "historical
+          # dry-run proves nothing"). At mode=dry-run this lane runs NEITHER the
+          # recovery proof ("Recover proof for migrations already present on
+          # preview" is gated on mode == 'apply') NOR "Bounded dry-run" (which
+          # excludes historical inputs) -- it simply succeeds having proved
+          # nothing at all. That is the same success-shaped emptiness the merged
+          # lane shipped, so it is refused here rather than reported green.
+          if [ "${MODE:-}" != "apply" ]; then
+            echo "REFUSED: historical preview recovery is apply-only; mode='${MODE:-}' would run neither the recovery proof nor a bounded dry-run and would still report success. Dispatch the stored instruction with mode=apply." >&2
+            exit 1
+          fi
+          # <<< END historical-mode-guard
           # The merged map is the post-merge APPLY lane, exactly as the single
           # merged PR is; the historical inputs are a no-write recovery.
           if [ -n "${MERGED_SOURCE_MAP:-}" ]; then
@@ -557,10 +578,13 @@ jobs:
             fi
           fi
           test -n "$CLAIM_PR"; test -n "$CLAIM_HEAD_SHA"
+          ADMITTED_ISSUE="$(node scripts/manage-migration-author-lanes.mjs --resolve-admitted-issue-for-pr "$CLAIM_PR" | jq -r .issue)"
+          test "$ADMITTED_ISSUE" -gt 0
           LOCK_KIND=preview
           if [ -n "$HISTORICAL_SOURCE_PR" ]; then LOCK_KIND=preview-recovery; fi
           if [ -n "${MERGED_SOURCE_PR:-}" ]; then LOCK_KIND=preview-rehearsal; fi
           node scripts/manage-migration-author-lanes.mjs --acquire-$LOCK_KIND \
+            --admit-issue "$ADMITTED_ISSUE" \
             --owner "github-actions:${GITHUB_RUN_ID}" --pr "$CLAIM_PR" --head-sha "$CLAIM_HEAD_SHA" \
             "${LANE_VERSIONS[@]}" \
             > "$RUNNER_TEMP/preview-lock.json"
@@ -1289,8 +1313,18 @@ jobs:
             fi
             ROUTE_ARGS=(--ephemeral-check-run-id "$EPHEMERAL_CHECK_RUN_ID")
           else
-            test -n "$PREVIEW_RUN_ID"
-            test -n "$PREVIEW_ARTIFACT_DIGEST"
+            # NAME THE MISSING INPUT (#2796). These were bare `test` calls, so a
+            # production apply reached for without preview evidence died with
+            # "Process completed with exit code 1." and nothing else -- which is
+            # precisely how a silently dry-run rehearsal presents downstream.
+            if [ -z "$PREVIEW_RUN_ID" ]; then
+              echo "REFUSED: production apply requires preview_run_id -- the run ID of the preview APPLY that rehearsed these exact bytes. A preview run that dry-ran produced no apply evidence and cannot promote. Supply it, or use ephemeral_check_run_id." >&2
+              exit 1
+            fi
+            if [ -z "$PREVIEW_ARTIFACT_DIGEST" ]; then
+              echo "REFUSED: production apply requires preview_artifact_digest -- the digest of that preview apply run's preview-migration-apply-<sha> artifact." >&2
+              exit 1
+            fi
             if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
               echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
               exit 1
@@ -1331,7 +1365,7 @@ jobs:
       contents: write
       actions: read
       checks: read
-      issues: read
+      issues: write # admission may reopen the validated merge-closed source issue
       pull-requests: read
       statuses: write
     # Keep the production environment binding. Environment policy is managed in
@@ -1356,9 +1390,14 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_SHA: ${{ inputs.commit_sha }}
+          SOURCE_PR: ${{ inputs.source_pr }}
         run: |
           set -euo pipefail
+          test -n "$SOURCE_PR"
+          ADMITTED_ISSUE="$(node scripts/manage-migration-author-lanes.mjs --resolve-admitted-issue-for-pr "$SOURCE_PR" | jq -r .issue)"
+          test "$ADMITTED_ISSUE" -gt 0
           node scripts/manage-migration-author-lanes.mjs --acquire-production \
+            --admit-issue "$ADMITTED_ISSUE" --pr "$SOURCE_PR" \
             --owner "github-actions:${GITHUB_RUN_ID}" --head-sha "$REQUESTED_SHA" \
             > "$RUNNER_TEMP/production-lock.json"
           echo "owner_sha=$(jq -r .ownerSha "$RUNNER_TEMP/production-lock.json")" >> "$GITHUB_OUTPUT"
@@ -1459,8 +1498,18 @@ jobs:
             fi
             ROUTE_ARGS=(--ephemeral-check-run-id "$EPHEMERAL_CHECK_RUN_ID")
           else
-            test -n "$PREVIEW_RUN_ID"
-            test -n "$PREVIEW_ARTIFACT_DIGEST"
+            # NAME THE MISSING INPUT (#2796). These were bare `test` calls, so a
+            # production apply reached for without preview evidence died with
+            # "Process completed with exit code 1." and nothing else -- which is
+            # precisely how a silently dry-run rehearsal presents downstream.
+            if [ -z "$PREVIEW_RUN_ID" ]; then
+              echo "REFUSED: production apply requires preview_run_id -- the run ID of the preview APPLY that rehearsed these exact bytes. A preview run that dry-ran produced no apply evidence and cannot promote. Supply it, or use ephemeral_check_run_id." >&2
+              exit 1
+            fi
+            if [ -z "$PREVIEW_ARTIFACT_DIGEST" ]; then
+              echo "REFUSED: production apply requires preview_artifact_digest -- the digest of that preview apply run's preview-migration-apply-<sha> artifact." >&2
+              exit 1
+            fi
             if [ -z "${PREVIEW_PROJECT_REF// /}" ]; then
               echo "REFUSED: repository variable PREVIEW_PROJECT_REF is not set. The production gate cannot check which preview database the rehearsal ran against, and an unset ref is never treated as a default." >&2
               exit 1
