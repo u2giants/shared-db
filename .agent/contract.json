@@ -1,60 +1,50 @@
 {
+  "schema_version": 1,
+  "work_issue": 2843,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Stop charging the structural admission gate's GitHub reads to the reviewer operation's derived 25-request budget. Admission runs in the same place, in the same order, under the same held mutex, and refuses identically; only the request accounting is suspended around it, so every migration author lane can draw a reviewer again.",
+  "base_sha": "bfdb19c916d2f481f1b740d5ce1318b065c13045",
+  "dispatcher": "shared-db orchestrator (marker #2758)",
+  "worker": "shared-db orchestrator repair lane for #2843",
+  "branch": "claude/issue-2802-admission-budget",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/issue-2802-admission-budget",
   "allowed_paths": [
-    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
-    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
-  "assumptions": [
-    "api.db_data_admin_scraped_properties stays byte-for-byte unchanged and remains the Property Matching contract for its current dependents.",
-    "The licensor authority derivation reused by the Property arm is the exact derivation api.db_data_admin_scraped_properties already applies, so the two functions cannot disagree about who a row belongs to.",
-    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are non-authoritative inferred evidence and are therefore excluded from a source-declared inventory.",
-    "Every capture-backed family reads exactly one latest complete capture, the same contract the existing RPC uses, so nothing here touches issue #2744's performance repair.",
-    "app.require_licensing_manager_access() is the existing Licensing Manager gate and is unchanged."
-  ],
-  "base_sha": "5ec8aef002471e8520f45aef290101e0424e69d7",
-  "branch": "claude/issue-2797-scraped-source-inventory",
-  "db_reads": [
-    "function api.db_data_admin_scraped_properties",
-    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
-    "character and style-guide source landing tables in the same approved captures"
-  ],
-  "db_writes": [
-    "function api.db_data_admin_scraped_source_inventory"
-  ],
-  "dispatcher": "claude shared-db orchestrator marker issue 2758",
   "file_writes": [
-    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
-    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
     ".agent/contract.json",
-    ".agent/completion.json"
+    ".agent/completion.json",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
-  "generation": 1,
-  "goal": "Add one read-only, Licensing-manager-gated, paged inventory RPC api.db_data_admin_scraped_source_inventory over the raw scraped source vocabularies for Properties, Characters and Style Guides, leaving api.db_data_admin_scraped_properties unchanged.",
+  "db_reads": [],
+  "db_writes": [],
   "prohibited_actions": [
-    "No change of any kind to api.db_data_admin_scraped_properties",
-    "No matching controls, review reasons, evidence basis, review guidance, contract status or authority-derived presentation buckets in the payload",
-    "No deduplication across scrape routes and no identity inferred from names",
-    "No inferred candidate table presented as a source-declared fact",
-    "No direct production DDL; production only through the governed workflow",
-    "No object or path outside claim 2807 and this contract"
+    "Do not widen REVIEW_OPERATION_REQUEST_LIMIT and do not shrink REVIEW_MUTEX_SECTION_RESERVE. The constant carries an explicit instruction to re-derive from a written measurement, and issue #2075 exists to stop exactly that shortcut.",
+    "Do not move the admitIssue call site out of the mutex section: the budget wrapper encloses that section, so relocating the call would also strip its requireOwnedRef mutex-ownership proof.",
+    "Do not delete, re-point or weaken any existing assertion to make a suite pass.",
+    "Do not edit docs/verification/throughput-guard-truth-audit-20260828.json; nine open pull requests contend for its global count and digest and this change adds no call site."
   ],
   "required_checks": [
-    "bash scripts/check-sql.sh",
-    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-    "node scripts/check-migration-pr-lease.mjs",
-    "git diff --check"
+    "node scripts/manage-migration-author-lanes.test.mjs",
+    "node scripts/orchestrator-flow/admission-outcome.test.mjs",
+    "node scripts/orchestrator-flow/coordination-audit.test.mjs",
+    "node scripts/orchestrator-flow/reviewer-allocation.test.mjs"
   ],
-  "route": "shared-db-orchestrator",
-  "schema_version": 1,
+  "assumptions": [
+    "The 25-request ceiling was derived in docs/verification/reviewer-assignment-api-budget-2026-08-28.md for a reviewer draw with no admission step; it predates scripts/orchestrator-flow/admission.mjs, which landed in e7bec2fe on 2026-09-11.",
+    "Suspending accounting rather than relocating the call keeps admission under the same held mutex, so a closed or unadmissible issue is still refused before any reviewer is spent.",
+    "Every other admission call site (acquireAuthorLane, the guarded merge gate, preview preparation) already runs with no reviewer budget installed, so this makes the reviewer path consistent with them rather than exceptional."
+  ],
   "stop_conditions": [
-    "Claim 2807, reserved version 20260911221304, or the coordinator route changes",
-    "A competing change touches api.db_data_admin_scraped_properties or any claimed object or contracted path",
-    "Issue #2744's performance repair would be weakened or its live claim collided with",
-    "Implementation requires an object or path outside claim 2807 or this contract"
-  ],
-  "work_issue": 2797,
-  "work_type": "structural",
-  "worker": "claude issue2797-author holding claim 2807",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/agent-aa4966ba29d9ccc16"
+    "Stop if the fix cannot be made without widening the derived ceiling or touching the mutex reserve.",
+    "Stop if suspending accounting would let admission run outside the mutex or change which issues it refuses.",
+    "Stop if a new green-path test cannot be shown to fail before the change."
+  ]
 }
