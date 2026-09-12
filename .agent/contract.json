@@ -15,7 +15,11 @@
   "db_reads": [],
   "db_writes": [],
   "prohibited_actions": ["No schema change or migration.", "No database write from this authoring task; GitHub Actions is the sole real-database path.", "No real ColdLion payload, customer, vendor, salesperson, factory, item, or licensed value in this public repository.", "No truncation of existing item tables and no history window ledger use for masters.", "No unfiltered seasons request and no EP001 landing row."],
-  "required_checks": ["node --test tools/coldlion-landing-masters.test.mjs", "node --test tools/*.test.mjs", "npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml"],
+  "required_checks": [
+    "node --test tools/coldlion-landing-masters.test.mjs",
+    "node --test tools/*.test.mjs",
+    "npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml"
+  ],
   "assumptions": ["Applied landing migrations and settled owner field decisions are authoritative for projections.", "The live API documentation captured on 2026-09-09 is authoritative for request parameters.", "A company-only itemDetails call is a complete plain-array snapshot, as established by the protected read-only probe.", "Migration 20260909194231 is applied in production and makes mg_category part of merchandise-group detail identity."],
   "stop_conditions": ["Stop if any requested field needs another schema change.", "Stop if offline proof would require committing a real ColdLion value.", "Stop before any local or authoring-session database write."]
 }

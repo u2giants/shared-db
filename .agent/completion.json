@@ -1,16 +1,21 @@
 {
   "schema_version": 1,
   "work_issue": 2690,
-  "outcome": "in-progress",
-  "pr": null,
+  "outcome": "ready-for-merge",
+  "pr": 2840,
   "migration_versions": [],
-  "contract_ref": null,
-  "contract_sha256": null,
-  "head_sha": null,
-  "files_changed": [],
+  "contract_ref": "refs/db-contracts/2690/10",
+  "contract_sha256": "db9122c694952231f723dda128feed0dbbf374b89cce29d7df1a6a22f26f4a59",
+  "head_sha": "ccc76db500dbb9b5f2fa7af4601324e5e36d2cfd",
+  "files_changed": [".agent/completion.json", ".agent/contract.json", ".github/workflows/coldlion-landing-sync.yml", "docs/verification/coldlion-api-parameters-20260909T022136Z.json", "docs/verification/coldlion-merch-group-details-probe-20260909T0224Z.json", "tools/coldlion-landing-masters.test.mjs", "tools/coldlion-landing/README.md", "tools/coldlion-landing/lib/db.mjs", "tools/coldlion-landing/lib/load-masters.mjs", "tools/coldlion-landing/lib/master-http.mjs", "tools/coldlion-landing/lib/master-specs.mjs", "tools/coldlion-landing/lib/project-masters.mjs", "tools/coldlion-landing/sync-masters.mjs"],
   "db_reads": [],
   "db_writes": [],
-  "checks": [],
-  "assumptions_resolved": [],
+  "checks": [
+    {"command":"node --test tools/coldlion-landing-masters.test.mjs","exit_code":0,"evidence":"37 focused synthetic tests passed; 0 failed, skipped, or todo."},
+    {"command":"node --test tools/*.test.mjs","exit_code":0,"evidence":"875 offline tests passed; 0 failed, skipped, or todo."},
+    {"command":"npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml","exit_code":0,"evidence":"Workflow YAML parsed successfully."},
+    {"command":"protected read-only ColdLion collection","exit_code":0,"evidence":"All requested endpoints completed and itemDetails company identity equalled the per-division union; repository evidence retains no payload values."}
+  ],
+  "assumptions_resolved": ["Issues #2621 and #2622 are live in production per owner confirmation.", "Owner ruling #906 permanently accepts the documented ColdLion HTTP transport risk.", "No database write occurred in the authoring session; production access remains workflow-only."],
   "stop_conditions_hit": []
 }
