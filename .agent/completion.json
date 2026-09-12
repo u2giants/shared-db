@@ -1,42 +1,51 @@
 {
   "schema_version": 1,
-  "work_issue": 2809,
+  "work_issue": 2847,
   "outcome": "ready-for-merge",
-  "pr": 2810,
+  "pr": 2849,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2809/4",
-  "contract_sha256": "0dd3e6769f48f080f9b318bc95a2ab44e0ca38410a3ef01929109a53db05b80a",
-  "head_sha": "a091c63c319067ececd2a5a74d8a69f667a885ac",
+  "contract_ref": "refs/db-contracts/2847/4",
+  "contract_sha256": "eaafb38dfd07c2577f3883c0eb6108892d045876b926d2da7b66621b1a9b8bd7",
+  "head_sha": "89aba51616549a81765c27cc2cf1ee22175992b3",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py"
+    "scripts/db-coordination-events.mjs",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/orchestrator-flow/admission-outcome.test.mjs",
+    "scripts/orchestrator-flow/outcome-lifecycle.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_migration_guard",
+      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "Ran 250 tests in 29.412s, OK, 0 failures, on the tree merged with main c7465a75 (implementation commit a091c63c). The suite grew 243 to 250 purely from cases main added while this branch waited; this lane's own two cases are still present and still pass, namely the archive-a-table case that now passes preflight and the negative control proving the OLD name after a move is still refused with 'DROPPED (or renamed away) by 20260102000000'. The capability was repaired, not removed."
+      "evidence": "tests 536, pass 536, fail 0, skipped 0, todo 0 at implementation commit 89aba516. Unchanged from the baseline required for this lane."
+    },
+    {
+      "command": "node --test scripts/orchestrator-flow/admission-outcome.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 68, pass 68, fail 0, skipped 0, todo 0 at implementation commit 89aba516, up from the 61 baseline by the 7 red-first cases this revision adds. Red-first was proven, not asserted: with scripts/orchestrator-flow/outcome-lifecycle.mjs and scripts/db-coordination-events.mjs reverted to the reviewed head b8f9ce7b and the new tests left in place, the suite ran 68 tests with 61 pass and 7 fail, so each new test fails without its fix and passes with it."
+    },
+    {
+      "command": "node --test scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/orchestrator-flow/coordination-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 49, pass 49, fail 0, skipped 0, todo 0 at implementation commit 89aba516. Unchanged from the baseline required for this lane, so restricting supersedes to the repair event type broke no existing coordination behaviour."
     },
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=283 on the tree merged with main c7465a75. Resolved as a union, not a side pick: main's 282 reviewed dispositions were kept verbatim and exactly ONE entry was re-added, the only one this branch itself authored, verified against the true merge base 485a0ba5 rather than against main. Its site moved from scripts/production_migration_guard.py:1969 to :2093 because main edited the same file, so the line number was recomputed from the merged tree; line_sha256 50799e3f is unchanged because the line content is unchanged. call_site_count and call_site_sha256 were regenerated from the checker's own discover() inventory, giving 283 and 014700ca17452ac219a56c6e7f7c044426eacd1262a30a9888a3baf61c6cab78. The checker reports 0 missing dispositions and 0 stale sites. schema_version remains 3. Main c7465a75 touched none of this lane's three paths, so this union is unchanged from the 4da62786 pass."
-    },
-    {
-      "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors on the tree merged with main c7465a75."
+      "evidence": "truth audit OK: call_sites=284 at implementation commit 89aba516. The HIGH 1 refusal message at scripts/orchestrator-flow/outcome-lifecycle.mjs:239 contains the word 'missing' and is therefore discovered as one new call site, taking the inventory from 283 to 284. This was attributed by experiment rather than assumed: a probe worktree at main da9ff0c6 alone reports 283 and exits 0, so this lane introduced exactly the one site, and a diff of the checker's own discover() output between the two trees showed one added site and none removed. It is registered with an explicit 'excluded' disposition, because the message names a missing coordination lifecycle event in the outcome ledger rather than a missing or unapplied database object. call_site_count and call_site_sha256 were regenerated from discover() rather than hand-edited. The message was deliberately NOT reworded to dodge the audit pattern: the guard exists to force explicit review of every such line, so evading it would not be the same as satisfying it."
     }
   ],
   "assumptions_resolved": [
-    "The identical self-flag shape in `alter table ... rename to ...` was confirmed present and deliberately left out of scope; it is recorded in the pull request body as deserving its own issue.",
-    "A second entry in the branch's previous registry copy, scripts/check-migration-ledger-drift.mjs:247, was checked against the true base 485a0ba5 and was NOT authored by this branch; main has since changed that line away, so it was dropped rather than resurrected.",
-    "Main moved twice during this refresh. Each step was re-derived with git merge-tree against the real new tip rather than trusted from a prior prediction; on the second step only the shared .agent evidence pair conflicted."
+    "HIGH 1 is closed by classifying every replay problem. repairOutcomeHistory now supersedes only the duplicate-event_id and byte-identical re-post classes left by the read-back race, and refuses loudly on any lifecycle violation instead of papering it over, so a genuinely skipped state can no longer be 'repaired' into invisibility.",
+    "HIGH 2 is closed at both ends. validateEvent now permits supersedes only on a recovery_completed event, and outcomeHistory now collects supersession only from a succeeded recovery_completed event and only for ids that are themselves outcome events of the same issue, so an OWNER comment of an arbitrary type can no longer suppress arbitrary outcome history.",
+    "Both fixes are strictly narrowing. Repair refuses in more cases than before and supersession is honoured from fewer sources than before, so no guard was weakened, bypassed or deleted.",
+    "The in-scope Mediums are closed: the duplicate-event_id repair no longer erases the legitimate original alongside the copy, event_id derivation now includes supersedes so two repair events cannot collide, and completeOutcome now uses the same bounded read-back backoff this pull request exists to introduce. The Low 'phantom supersedes ids' finding is closed by the same-issue outcome-id filter.",
+    "detail was deliberately left out of the event_id derivation. It is free prose that does not distinguish one governed action from another, so including it would change existing ids for zero collision benefit.",
+    "This evidence pair is a refresh. head_sha 89aba516 is the IMPLEMENTATION commit and not the commit carrying these two .agent files, and files_changed lists only implementation files. Generation 4 was required because generation 3 did not declare the throughput truth-audit registry, which this revision must write.",
+    "Main moved from c7465a75 to da9ff0c6 while this branch waited, leaving the pull request CONFLICTING. That was a hard blocker rather than an optional refresh, because GitHub cannot build a merge ref for a conflicting pull request and every pull_request-triggered workflow, including the required contract check, was silently suppressed. Main was merged in; only the shared .agent pair conflicted and no code file did."
   ],
   "stop_conditions_hit": []
 }
