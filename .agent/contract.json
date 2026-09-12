@@ -1,11 +1,11 @@
 {
   "schema_version": 1,
   "work_issue": 2611,
-  "generation": 2,
+  "generation": 3,
   "work_type": "structural",
   "route": "shared-db-orchestrator",
   "goal": "Implement the owner's prepack exclusion, which existed only as prose and was never implemented in SQL: add plm.prepack_role as the single authoritative assortment test (head, member or null, sourced from ColdLion) and plm.item_missing_attribution as the missing-Licensor/Property population that applies it, plus an offline regression guard that fails if the exclusion is dropped or weakened.",
-  "base_sha": "485a0ba5da8c43f2c7bddd85d2c29cfc1271452f",
+  "base_sha": "bfdb19c916d2f481f1b740d5ce1318b065c13045",
   "dispatcher": "albert hazan, autonomous migration author lane for #2611",
   "worker": "claude issue-2611 migration author lane (claim #2819)",
   "branch": "claude/issue-2611-prepack-exclusion",
@@ -58,7 +58,8 @@
     "The issue's premise was verified before implementation and did not survive: no SQL implements the exclusion today, and the head source named in the issue is wrong rather than merely stale.",
     "Granting or revoking on a view legitimately registers as a write against both 'view' and 'table' under the object extractor, so claim #2819 declares all three objects; the grants are not removed, because the view's permission hardening is part of the deliverable.",
     "The public-data-venue test fails identically on untouched origin/main and on other open pull requests, so it is pre-existing and outside this contract.",
-    "The 11 new call sites this lane adds to scripts/check-prepack-exclusion.mjs and .github/workflows/prepack-exclusion.yml are genuine prose about a missing-attribution population, so scripts/check-throughput-truth-audit.mjs correctly refused until each received a hand-written disposition. Generation 2 exists solely to bring docs/verification/throughput-guard-truth-audit-20260828.json into declared scope: the guard has no regenerate flag by design, its count and digest are global, and the file was edited under a coordinator-granted slot after confirming its count was still 277 on origin/main immediately before writing. Only the 11 dispositions, the count and the digest changed; the digest was recomputed mechanically from the guard's own discover() rather than hand-incremented."
+    "The 11 new call sites this lane adds to scripts/check-prepack-exclusion.mjs and .github/workflows/prepack-exclusion.yml are genuine prose about a missing-attribution population, so scripts/check-throughput-truth-audit.mjs correctly refused until each received a hand-written disposition. Generation 2 exists solely to bring docs/verification/throughput-guard-truth-audit-20260828.json into declared scope: the guard has no regenerate flag by design, its count and digest are global, and the file was edited under a coordinator-granted slot after confirming its count was still 277 on origin/main immediately before writing. Only the 11 dispositions, the count and the digest changed; the digest was recomputed mechanically from the guard's own discover() rather than hand-incremented.",
+    "Generation 3 exists because PR #2826 landed and main advanced 114 commits; the branch was refreshed by MERGE (never rebase) onto bfdb19c9, so base_sha names the tip the work is actually built on. The throughput truth audit was re-derived mechanically against that new main via discover(), giving 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a; no earlier count (277 or 288) was carried forward."
   ],
   "stop_conditions": [
     "Stop if a guard refusal could only be cleared by weakening the guard.",

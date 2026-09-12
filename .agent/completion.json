@@ -6,10 +6,12 @@
   "migration_versions": [
     "20260911230553"
   ],
-  "contract_ref": "refs/db-contracts/2611/2",
-  "contract_sha256": "efcc3f89a0c3400c9231652edefdc9c2fbe94004e5c9f61ce235972d793afd98",
-  "head_sha": "f7037b8444ca8d873693a3894bf28b01d7a9f7ab",
+  "contract_ref": "refs/db-contracts/2611/3",
+  "contract_sha256": "05d83ddd27ca2bfcade21d38aac3576112f06aa37287f3d693a6a6609cb5a410",
+  "head_sha": "ad2cfb8caf8e9ec4251386f626e7506aa1517e97",
   "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
     ".github/workflows/prepack-exclusion.yml",
     "docs/business-rules/product-items-and-identifiers.md",
     "docs/verification/prepack-exclusion-20260911.md",
@@ -51,7 +53,8 @@
     "Two errors in docs/business-rules/product-items-and-identifiers.md that this work disproved were corrected: the head/member table mislabelled erp_items_current.prepack_code as heads, and a paragraph claimed an inventory row's prepack code identifies an assortment head when coldlion.inventory.prepack_code is empty on every production row.",
     "The public-data-venue test failure is pre-existing and outside this contract: it fails identically on untouched origin/main and on other open pull requests, over eight docs/verification/database-efficiency CSVs this lane did not author. It is already owned by issues #2390 and #2391. No evidence file was deleted and no guard was relaxed.",
     "The throughput truth audit refused this branch with 'found 288, recorded 277'. Verified NOT pre-existing: a pristine-main probe passes at 277. All 11 new sites are genuine prose about a missing-attribution population, so each received a hand-written 'excluded' disposition rather than being reworded to dodge the pattern, which would have left the guard green while defeating it. The count and digest were recomputed mechanically from the guard's own discover(), never hand-incremented. origin/main still read 277 immediately before the write, so no rival lane's edit was overwritten.",
-    "Refreshed from main by MERGE, never a rebase, after #2822 landed and flipped the PR to CONFLICTING. The only overlap was the shared .agent evidence pair, which main carried for lane #2817; that collision was resolved in favour of this lane's own #2611 evidence. head_sha is the merge commit because its tree already holds all seven implementation files unchanged, and 9eb1d587..f7037b84 yields exactly those seven."
+    "Refreshed from main by MERGE, never a rebase, after #2822 landed and flipped the PR to CONFLICTING. The only overlap was the shared .agent evidence pair, which main carried for lane #2817; that collision was resolved in favour of this lane's own #2611 evidence. head_sha is the merge commit because its tree already holds all seven implementation files unchanged, and 9eb1d587..f7037b84 yields exactly those seven.",
+    "Refreshed onto main tip bfdb19c9 by MERGE, never rebase, after PR #2826 landed. The throughput truth audit was re-derived mechanically from discover() against that new main rather than from any earlier baseline: 291 sites = 280 carried from main plus this lane 11, digest 28c0d1b06b6c63a3dfa70c30b827e6921bc61ca36ed04c740e72a1701281800a. Zero unresolved sites and zero stale sites dropped; the checker validates with truth audit OK: call_sites=291."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Structural change implementing an owner ruling that had never been implemented in SQL. Two database objects plus an offline regression guard, a verification note recording every probe with its query per AGENTS.md 4.3, and two business-rule corrections. Awaiting two governed reviews at the final head, then preview apply, guarded merge and production promotion."
