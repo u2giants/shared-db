@@ -1,42 +1,92 @@
 {
   "schema_version": 1,
-  "work_issue": 2809,
+  "work_issue": 2744,
   "outcome": "ready-for-merge",
-  "pr": 2810,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2809/4",
-  "contract_sha256": "0dd3e6769f48f080f9b318bc95a2ab44e0ca38410a3ef01929109a53db05b80a",
-  "head_sha": "a091c63c319067ececd2a5a74d8a69f667a885ac",
+  "pr": 2818,
+  "migration_versions": [
+    "20260911222514"
+  ],
+  "contract_ref": "refs/db-contracts/2744/11",
+  "contract_sha256": "53f7d02c39f3f3f076959a60f0f06170d4dd138de98e3ad9c823dfbb74b1f82a",
+  "head_sha": "beceded123732ca60e19c74553b78c966802463e",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py"
+    "docs/verification/throughput-guard-truth-baseline-20260828.json",
+    "scripts/production-verification-sidecars/20260911222514.json",
+    "scripts/production_business_risk_gate.py",
+    "scripts/production_catalog_verification.py",
+    "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
+    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
+    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "table plm.dcp_asset",
+    "table plm.lucasfilm_dcp_asset",
+    "table plm.dcp_asset_property_observation",
+    "table plm.lucasfilm_dcp_asset_property_observation",
+    "table plm.dcp_style_guide",
+    "table plm.lucasfilm_dcp_style_guide"
+  ],
+  "db_writes": [
+    "function api.db_data_admin_scraped_properties"
+  ],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_migration_guard",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Ran 250 tests in 29.412s, OK, 0 failures, on the tree merged with main c7465a75 (implementation commit a091c63c). The suite grew 243 to 250 purely from cases main added while this branch waited; this lane's own two cases are still present and still pass, namely the archive-a-table case that now passes preflight and the negative control proving the OLD name after a move is still refused with 'DROPPED (or renamed away) by 20260102000000'. The capability was repaired, not removed."
-    },
-    {
-      "command": "node scripts/check-throughput-truth-audit.mjs",
-      "exit_code": 0,
-      "evidence": "truth audit OK: call_sites=283 on the tree merged with main c7465a75. Resolved as a union, not a side pick: main's 282 reviewed dispositions were kept verbatim and exactly ONE entry was re-added, the only one this branch itself authored, verified against the true merge base 485a0ba5 rather than against main. Its site moved from scripts/production_migration_guard.py:1969 to :2093 because main edited the same file, so the line number was recomputed from the merged tree; line_sha256 50799e3f is unchanged because the line content is unchanged. call_site_count and call_site_sha256 were regenerated from the checker's own discover() inventory, giving 283 and 014700ca17452ac219a56c6e7f7c044426eacd1262a30a9888a3baf61c6cab78. The checker reports 0 missing dispositions and 0 stale sites. schema_version remains 3. Main c7465a75 touched none of this lane's three paths, so this union is unchanged from the 4da62786 pass."
+      "evidence": "Static SQL guards pass. Guard B confirms 20260911222514 sorts after the base branch's newest version 20260911212849. Guard B2 did not run: no live ledger source configured in this worktree, so full PR database CI remains required."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors on the tree merged with main c7465a75."
+      "evidence": "No whitespace errors."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "exit_code": 0,
+      "evidence": "status OK across 50 sidecars. Version 20260911222514 reports markers [89] with sidecar true, hash-bound to migration_sha256 33d55ffa432b09f476e6121fb380e3d676dc287c576a2aefdc03b813744fbaff. The marker is now reviewed as disposition checks, bound to catalog contract dcp_narrow_asset_style_map_v1 at expected_count 1. The earlier no_durable_target declaration was wrong and the slot 2 governed review caught it: the EXECUTE rewrites the body of api.db_data_admin_scraped_properties(text,text,integer) in pg_proc, derive_targets() cannot read a do-block, and an empty check list would have landed the enforcing production run on its own THIS STEP PROVED NOTHING branch."
+    },
+    {
+      "command": "read-only production latency probe, role authenticated, statement_timeout 8s, inside begin; ... rollback;",
+      "exit_code": 0,
+      "evidence": "Interleaved on one session under identical live load at page size 500: before 9991/4867/4466 ms, after 2671/2525/3273 ms. The baseline's 9991 ms tail is the source of the 8400 ms acceptance cancellation; the fixed statement's worst run was 3273 ms. Nothing was committed to any database."
+    },
+    {
+      "command": "read-only production result-parity probe",
+      "exit_code": 0,
+      "evidence": "Unfiltered default page is 1,311,298 bytes byte-identical before and after. Cinderella, Bambi, Cars 2 and Georgia Green Glass are byte-identical at page size 100."
+    },
+    {
+      "command": "read-only refutation probes (recorded so they are not retried)",
+      "exit_code": 0,
+      "evidence": "Materializing the retained-asset CTEs alone measured 4285/4226/4656 ms, no gain over baseline. Raising work_mem 12x measured no gain, refuting the theory named in claim #2791's title. The narrow (id, style_guide_id) projection is the load-bearing change."
+    },
+    {
+      "command": "supabase/tests against an ephemeral database",
+      "exit_code": 0,
+      "evidence": "GREEN in CI at d8bc0a03 (job 103453979387). It FAILED at 4ad729ff on db_data_admin_scraped_properties_opa_groups.sql, which is NOT quarantined. Cause was mine and real: that file asserted the function text still contained \"page_dcp_retained_assets as not materialized\" and \"join plm.dcp_asset a on a.id=r.asset_id\", both of which this migration rewrites. The assertions were re-pointed at the narrow map rather than deleted, and are strictly stronger: they still pin the retained-asset CTE, still ban dcp_asset_context, and additionally prove the style context is sourced from plm.dcp_asset via \"select a.id,a.style_guide_id from plm.dcp_asset a\". Only pre-existing quarantined failures remain. Verified by reading the check result back, not inferred from an exit code."
+    },
+    {
+      "command": "read-only production falsifiability probe of catalog contract dcp_narrow_asset_style_map_v1, inside begin read only; ... rollback;",
+      "exit_code": 0,
+      "evidence": "Proven able to fail before being trusted. On production (qsllyeztdwjgirsysgai), where migration 20260911222514 is not yet applied, the inherited half all_licensor_property_source_coverage_v1 evaluates TRUE while the new contract evaluates FALSE, so both outcomes are reachable and the only thing separating them is the set of assertions this migration adds. The probe SQL was generated directly from CATALOG_CONTRACTS so the text tested is byte-identical to the text the gate runs. Read-only, rolled back, nothing committed, no setting changed beyond a local statement_timeout. It must flip to TRUE after apply; that flip is NOT claimed yet."
+    },
+    {
+      "command": "python -m pytest scripts/test_production_catalog_verification.py",
+      "exit_code": 0,
+      "evidence": "189 passed, 65 subtests passed. Also verified locally that catalog_contract_objects() extracts an identical object set for the new contract and the one it supersedes, so supersession within one ordered batch lands on the same objects and nothing #2579, #2576 or #2449 proved silently loses protection."
     }
   ],
+  "notes": [
+    "Issue #2744 remains open and claim #2791 remains held; acceptance has not yet been re-run against production after this change.",
+    "The reported 'Product pipeline could not load' outage is a different function: api.pm_pipeline_page('licensed', limit 100) measured 8235 ms cold as role authenticated and shares no objects with this migration. It needs its own issue and is reported on #2744 and #2758.",
+    "Per AGENTS.md this migration requires two independent governed reviewers at the exact head. Both slots must be drawn before either runs, because the first verdict locks the second. NOT yet satisfied at this head."
+  ],
   "assumptions_resolved": [
-    "The identical self-flag shape in `alter table ... rename to ...` was confirmed present and deliberately left out of scope; it is recorded in the pull request body as deserving its own issue.",
-    "A second entry in the branch's previous registry copy, scripts/check-migration-ledger-drift.mjs:247, was checked against the true base 485a0ba5 and was NOT authored by this branch; main has since changed that line away, so it was dropped rather than resurrected.",
-    "Main moved twice during this refresh. Each step was re-derived with git merge-tree against the real new tip rather than trusted from a prior prediction; on the second step only the shared .agent evidence pair conflicted."
+    "Narrow projection is load-bearing: materializing the retained-asset CTEs alone measured 4285/4226/4656 ms with no gain, and 12x work_mem measured no gain. Only the narrow (id, style_guide_id) map moved the number.",
+    "Output parity confirmed: the unfiltered default page is 1,311,298 bytes byte-identical, and the four targeted controls are byte-identical.",
+    "The dynamic-execution marker DOES have a durable target: the rewritten body of the one pre-existing function. It is witnessed by catalog contract dcp_narrow_asset_style_map_v1, built as a strict superset of all_licensor_property_source_coverage_v1, and proven falsifiable on production before being trusted."
   ],
   "stop_conditions_hit": []
 }
