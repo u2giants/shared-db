@@ -4,7 +4,7 @@ import { spawn, spawnSync } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { REVIEW_VERDICT_REF_PREFIX } from './lib/review-verdict-artifact.mjs'
 import { assignWithMutexRetry } from './manage-migration-author-lanes.mjs'
-import { readyRecord } from './orchestrator-flow/reconcile.mjs'
+import { readyRecord, persistInitialReady } from './orchestrator-flow/reconcile.mjs'
 import { canonicalJson, sha256 } from './orchestrator-flow/evidence-bundle.mjs'
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -614,6 +614,75 @@ test('reviewer admission revalidates after its mutex is acquired',()=>{
   const {io,headSha,mutexCreates}=admittedReviewIo({closeOnMutex:true})
   assert.throws(()=>assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{admitIssue:41,pr:7}},io),/closed and cannot be admitted/)
   assert.equal(mutexCreates(),1);assert.equal(io.refs.has(MUTEX_REF),false);assert.equal(io.refs.has(REVIEW_CURSOR_REF),false)
+})
+
+// Issue #2802. The structural-admission gate landed on 2026-09-11, AFTER the reviewer
+// operation's 25-request ceiling was derived (docs/verification/
+// reviewer-assignment-api-budget-2026-08-28.md) for a draw that had no admission step.
+// Charged against that ceiling, every structural draw in the fleet refused with
+// "exhausted its derived 25-request budget before request 24 (2 held back as the
+// mutex-release reserve)". The fixtures above never reproduced it because they make no
+// REAL wire requests, and the budget only charges requests that go through the shared
+// transport. This one does, so the admission gate's reads are counted the way
+// production counts them.
+function wiredAdmittedReviewIo(options){
+  const fixture=admittedReviewIo(options),io=fixture.io,labels=[]
+  // The fixture PR carries many migration files so the wired read count is large. A
+  // production PR does carry many files and admission does read each one's content at
+  // the exact head -- but those content reads are NOT billed to the reviewer budget in
+  // production; see the wiring note below. Every file here writes the one structural
+  // object the fixture issue declares, so the change stays admissible; only the count grows.
+  const files=[{filename:'supabase/migrations/20260911120000_example.sql',status:'added',content:'create table core.example(id bigint);'}]
+  for(let i=1;i<=30;i+=1)files.push({filename:`supabase/migrations/2026091112${String(i).padStart(4,'0')}_example_column.sql`,status:'added',content:`alter table core.example add column label_${i} text;`})
+  io.getPrFiles=()=>files
+  io.getFileAt=(path)=>files.find((row)=>row.filename===String(path))?.content??'create table core.example(id bigint);'
+  const wire=(label)=>runGitHubCommand(['api','fixture'],{executor:()=>{labels.push(label);return '{}'}})
+  // This is NOT a production-shaped request count, and must not be read as one. The
+  // fixture deliberately routes three admission reads onto the BUDGETED wire so that
+  // deleting withoutReviewRequestBudget makes this suite fail: it is a revert detector,
+  // not a measurement. Production charges fewer reads than this. In particular
+  // githubIo.getFileAt (and treeFiles) go through laneTreeReader -> createTreeReader in
+  // scripts/lib/github-tree.mjs, which calls runGitHubCommand from
+  // scripts/lib/github-transport.mjs -- the shared transport, which never reaches
+  // consumeReviewWireRequest -- so blob and tree reads are not charged to the reviewer
+  // budget in production at all. What production admission actually charges is getPr,
+  // getPrFiles (via ghPaginated), closingIssuesForPr, getIssue, and the comment/outcome
+  // history reads. The reviewer draw's own reads are left off the wire either way:
+  // charging them here too would refuse for a reason that has nothing to do with #2802.
+  for(const name of ['getPrFiles','getFileAt','closingIssuesForPr']){
+    const fn=io[name]
+    if(typeof fn!=='function')continue
+    io[name]=(...args)=>{wire(name);return fn(...args)}
+  }
+  return {...fixture,io,labels}
+}
+
+test('#2802 the structural-admission gate is not charged to the reviewer request budget',()=>{
+  const {io,headSha,labels,mutexCreates}=wiredAdmittedReviewIo()
+  const result=assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{admitIssue:41,pr:7}},io)
+  assert.ok(result.reviewer,'a structural draw must complete instead of refusing on the reviewer budget')
+  assert.equal(mutexCreates(),1)
+  assert.equal(io.refs.has(MUTEX_REF),false,'the reviewer mutex must still be released')
+  // Admission must still RUN. Only its accounting moves, so every read it makes has to
+  // still be observable on the wire.
+  for(const label of ['getPrFiles','getFileAt','closingIssuesForPr'])assert.ok(labels.includes(label),`the admission gate must still read ${label}: ${labels.join(',')}`)
+  // The proof: this one operation puts MORE wired requests through the budgeted executor
+  // than the reviewer ceiling allows, and still completes. That can only be true if the
+  // admission gate's requests are not charged to the reviewer operation.
+  assert.ok(labels.length>REVIEW_OPERATION_REQUEST_LIMIT,`this fixture made only ${labels.length} requests; it must exceed the ${REVIEW_OPERATION_REQUEST_LIMIT}-request reviewer ceiling or it proves nothing: ${labels.join(',')}`)
+  // ...and NOT because the ceiling or the reserve was widened to let it through, which
+  // is the shortcut issue #2075 exists to prevent.
+  assert.equal(REVIEW_OPERATION_REQUEST_LIMIT,25,'the reviewer ceiling must not be widened to make this pass (issue #2075)')
+  assert.equal(REVIEW_MUTEX_SECTION_RESERVE,15,'the mutex-release reserve must not be touched to make this pass')
+})
+
+test('#2802 an inadmissible issue is still refused when admission is not charged to the reviewer budget',()=>{
+  const {io,headSha,labels,mutexCreates}=wiredAdmittedReviewIo({closeOnMutex:true})
+  assert.throws(()=>assignNextReviewer({issue:41,pr:7,headSha,admissionOptions:{admitIssue:41,pr:7}},io),/closed and cannot be admitted/)
+  assert.equal(mutexCreates(),1)
+  assert.equal(io.refs.has(MUTEX_REF),false,'a refused admission must not strand the reviewer mutex')
+  assert.equal(io.refs.has(REVIEW_CURSOR_REF),false,'a refused admission must stop the draw before it consumes a sequence')
+  assert.ok(labels.includes('getPrFiles'),'the refusal must come from the admission gate actually running')
 })
 
 test('#2705 reviewer assignment skips a provider that reconciled preflight says is unusable',()=>{
@@ -5301,8 +5370,12 @@ test('the exact byte-pinned #2509 claim apply is valid immutable historical-rebi
 
 function historicalTerminalIo(overrides={}){
   const manifest={target:'preview',preview_allowlist:'20260907131728',claim_pr:'2513',claim_head_sha:'1be8f325dbf1ff035bd5039638dc47c14a3eb155',commit_sha:'c5f85ad3a98b7a5598e8c81a56735473d5bb5487',historical_preview_source_pr:'2513',historical_preview_original_run_map:'20260907131728:34157812748'}
-  const record=readyRecord({issue:2509,pr:2513,head_sha:manifest.claim_head_sha,bundle_id:'7e75bf09d81bc26fd310797c9db658629871b3ed186ee4788dfce4a6ac13b42b',route:'historical_rebind',route_context:manifest.commit_sha,manifest}),refs=new Map()
-  refs.set(`refs/db-preview-ready/${record.ready_id}`,{digest:sha256(canonicalJson(record)),record})
+  const readyInput={issue:2509,pr:2513,head_sha:manifest.claim_head_sha,bundle_id:'7e75bf09d81bc26fd310797c9db658629871b3ed186ee4788dfce4a6ac13b42b',route:'historical_rebind',route_context:manifest.commit_sha,manifest}
+  const record=readyRecord(readyInput),refs=new Map()
+  // Written by the REAL writer rather than by a hand-copied digest convention. A
+  // producer/consumer digest divergence must BREAK this fixture, not hide inside it:
+  // the previous hand-set digest pinned one convention and passed either way.
+  persistInitialReady(readyInput,{resolveMarker:()=>({live:true,task:'t',calling_task:'t'}),actor:()=> 't',now:()=> '2026-09-08T09:38:33Z',appendEvent:()=>{},createRef:(ref,digest,value)=>refs.has(ref)?false:(refs.set(ref,{digest,record:value}),true),readRef:(ref)=>refs.get(ref)??null})
   const runId='34211013201',artifactId='10049835085',artifactDigest=`sha256:${'4'.repeat(64)}`
   const evidence={
     run:{id:Number(runId),path:'.github/workflows/shared-supabase-migrations.yml',event:'workflow_dispatch',status:'completed',conclusion:'success',run_attempt:1,head_sha:manifest.commit_sha},
@@ -5387,6 +5460,11 @@ test('#2509 emits only the existing no-write historical recovery manifest from i
   })
   assert.equal('merged_preview_source_pr' in candidate.manifest,false)
   assert.equal('production_allowlist' in candidate.manifest,false)
+  // #2796: apply-only, and the instruction says so. The workflow's mode input
+  // defaults to dry-run, and a historical dry-run runs neither the recovery proof
+  // nor a bounded dry-run -- it just succeeds having proved nothing.
+  assert.deepEqual(candidate.mode_sequence,['apply'])
+  assert.equal('mode' in candidate.manifest,false)
 })
 
 test('a merged claim still reaches the post-merge rehearsal route instead of being stranded',()=>{
@@ -5402,6 +5480,10 @@ test('a merged claim still reaches the post-merge rehearsal route instead of bei
   assert.equal(candidate.manifest.commit_sha,mainSha)
   assert.equal(candidate.manifest.merged_preview_source_pr,'1809')
   assert.equal(candidate.manifest.preview_allowlist,version)
+  // #2796: the dry-run is a REQUIRED first phase here, so the instruction names
+  // both phases rather than being silent and dispatching at the dry-run default.
+  assert.deepEqual(candidate.mode_sequence,['dry-run','apply'])
+  assert.equal('mode' in candidate.manifest,false)
   // "merged_preview_source_pr replaces claim_pr ... do not name both" -- naming
   // either claim field alongside it makes the workflow refuse the dispatch outright.
   assert.equal('claim_pr' in candidate.manifest,false)
