@@ -3,9 +3,9 @@
   "work_issue": 2796,
   "outcome": "ready-for-merge",
   "pr": 2825,
-  "contract_ref": "refs/db-contracts/2796/4",
-  "contract_sha256": "2d7006b73f51ca9d31537ebdd29e3d83d46cf8c860f1f50395f641d2cf4b443a",
-  "head_sha": "6b2a906d99608d25b12e64e55e37f629a34178d1",
+  "contract_ref": "refs/db-contracts/2796/5",
+  "contract_sha256": "4e394226adc49b59aff5c98b68da370b1f20af4a1efcdac348303ff7e9f64967",
+  "head_sha": "7663fe043d538c2cc0e41af5e2464f4fdbe57ea9",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -23,28 +23,29 @@
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Run directly and unpiped at 6b2a906d: \"truth audit OK: call_sites=282\", exit 0. The 282 count and its semantic digest were DERIVED by calling the checker's own discover() over the rebased tree, not chosen; the tool then confirmed both."
+      "evidence": "Run directly and unpiped at 7663fe04: \"truth audit OK: call_sites=282\", exit 0. The checker DERIVES both the call-site count and the semantic digest from the tree itself and compares them to the file, so exit 0 here is the re-derivation, not a restatement of it. This mattered: the refresh from main auto-merged this file with no conflict while main's own copy recorded 280 and this branch recorded 282, which is exactly the shape that yields a count matching neither side. Neither number was adopted by hand; the checker re-derived over the merged tree and confirmed 282."
     },
     {
       "command": "node scripts/orchestrator-flow/reconcile.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 14, pass 14, fail 0, skipped 0, todo 0, exit 0 at 6b2a906d, run directly and unpiped. The replacement test was then MUTATION-PROVEN rather than trusted: with the stored digest narrowed back to identity it exits 1; with the occupancy check loosened to a tautology it exits 1; with both mutations reverted it exits 0. The test it replaces exercised the writer against itself and therefore passed under either convention, which is how the defect reached a reviewer."
+      "evidence": "tests 14, pass 14, fail 0, exit 0 at 7663fe04, run directly and unpiped. The replacement test was then MUTATION-PROVEN rather than trusted: with the stored digest narrowed back to identity it exits 1; with the occupancy check loosened to a tautology it exits 1; with both mutations reverted it exits 0. The test it replaces exercised the writer against itself and therefore passed under either convention, which is how the defect reached a reviewer."
     },
     {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 534, pass 534, fail 0, skipped 0, todo 0, exit 0 at 6b2a906d, run directly and unpiped. Includes the historical-terminalization fixture, which now builds its preview-ready ref with the real writer instead of a hand-copied digest, so a producer/consumer divergence breaks the suite rather than hiding inside it."
+      "evidence": "tests 534, pass 534, fail 0, skipped 0, todo 0, exit 0 at 7663fe04, run directly and unpiped. Includes the historical-terminalization fixture, which now builds its preview-ready ref with the real writer instead of a hand-copied digest, so a producer/consumer divergence breaks the suite rather than hiding inside it."
     },
     {
       "command": "node scripts/check-workflow-preview-mode-guard.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 8, pass 8, fail 0, skipped 0, todo 0, exit 0 at 6b2a906d, run directly and unpiped. Runs the workflow guard block under a real shell in both directions with inversion and deletion sabotage cases. It asserts the historical step gate, not a refusal of merged_preview_source_pr."
+      "evidence": "tests 8, pass 8, fail 0, exit 0 at 7663fe04, run directly and unpiped. Runs the workflow guard block under a real shell in both directions with inversion and deletion sabotage cases. It asserts the historical step gate, not a refusal of merged_preview_source_pr."
     }
   ],
   "assumptions_resolved": [
     "The original #2796 lane is cold, not working: its last commit was 2026-09-11 19:31 EDT, there is no open db-claim naming the branch or worktree, and issue #2796 carries zero comments. I first mistook three comments on PR #2825 for lane activity; they are my own orchestrator serialization notice, its retraction and its inversion correction, so they establish nothing about the lane. Liveness was therefore never positively shown, and the branch was adopted rather than assumed abandoned on silence alone.",
     "The truth-audit conflict recurred on rebase as a single append-versus-append block. It was resolved by DERIVATION, not by hand: the union was keyed on semantic_key, and call_site_count (282) plus call_site_sha256 were computed by importing the checker's own discover() over the rebased tree. Neither side's recorded numbers (280 on main, 279 on this branch) was adopted. One site was dropped because its line no longer exists in check-migration-ledger-drift.mjs, and one prose clash on documents-only-change.mjs was settled in favour of main's landed \"enriched\" disposition after reading the line itself and confirming it documents a fail-closed rule.",
     "No generator exists for this file. An earlier orchestrator notice told lanes to 'run the generator'; that instruction was wrong and was retracted. The checker derives count and digest but has no write mode by design.",
+    "The reviewer draw for this PR refused with \"unknown object kind in claim: scripts/manage-migration-author-lanes.mjs\", which reads like a bad argument but was not one: the parser has no positional fallback, and the string was never in argv. Issue #2796's own db-work-scope block listed three FILE PATHS under reads:, and admission feeds that list straight into the database-object validator (manage-migration-author-lanes.mjs:696). The block also violated the rule stated one line below at :698 -- a non-structural work_type must not claim database objects at all. The orchestrator wrote that block, so this was a self-inflicted metadata defect; it was repaired by emptying the reads: list on the issue, NOT by touching the validator. Two earlier guesses were checked and discarded first: Git Bash argument rewriting (reproduced identically under PowerShell, so not a shell effect) and a malformed open claim (no open db-claim declares a script path).",
     "CORRECTED. An earlier revision of this report said the branch was refreshed by merge and never rebased. That is no longer true: the branch was REBASED onto d5cea027 after PR #2808 merged, because it had become CONFLICTING against the new main. The rebase replayed the implementation, then the truth-audit conflict was re-resolved by derivation and the .agent pair was regenerated at the final head rather than reconstructed at intermediate replays, where every head-bound field would have been wrong by construction.",
     "No migration is carried by this PR, so no version reservation or author lease is at stake and no open claim covers its files.",
     "Issue #2796 had no db-work-scope block at all, which is why it was never dispatchable. The orchestrator classified it repo-maintenance / reviewer-tooling before landing this work, rather than leaving the work to land against an unclassified issue.",
@@ -53,6 +54,6 @@
     "CORRECTED, and this is the substance of generation 4. Generation 3 fixed that High by narrowing the STORED digest to ready identity. That was wrong, and both slots returned REVISE on it at head 20dabc75 (durable verdicts d7b36fff slot 1, 65d5945b slot 2). Consumers re-derive sha256(canonicalJson(<stored record>)) from the record they read back -- manage-migration-author-lanes.mjs:2094 does exactly this inside terminalizeHistoricalPreviewReady -- so narrowing the writer repaired the 117 pre-change refs by making every NEWLY written historical_rebind ref unreadable and fail-closing terminalization. I verified the reader on the branch rather than on origin/main, having previously misread it at the wrong ref. The shipped fix keeps the stored digest over the whole record and moves the compatibility concession into the OCCUPANCY check, which now compares identity with mode_sequence stripped on both sides; a pre-change ref carries no such key, so stripping yields a genuine identity match. This is safe because no consumer reads mode_sequence back off a stored record: the only non-test references are its producers, reconcile.mjs and manage-migration-author-lanes.mjs:2084. Generations 1 through 3 remain immutable and superseded."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Repository tooling fix adopted from a cold lane. The implementation is the original lane's; this session added only the merge from current main, the conflict resolution in the global throughput truth audit, and this evidence pair. Awaiting two governed reviews at the final head, then guarded merge.",
+  "evidence_note": "Repository tooling fix adopted from a cold lane. The implementation is the original lane's; this session added the refreshes from main, the conflict resolutions, and this evidence pair. The branch was refreshed from main a second time at 54e1e3c6 after falling 20 commits behind, because a branch behind main reviews as vandalism and a reviewer must never be handed one. That refresh conflicted only in .agent/contract.json and .agent/completion.json, where main carried a FOREIGN lane's pair (issue #2690, PR #2840, since merged); those two paths are single-slot files every lane overwrites, so this PR's side was taken wholesale after confirming the incoming side belonged to #2690 and not to this work. Awaiting two governed reviews at the final head, then guarded merge.",
   "migration_versions": []
 }
