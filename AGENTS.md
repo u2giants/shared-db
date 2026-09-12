@@ -899,8 +899,19 @@ Merge a `shared-db` PR **only when every item is true**:
 5. The change is additive, or any removal was explicitly approved.
 
 Then: merge to `main` (this auto-syncs the `shared-db/` folder into all apps) and
-promote to **production only in an approved window**. Docs-only PRs (no schema
-change) need just items 1 and "it reads correctly" — merge them promptly.
+run the governed merged-main preview rehearsal. For one source PR, a successful
+rehearsal automatically qualifies and dispatches the existing serial production
+lane. No session or owner names migration versions or artifact IDs for that
+ordinary path. Missing, stale, multi-source, failed, or ambiguous evidence stops
+before dispatch with **ENGINEER ACTION REQUIRED**. The production job still
+re-proves current main, the durable exact-head verdict, guarded merge, immutable
+preview evidence, the one open independently admitted structural work issue linked
+by GitHub to the source PR, exact target, bounded allowlist, fresh dry-run,
+all five machine-derived business-risk conclusions clear, exclusive lock, and
+post-apply ledger/catalog result. This narrow path authorizes no manual
+production command, manual workflow dispatch, other repository, or bypass.
+Docs-only PRs (no schema change) need just items 1 and "it reads correctly" —
+merge them promptly.
 
 ### 5.0-D Declare what a re-derived migration was derived from — `-- derived-from:` (issue #1608, added 2026-08-26)
 
