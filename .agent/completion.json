@@ -1,21 +1,61 @@
 {
   "schema_version": 1,
-  "work_issue": 2690,
+  "work_issue": 2843,
   "outcome": "ready-for-merge",
-  "pr": 2840,
+  "pr": 2842,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2690/10",
-  "contract_sha256": "db9122c694952231f723dda128feed0dbbf374b89cce29d7df1a6a22f26f4a59",
-  "head_sha": "ccc76db500dbb9b5f2fa7af4601324e5e36d2cfd",
-  "files_changed": [".agent/completion.json", ".agent/contract.json", ".github/workflows/coldlion-landing-sync.yml", "docs/verification/coldlion-api-parameters-20260909T022136Z.json", "docs/verification/coldlion-merch-group-details-probe-20260909T0224Z.json", "tools/coldlion-landing-masters.test.mjs", "tools/coldlion-landing/README.md", "tools/coldlion-landing/lib/db.mjs", "tools/coldlion-landing/lib/load-masters.mjs", "tools/coldlion-landing/lib/master-http.mjs", "tools/coldlion-landing/lib/master-specs.mjs", "tools/coldlion-landing/lib/project-masters.mjs", "tools/coldlion-landing/sync-masters.mjs"],
+  "contract_ref": "refs/db-contracts/2843/5",
+  "contract_sha256": "4826f4337b3f4220c28aecd62b9fc8170b76c1e3122f5ff1808aae5f7ebc0c47",
+  "head_sha": "f108113aa0730340d6ba60af53ec344dd55802ba",
+  "files_changed": [
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
+  ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command":"node --test tools/coldlion-landing-masters.test.mjs","exit_code":0,"evidence":"37 focused synthetic tests passed; 0 failed, skipped, or todo."},
-    {"command":"node --test tools/*.test.mjs","exit_code":0,"evidence":"875 offline tests passed; 0 failed, skipped, or todo."},
-    {"command":"npx --yes js-yaml .github/workflows/coldlion-landing-sync.yml","exit_code":0,"evidence":"Workflow YAML parsed successfully."},
-    {"command":"protected read-only ColdLion collection","exit_code":0,"evidence":"All requested endpoints completed and itemDetails company identity equalled the per-division union; repository evidence retains no payload values."}
+    {
+      "command": "node scripts/manage-migration-author-lanes.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 536, suites 0, pass 536, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself). This is the suite that carries both sides of the merge: the #2802 admission-budget tests and the #2796 mode_sequence tests from main all pass together."
+    },
+    {
+      "command": "node scripts/orchestrator-flow/admission-outcome.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 57, suites 0, pass 57, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
+    },
+    {
+      "command": "node scripts/orchestrator-flow/coordination-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 1, suites 0, pass 1, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
+    },
+    {
+      "command": "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 6, suites 0, pass 6, fail 0, cancelled 0, skipped 0, todo 0 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself)."
+    },
+    {
+      "command": "node scripts/check-throughput-truth-audit.mjs",
+      "exit_code": 0,
+      "evidence": "reported truth audit OK: call_sites=282 at f108113aa0730340d6ba60af53ec344dd55802ba (invoked directly, output redirected to a file, never piped; exit code read from the command itself). The count moved from 280 to 282 because the merge brought across the regenerated docs/verification/throughput-guard-truth-audit-20260828.json from main together with the new call sites from main; this lane did not edit that file and adds no call site of its own."
+    }
   ],
-  "assumptions_resolved": ["Issues #2621 and #2622 are live in production per owner confirmation.", "Owner ruling #906 permanently accepts the documented ColdLion HTTP transport risk.", "No database write occurred in the authoring session; production access remains workflow-only."],
+  "assumptions_resolved": [
+    "Admission GitHub reads were billed to the reviewer operation derived 25-request budget; suspending accounting around the admission call in place keeps the requireOwnedRef mutex-ownership proof intact, which moving the call site would have destroyed.",
+    "REVIEW_OPERATION_REQUEST_LIMIT is unchanged at 25 and REVIEW_MUTEX_SECTION_RESERVE is unchanged at 15; the defect was the accounting boundary, not the size of the ceiling. The green-path test still asserts both constants, and both were re-verified in the merged tree.",
+    "Admission still runs, still refuses identically, and still runs under the same held mutex before the reviewer draw.",
+    "The generation-3 corrections stand unchanged: the old failure was a refusal raised from inside the held mutex section, not a fail-fast before the mutex was taken, and the #2802 green-path test is a revert detector rather than a production-shaped request count.",
+    "REFRESH: the guarded merge refused this pull request because origin/main bf7cc98c (the squash merge of #2825) and this branch both changed scripts/manage-migration-author-lanes.mjs and scripts/manage-migration-author-lanes.test.mjs. Resolved by MERGING origin/main into the branch, never by rebasing, because the approval carry-forward in this repository covers a merge that extends history and is voided by a rewrite.",
+    "REFRESH: the two sides are textually disjoint and both are kept in full. Git auto-merged both script files with no conflict. The #2796 content from main is present in the merged tree (the MODE_SEQUENCE import and the mode_sequence field on deriveLivePreviewCandidate, plus its two test assertions) and the #2802 content from this branch is present (withoutReviewRequestBudget and the requirePrOperationRoute and requireAdmission wrappers, plus its two tests). Neither side was taken wholesale and neither side behaviour was altered.",
+    "REFRESH: the only merge conflicts were .agent/completion.json and .agent/contract.json, the evidence of this lane against the copies of a foreign lane on main. They were resolved to the PR base content inside the implementation commit, so the implementation diff contains no hand-authored .agent change, and the pair is re-sealed in the single commit that follows it.",
+    "RE-SEAL: a NEW contract generation was published rather than editing an immutable one. refs/db-contracts/2843/5 (sha256 4826f4337b3f4220c28aecd62b9fc8170b76c1e3122f5ff1808aae5f7ebc0c47) anchors base_sha at bf7cc98c63c425817ae98ec023f90f0d8260c98f, the actual PR base reported by gh pr view 2842 --json baseRefOid and the value the agent work contract workflow passes to the evidence gate as github.event.pull_request.base.sha. Generation 4 was anchored at the pre-refresh base 54e1e3c6 and had to widen allowed_paths to cover files that the wider diff swept in from main; at the correct anchor that widening is unnecessary and is withdrawn, so allowed_paths and file_writes are back to exactly the five paths this lane owns.",
+    "head_sha is f108113aa0730340d6ba60af53ec344dd55802ba, the merge commit, which is the IMPLEMENTATION commit for this refresh; the evidence commit that follows it cannot describe itself.",
+    "files_changed is the literal Git diff from the real PR base bf7cc98c to the implementation head f108113a, verified with git diff --name-only. It contains .agent/completion.json and .agent/contract.json because main carries a foreign lane's copies of those two files, so this branch's copies differ from the base and Git reports them; both paths are declared in allowed_paths and file_writes. The evidence gate separately requires the diff from the implementation head to the PR head to be exactly those two metadata files, which it is.",
+    "All five required checks were re-run at the merged implementation head f108113a, each invoked directly with output redirected to a file rather than piped, so every exit code came from the check itself and not from a downstream pager. No guard, test, assertion or check was weakened, bypassed, quarantined or deleted to make anything pass.",
+    "docs/verification/throughput-guard-truth-audit-20260828.json was not edited by hand; the regenerated copy from main arrived through the merge."
+  ],
   "stop_conditions_hit": []
 }
