@@ -26,6 +26,7 @@ function currentTableSql(table, spec, rows) {
   const naturalKey = `jsonb_build_object(${keys.flatMap((key) => [sqlText(key), `s.${key}`]).join(", ")})`;
   const projected = `(to_jsonb(s) - array['run_id','fetched_at','source_raw']::text[])`;
   const previous = `(to_jsonb(t) - array['run_id','fetched_at','first_seen_at','last_seen_at']::text[])`;
+  const priorRaw = `coalesce((select cl.new_raw from coldlion.change_log cl where cl.table_name=${sqlText(table)} and cl.natural_key=${naturalKey} order by cl.changed_at desc limit 1), ${previous})`;
   const updates = [...data.filter((c) => !keys.includes(c)).map((c) => `${c} = excluded.${c}`), "run_id = excluded.run_id", "fetched_at = excluded.fetched_at", "source_hash = excluded.source_hash", "last_seen_at = excluded.last_seen_at"].join(",\n      ");
   return `${stageSql(stage, spec, rows)}
 create temp table _counts_${table} as
@@ -37,7 +38,7 @@ select count(*) filter (where t.${keys[0]} is null) as inserted,
 insert into coldlion.change_log
   (table_name, natural_key, change_kind, previous_source_hash, new_source_hash, previous_raw, new_raw, run_id)
 select ${sqlText(table)}, ${naturalKey}, 'updated',
-       t.source_hash, s.source_hash, ${previous}, s.source_raw, s.run_id
+       t.source_hash, s.source_hash, ${priorRaw}, s.source_raw, s.run_id
   from ${stage} s left join coldlion.${table} t on ${join}
  where t.${keys[0]} is not null and t.source_hash <> s.source_hash;
 
