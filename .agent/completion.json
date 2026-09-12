@@ -1,45 +1,42 @@
 {
   "schema_version": 1,
-  "work_issue": 2847,
+  "work_issue": 2809,
   "outcome": "ready-for-merge",
-  "pr": 2849,
+  "pr": 2810,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2847/2",
-  "contract_sha256": "f135dc95abe3ad14f190a8d8470da4505e09438126288e84f9e848174088f534",
-  "head_sha": "f8a83b089f202e7471266b5e61be71ba5898e6da",
+  "contract_ref": "refs/db-contracts/2809/4",
+  "contract_sha256": "0dd3e6769f48f080f9b318bc95a2ab44e0ca38410a3ef01929109a53db05b80a",
+  "head_sha": "a091c63c319067ececd2a5a74d8a69f667a885ac",
   "files_changed": [
-    "scripts/db-coordination-events.mjs",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/orchestrator-flow/admission-outcome.test.mjs",
-    "scripts/orchestrator-flow/outcome-lifecycle.mjs"
+    ".agent/completion.json",
+    ".agent/contract.json",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/production_migration_guard.py",
+    "scripts/test_production_migration_guard.py"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/manage-migration-author-lanes.test.mjs",
+      "command": "python -m unittest scripts.test_production_migration_guard",
       "exit_code": 0,
-      "evidence": "tests 536 / suites 0 / pass 536 / fail 0 / cancelled 0 / skipped 0 / todo 0, measured at this implementation tree. Unchanged from the 536 measured at both c7465a75 and the previously reviewed head, so the review fixes cost the CLI suite no test."
+      "evidence": "Ran 250 tests in 29.412s, OK, 0 failures, on the tree merged with main c7465a75 (implementation commit a091c63c). The suite grew 243 to 250 purely from cases main added while this branch waited; this lane's own two cases are still present and still pass, namely the archive-a-table case that now passes preflight and the negative control proving the OLD name after a move is still refused with 'DROPPED (or renamed away) by 20260102000000'. The capability was repaired, not removed."
     },
     {
-      "command": "node --test scripts/orchestrator-flow/admission-outcome.test.mjs",
+      "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "tests 68 / pass 68 / fail 0 / cancelled 0 / skipped 0 / todo 0, up from the 61 at the reviewed head b8f9ce7b: seven new tests, one or more per review finding. Red-first proved by control run: with only scripts/orchestrator-flow/outcome-lifecycle.mjs and scripts/db-coordination-events.mjs reverted to b8f9ce7b and the new tests in place, the suite reported tests 68 / pass 61 / fail 7 — exactly the seven new tests failed and all 61 pre-existing tests still passed."
+      "evidence": "truth audit OK: call_sites=283 on the tree merged with main c7465a75. Resolved as a union, not a side pick: main's 282 reviewed dispositions were kept verbatim and exactly ONE entry was re-added, the only one this branch itself authored, verified against the true merge base 485a0ba5 rather than against main. Its site moved from scripts/production_migration_guard.py:1969 to :2093 because main edited the same file, so the line number was recomputed from the merged tree; line_sha256 50799e3f is unchanged because the line content is unchanged. call_site_count and call_site_sha256 were regenerated from the checker's own discover() inventory, giving 283 and 014700ca17452ac219a56c6e7f7c044426eacd1262a30a9888a3baf61c6cab78. The checker reports 0 missing dispositions and 0 stale sites. schema_version remains 3. Main c7465a75 touched none of this lane's three paths, so this union is unchanged from the 4da62786 pass."
     },
     {
-      "command": "node --test scripts/db-coordination-events.test.mjs scripts/coordination-scenarios.test.mjs scripts/orchestrator-flow/coordination-audit.test.mjs",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "tests 49 / pass 49 / fail 0 / cancelled 0 / skipped 0 / todo 0, proving that restricting the supersedes field to the recovery_completed event type and folding supersedes into the derived event_id tightened the v2 schema without breaking any existing event or the coordination audit."
+      "evidence": "No whitespace errors on the tree merged with main c7465a75."
     }
   ],
   "assumptions_resolved": [
-    "The bounded read-back follows the existing --claim dispatch recovery loop in scripts/manage-migration-author-lanes.mjs rather than a new pattern, with the same injectable wait so the retries are testable without real sleeps. completeOutcome now uses that same bounded confirmation instead of the single read the pull request exists to fix.",
-    "Repair is strictly append-only: a new recovery_completed event names the offending event_ids in a validated supersedes array, and a test asserts every pre-existing comment body is byte-identical after the repair runs, including on every path where repair now refuses.",
-    "HIGH 1 resolved by a three-class problem taxonomy in replayOutcomeEvents. duplicate_event_id (the same event_id posted twice) and state_repost (the state already reached, re-recorded under a new event_id) are the two artefacts of the read-back race; retiring either leaves the ledger at exactly the state it already held, so nothing is hidden. Everything else — a skipped state, a move backward, a misused blocked/yielded pair — is classed lifecycle_violation, and repairOutcomeHistory now throws before appending anything, naming the violation and telling the operator to record the missing or corrected lifecycle event instead. It no longer drops replay.offenders[0] for an unexamined problem class.",
-    "HIGH 2 resolved in two layers. validateEvent in scripts/db-coordination-events.mjs now refuses a supersedes field on any event whose event_type is not recovery_completed, so no routine lifecycle comment can carry one at all. outcomeHistory then honours supersedes only from a recovery_completed event whose result is succeeded, and only for ids that are themselves outcome-state events of the same work issue, so neither a cross-type target nor a phantom id can suppress anything.",
-    "Deterministic event_id from (issue, state) was deliberately not implemented, for the reason recorded at generation 1. The narrower collision the review found was fixed instead: eventId now folds a sorted supersedes list into the derived material when present, so two repairs that retire different events cannot collapse onto one id. detail was deliberately NOT added, because appending it unconditionally would change the derived id of every existing event that carries one; the supersedes append is conditional and therefore has zero blast radius.",
-    "The duplicate-event_id repair no longer erases the legitimate original alongside the copy: when an id was posted more than once only the repeated occurrences are retired, so the state the repair was run to restore does not regress."
+    "The identical self-flag shape in `alter table ... rename to ...` was confirmed present and deliberately left out of scope; it is recorded in the pull request body as deserving its own issue.",
+    "A second entry in the branch's previous registry copy, scripts/check-migration-ledger-drift.mjs:247, was checked against the true base 485a0ba5 and was NOT authored by this branch; main has since changed that line away, so it was dropped rather than resurrected.",
+    "Main moved twice during this refresh. Each step was re-derived with git merge-tree against the real new tip rather than trusted from a prior prediction; on the second step only the shared .agent evidence pair conflicted."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "head_sha is the implementation commit f8a83b08, which is what the governed review reads; this evidence pair sits in its own commit on top of it and cannot describe itself. files_changed lists implementation files only, never the .agent pair. The branch was rebuilt so that the implementation commit precedes the evidence commit: the superseded generation-1 evidence commit b8f9ce7b had come to sit BEFORE the new implementation work, which would have put the .agent pair inside the base-to-head_sha diff and broken the git evidence rule that only those two files may follow head_sha. The implementation content is unchanged by that rebuild. Every change in this generation makes the tool STRICTER: repair refuses more problem classes than before, and supersession is honoured from fewer sources than before. No guard was weakened, bypassed or deleted, no coordination comment was edited or deleted, no reviewer or budget constant was changed, no production command, migration apply, or workflow dispatch was run, and issues #2705, #2709, #2290 and #2678 were not touched. The curative verb --repair-outcome-history has NOT been run against #2802 or #2848; that remains unauthorised until this pull request lands. No reviewer was assigned and the pull request was not merged."
+  "stop_conditions_hit": []
 }

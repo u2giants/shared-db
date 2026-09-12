@@ -2084,8 +2084,15 @@ def object_events(raw: str) -> list[tuple[int, str, bool]]:
         events.append((match.start() + 1, f"{schema}.{new}", True))
     for match in SET_SCHEMA_RE.finditer(text):
         schema, obj, new_schema = match.group(1), match.group(2), match.group(3)
-        events.append((match.start(), f"{schema}.{obj}", False))
-        events.append((match.start() + 1, f"{new_schema}.{obj}", True))
+        # #2809. The move must be booked at the END of its own statement. The
+        # statement names the table it is moving, and `hard_reference_events`
+        # records that name at `match.start(1)` -- INSIDE this match. Booking
+        # the removal at `match.start()` therefore withdrew the table from
+        # `available` before `preflight_batch` reached the very reference that
+        # performs the move, so every archive-a-table migration self-flagged as
+        # "references missing <table>; it was DROPPED (or renamed away)".
+        events.append((match.end(), f"{schema}.{obj}", False))
+        events.append((match.end() + 1, f"{new_schema}.{obj}", True))
     events.sort(key=lambda item: item[0])
     return events
 
