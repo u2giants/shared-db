@@ -1,47 +1,57 @@
 {
   "schema_version": 1,
-  "work_issue": 2716,
+  "work_issue": 2357,
   "outcome": "ready-for-merge",
-  "pr": 2736,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2716/4",
-  "contract_sha256": "1d0e80edc35e9fd891a9df7c65cbf2e39cc551dfa618a1dc7336736dfbb73537",
-  "head_sha": "c29cdfa5ab3df82f600ae70489d76caf04f39466",
+  "pr": 2835,
+  "migration_versions": [
+    "20260912000806"
+  ],
+  "contract_ref": "refs/db-contracts/2357/3",
+  "contract_sha256": "e6b78e403384f66a8785866ca1f368277b12d86bc4578e0fcbd312e39f202790",
+  "head_sha": "65f13168624a0eedde7ce0c9b8db6312a9113795",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/production-promotion-procedure.md",
-    "scripts/production_apply_review_evidence.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_apply_review_evidence.py",
-    "scripts/test_production_business_risk_gate.py"
+    "supabase/migrations/20260912000806_licensing_candidate_and_review_apis.sql"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "db_reads": [
+    "plm.source_resolution",
+    "plm.licensing_relationship_resolution",
+    "plm.licensing_source_scope",
+    "plm.opa_capture",
+    "plm.opa_property_character_capture"
+  ],
+  "db_writes": [
+    "api.licensing_entity_candidates",
+    "api.licensing_relationship_candidates",
+    "api.licensing_resolution_queue"
+  ],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Ran 163 tests, OK, exit 0, observed at merge commit c29cdfa5 on base 4da62786."
+      "evidence": "Re-run at refreshed head 65f13168. Static checks passed. Issue #1235 expected-count guard passed; verify-cost guard passed on the 1 added migration; issue #1684 EOL reference guard passed."
     },
     {
-      "command": "python production-policy regression suite",
+      "command": "python -m pytest scripts/",
       "exit_code": 0,
-      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 63.249s, OK (skipped=8), exit 0. Counts re-measured at this head, not carried forward from generation 3."
+      "evidence": "Re-run at refreshed head 65f13168: 1144 passed, 8 skipped, 5 warnings, 739 subtests passed in 82.59s. Counts re-measured at this head, not carried forward from generation 2."
     },
     {
-      "command": "YAML parse and git diff --check",
+      "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check 4da62786..HEAD reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; AST confirms one definition and one call site of enforce_automatic_risk_decision."
+      "evidence": "No whitespace errors at the refreshed head 65f13168."
     }
   ],
   "assumptions_resolved": [
-    "Live issue and pull-request inventory found no existing owner or duplicate implementation for #2716.",
-    "Owner authority activates only this exact automatic shared-db workflow path; no preview or production database write occurred.",
-    "The #2727 admission interface is pinned as --resolve-admitted-issue-for-pr and --admit-issue; absence fails before dispatch."
+    "Base-table privileges read live from the authoritative catalog rather than information_schema: plm.source_resolution, plm.licensing_relationship_resolution and plm.licensing_source_scope each have rowsecurity=t, one policy, authenticated holding SELECT and anon holding nothing.",
+    "plm.opa_capture and plm.opa_property_character_capture have rowsecurity=t, zero policies, and grant SELECT to service_role only; authenticated holds nothing. Confirmed a browser role cannot read them at all.",
+    "That asymmetry was resolved by exposing OPA corroboration as a bounded aggregate guarded by has_table_privilege and labelled opa_evidence_readable, so an unauthorized caller sees false and NULL rather than a zero that would misstate the source data.",
+    "Row counts at authoring time were source_resolution 0, licensing_relationship_resolution 0, licensing_source_scope 0, opa_capture 2, opa_property_character_capture 10454. Because the resolution tables are empty, the security proof rests entirely on privilege probes and never on an empty read.",
+    "The migration's verification block carries positive controls proving the privilege probe can return false (anon must not hold SELECT on the OPA capture table) and true (authenticated must hold SELECT on plm.source_resolution), so a green run means the check was exercised rather than vacuously satisfied.",
+    "Exactly three database objects are created, matching claim #2834's declared objects; no helper function was added, and no review decision or curated row is written.",
+    "This lane was refreshed twice. The first refresh sealed generation 2 against main 4da62786; main then moved to c7465a75 when PR #2736 merged, returning the PR to CONFLICTING/DIRTY, so the branch was brought forward again and re-sealed here at generation 3. git merge-tree was re-derived against the new main before anything was resolved: on both refreshes the ONLY conflicting paths git reported were .agent/completion.json and .agent/contract.json, the shared repo-root evidence pair, which main carried from another lane (PR #2842 first, then the #2716 / PR #2736 lane). No code file conflicted on either pass. Both files were resolved wholesale to this lane's own evidence rather than hand-merged between two lanes. The migration file merged without conflict and is byte-identical to the reviewed implementation at 9cdf3820, confirmed by an empty git diff over that path."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Second refresh of this lane. Main moved to 4da62786 when PR #2842 merged, returning #2736 to CONFLICTING/DIRTY. Refreshed by MERGE from main (not rebase), so history is extended rather than rewritten. git merge-tree against real main showed the only conflicting paths were .agent/contract.json and .agent/completion.json; no code file conflicted. Both were resolved wholesale to this lane's own evidence pair (main carried PR #2842 / work_issue 2843 evidence, another lane's artifact, not shared state) and are re-sealed here at contract generation 4. Verified the merged tree is byte-identical to the pre-refresh head 07913fc3 for all seven code files, and byte-identical to main 4da62786 for the three files main contributed, so the merge regressed nothing in either direction. Re-verified the duplicate --admit-issue trap that merged clean and silent three times on the previous pass: exactly two occurrences remain, both $ADMITTED_ISSUE, and AST reports exactly one definition and one call site of enforce_automatic_risk_decision. head_sha is the merge commit c29cdfa5, the implementation commit; this evidence commit sits on top of it and cannot describe itself."
+  "evidence_note": "Three api views at reserved version 20260912000806 under claim #2834, refreshed onto main c7465a75 by MERGE (not rebase), so history is extended rather than rewritten. Implementation head is the refresh merge 65f13168; this evidence commit sits on top of it and cannot describe itself. base_sha is the real post-refresh PR base read from GitHub after the push. files_changed is exactly what git reports for the diff from that base to the implementation head, including the two .agent files, which git does report. Ready for exact-head governed review, CI, and guarded merge. No preview apply attempted: the preview database is blocked until PR #2808 lands."
 }
