@@ -59,36 +59,50 @@ export function trustedOutcomeComments(comments = []) {
   })
 }
 
-export function outcomeHistory(comments = [], issue) {
-  const expectedIssue = issue === undefined ? null : Number(issue)
-  const events = trustedOutcomeComments(comments).flatMap((comment) => parseEventComment(comment?.body ?? ''))
-    .filter((event) => OUTCOME_STATES.includes(event.event_type))
-    .filter((event) => expectedIssue === null || Number(event.work_issue) === expectedIssue)
-    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)
-      || (LINEAR.indexOf(a.event_type)<0?LINEAR.length:LINEAR.indexOf(a.event_type))-(LINEAR.indexOf(b.event_type)<0?LINEAR.length:LINEAR.indexOf(b.event_type))
-      || a.event_id.localeCompare(b.event_id))
+// Replay the ordered outcome events, ignoring every event a later appended
+// supersession named. `offenders` records which exact event raised each problem,
+// so a governed repair can name the smallest set of events to supersede instead
+// of guessing — and never has to edit or delete an audit comment to do it.
+function replayOutcomeEvents(events, superseded = new Set()) {
   const problems = []
+  const offenders = []
   const seen = new Set()
   let highest = -1
   let blocked = false
+  const flag = (event, message) => { problems.push(message); offenders.push(event.event_id) }
   for (const event of events) {
-    if (seen.has(event.event_id)) { problems.push(`duplicate outcome event ${event.event_id}`); continue }
+    if (superseded.has(event.event_id)) continue
+    if (seen.has(event.event_id)) { flag(event, `duplicate outcome event ${event.event_id}`); continue }
     seen.add(event.event_id)
     if (event.result === 'refused') continue
     if (event.event_type === 'blocked') {
-      if(blocked)problems.push('blocked repeats before yielded')
+      if(blocked)flag(event, 'blocked repeats before yielded')
       blocked = true; continue
     }
     if (event.event_type === 'yielded') {
-      if(!blocked)problems.push('yielded without an active blocked state')
+      if(!blocked)flag(event, 'yielded without an active blocked state')
       blocked = false; continue
     }
     const index = LINEAR.indexOf(event.event_type)
     if (index < 0) continue
-    if (index > highest + 1) problems.push(`${event.event_type} skips ${LINEAR[highest + 1]}`)
-    if (index <= highest) problems.push(`${event.event_type} repeats or moves backward from ${LINEAR[highest]}`)
+    if (index > highest + 1) flag(event, `${event.event_type} skips ${LINEAR[highest + 1]}`)
+    if (index <= highest) flag(event, `${event.event_type} repeats or moves backward from ${LINEAR[highest]}`)
     highest = Math.max(highest, index)
   }
+  return { problems, offenders, highest, blocked }
+}
+
+export function outcomeHistory(comments = [], issue) {
+  const expectedIssue = issue === undefined ? null : Number(issue)
+  const parsed = trustedOutcomeComments(comments).flatMap((comment) => parseEventComment(comment?.body ?? ''))
+    .filter((event) => expectedIssue === null || Number(event.work_issue) === expectedIssue)
+  const superseded = new Set(parsed.flatMap((event) => Array.isArray(event.supersedes) ? event.supersedes : []))
+  const events = parsed
+    .filter((event) => OUTCOME_STATES.includes(event.event_type))
+    .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp)
+      || (LINEAR.indexOf(a.event_type)<0?LINEAR.length:LINEAR.indexOf(a.event_type))-(LINEAR.indexOf(b.event_type)<0?LINEAR.length:LINEAR.indexOf(b.event_type))
+      || a.event_id.localeCompare(b.event_id))
+  const { problems, highest, blocked } = replayOutcomeEvents(events, superseded)
   return {
     valid: problems.length === 0,
     problems,
@@ -96,6 +110,7 @@ export function outcomeHistory(comments = [], issue) {
     blocked,
     complete: highest === LINEAR.length - 1,
     events,
+    superseded: [...superseded],
   }
 }
 
@@ -117,15 +132,73 @@ export function assertOutcomeTransition(comments, next, issue) {
   return history
 }
 
+// GitHub comment listing is eventually consistent, so a read-back issued
+// immediately after a successful post can race its own write (issue #2847). A
+// first miss therefore proves nothing. Re-read with bounded backoff — the same
+// pattern the --claim dispatch path already uses — and refuse only once the
+// event is genuinely absent after every attempt. Throwing on the first miss made
+// operators retry a write that had already landed, appending a second event with
+// a different event_id and wedging the ledger permanently.
+export const OUTCOME_READBACK_DELAYS = Object.freeze([0, 250, 500, 1000, 1500, 2000])
+const defaultWait = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms)
+
+function confirmOutcomeReadBack(io, issue, predicate) {
+  let history = null
+  for (const delay of OUTCOME_READBACK_DELAYS) {
+    if (delay) (io.wait ?? defaultWait)(delay)
+    history = outcomeHistory(io.issueComments(Number(issue)), issue)
+    if (predicate(history)) return { seen: true, history }
+  }
+  return { seen: false, history }
+}
+
 export function advanceOutcome({issue,state,actor,timestamp=new Date().toISOString(),evidenceUrls=[]},io){
   const comments=io.issueComments(Number(issue))
   assertOutcomeTransition(comments,state,issue)
   if(!['entered','classified'].includes(state)&&(!Array.isArray(evidenceUrls)||evidenceUrls.length<1||evidenceUrls.some((value)=>typeof value!=='string'||!EVIDENCE_REF.test(value))))throw new OutcomeError(`outcome ${state} requires at least one durable GitHub or artifact evidence reference`)
   const event=outcomeEvent({issue,state,actor,timestamp,evidenceUrls})
   io.commentIssue(Number(issue),formatEventComment(event))
-  const readBack=outcomeHistory(io.issueComments(Number(issue)),issue)
-  if(!readBack.valid||!readBack.events.some((row)=>row.event_id===event.event_id))throw new OutcomeError(`outcome ${state} event did not read back exactly`)
+  const {seen}=confirmOutcomeReadBack(io,issue,(history)=>history.valid&&history.events.some((row)=>row.event_id===event.event_id))
+  if(!seen)throw new OutcomeError(`outcome ${state} event did not read back exactly`)
   return {issue:Number(issue),state,event_id:event.event_id}
+}
+
+// Curative counterpart to the fix above. Two work issues were already wedged by
+// duplicate events before the backoff existed, and nothing could clear an invalid
+// history: requireAdmission refuses on it before doing anything.
+//
+// This repairs ONLY by appending. It names the exact earlier event_ids that no
+// longer count and records who ran it and why. No existing coordination comment
+// is edited or deleted — that would be audit-history tampering.
+export const OUTCOME_REPAIR_EVENT_TYPE = 'recovery_completed'
+
+export function repairOutcomeHistory({issue,actor,reason,timestamp=new Date().toISOString(),evidenceUrls=[]},io){
+  if(typeof actor!=='string'||!actor.trim())throw new OutcomeError('outcome history repair must record the actor that ran it')
+  if(typeof reason!=='string'||!reason.trim())throw new OutcomeError('outcome history repair must record why it was run')
+  if(!Array.isArray(evidenceUrls)||evidenceUrls.some((value)=>typeof value!=='string'||!EVIDENCE_REF.test(value)))throw new OutcomeError('outcome history repair evidence must be durable GitHub or artifact references')
+  const history=outcomeHistory(io.issueComments(Number(issue)),issue)
+  if(history.valid)throw new OutcomeError(`outcome history for #${issue} is already valid; repair refuses to append to a healthy ledger`)
+  const dropped=new Set(history.superseded)
+  for(let attempt=0;attempt<=history.events.length;attempt+=1){
+    const replay=replayOutcomeEvents(history.events,dropped)
+    if(!replay.problems.length)break
+    const offender=replay.offenders[0]
+    if(!offender||dropped.has(offender))throw new OutcomeError(`outcome history for #${issue} cannot be repaired by supersession: ${replay.problems.join('; ')}`)
+    dropped.add(offender)
+  }
+  const supersedes=[...dropped].filter((id)=>!history.superseded.includes(id))
+  if(!supersedes.length)throw new OutcomeError(`outcome history for #${issue} names no superseding event that would repair it`)
+  if(replayOutcomeEvents(history.events,dropped).problems.length)throw new OutcomeError(`outcome history for #${issue} cannot be repaired by supersession`)
+  const event=coordinationEvent({
+    eventType:OUTCOME_REPAIR_EVENT_TYPE, workIssue:Number(issue), actor, timestamp,
+    detail:`outcome history repair by ${actor}: ${reason.trim()}`,
+    supersedes, evidence_urls:evidenceUrls,
+  })
+  io.commentIssue(Number(issue),formatEventComment(event))
+  const {seen,history:readBack}=confirmOutcomeReadBack(io,issue,(current)=>supersedes.every((id)=>current.superseded.includes(id)))
+  if(!seen)throw new OutcomeError('outcome history repair event did not read back exactly')
+  if(!readBack.valid)throw new OutcomeError(`outcome history for #${issue} remains invalid after repair: ${readBack.problems.join('; ')}`)
+  return {issue:Number(issue),event_id:event.event_id,supersedes,state:readBack.state,actor,reason:reason.trim()}
 }
 
 export function outcomeEvent({ issue, state, actor, timestamp, evidenceUrls = [], detail }) {

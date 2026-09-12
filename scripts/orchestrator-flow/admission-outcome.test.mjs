@@ -1,7 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { evaluateAdmission, parseImpactBlock, STRUCTURAL_CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, assertPrCarriesStructuralChange, inspectPrStructuralChange } from './admission.mjs'
-import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
+import { advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, repairOutcomeHistory, OUTCOME_STATES } from './outcome-lifecycle.mjs'
 import { coordinationEvent, formatEventComment, parseEventComment } from '../db-coordination-events.mjs'
 import { admitIssue, buildDynamicQueues, claimBody, derivePrOperationRoute, EXCLUSIVE_REFS, main as managerMain, matchesGeneratedTypesProof, matchesLiveProof, MUTEX_REF, parseQueueScope, resolveAdmittedIssueForPr } from '../manage-migration-author-lanes.mjs'
 import { findCompletionRecord } from '../lib/work-dependencies.mjs'
@@ -509,6 +509,69 @@ test('advance validation and lifecycle mutation share one author-mutex interval'
   const old=console.log;console.log=()=>{}
   try{assert.equal(managerMain(['--advance-outcome','dispatched','--admit-issue','41','--issue','41','--owner','o','--evidence','https://github.com/u2giants/shared-db/issues/99'],new Date('2026-09-11T00:03:00Z'),io),0)}finally{console.log=old}
   assert.equal(writes,1);assert.equal(outcomeHistory(comments,41).state,'dispatched');assert.equal(refs.size,0)
+})
+
+test('a lifecycle advance tolerates delayed visibility of its own event instead of wedging the ledger (issue #2847)',()=>{
+  const comments=eventComments('classified',41);let hidden=0,waits=0
+  const io={
+    issueComments:()=>hidden-->0?comments.filter((row)=>parseEventComment(row.body)[0]?.event_type!=='dispatched'):comments,
+    commentIssue:(_n,body)=>{comments.push(ownerComment(body));hidden=3},
+    wait:()=>{waits++},
+  }
+  const result=advanceOutcome({issue:41,state:'dispatched',actor:'test',timestamp:'2026-09-11T00:03:00Z',evidenceUrls:['https://github.com/u2giants/shared-db/issues/99']},io)
+  assert.equal(result.state,'dispatched');assert.equal(waits,3)
+  assert.equal(comments.filter((row)=>parseEventComment(row.body)[0]?.event_type==='dispatched').length,1)
+  assert.equal(outcomeHistory(comments,41).state,'dispatched')
+})
+
+test('a lifecycle advance still refuses only after every bounded read-back retry is exhausted (issue #2847)',()=>{
+  const comments=eventComments('classified',41);let waits=0
+  const io={
+    issueComments:()=>comments.filter((row)=>parseEventComment(row.body)[0]?.event_type!=='dispatched'),
+    commentIssue:(_n,body)=>comments.push(ownerComment(body)),wait:()=>{waits++},
+  }
+  assert.throws(()=>advanceOutcome({issue:41,state:'dispatched',actor:'test',timestamp:'2026-09-11T00:03:00Z',evidenceUrls:['https://github.com/u2giants/shared-db/issues/99']},io),/outcome dispatched event did not read back exactly/)
+  assert.equal(waits,5)
+})
+
+test('a wedged duplicate-event ledger is repaired by appending one superseding event (issue #2847)',()=>{
+  const comments=eventComments('classified',41)
+  const duplicate=outcomeEvent({issue:41,state:'classified',actor:'runner',timestamp:'2026-09-11T05:52:21Z'})
+  comments.push(ownerComment(formatEventComment(duplicate)))
+  assert.equal(outcomeHistory(comments,41).valid,false)
+  const before=comments.map((row)=>row.body)
+  const io={issueComments:()=>comments,commentIssue:(_n,body)=>comments.push(ownerComment(body)),wait:()=>{}}
+  const result=repairOutcomeHistory({issue:41,actor:'albert',reason:'duplicate classified from the #2847 read-back race',timestamp:'2026-09-12T00:00:00Z'},io)
+  assert.deepEqual(result.supersedes,[duplicate.event_id])
+  const after=outcomeHistory(comments,41)
+  assert.equal(after.valid,true);assert.equal(after.state,'classified')
+  assert.deepEqual(comments.slice(0,before.length).map((row)=>row.body),before,'repair must never edit or delete an existing coordination comment')
+  const repair=parseEventComment(comments.at(-1).body)[0]
+  assert.match(repair.detail,/albert/);assert.match(repair.detail,/#2847 read-back race/)
+  assert.throws(()=>repairOutcomeHistory({issue:41,actor:'albert',reason:'again',timestamp:'2026-09-12T00:01:00Z'},io),/already valid; repair refuses/)
+  assert.throws(()=>repairOutcomeHistory({issue:41,actor:'albert',reason:'   ',timestamp:'2026-09-12T00:01:00Z'},io),/must record why it was run/)
+  assert.throws(()=>repairOutcomeHistory({issue:41,actor:'',reason:'x',timestamp:'2026-09-12T00:01:00Z'},io),/must record the actor/)
+})
+
+test('--repair-outcome-history repairs under the author mutex and names its actor and reason (issue #2847)',()=>{
+  const comments=eventComments('classified',41),refs=new Map(),labels=[]
+  const duplicate=outcomeEvent({issue:41,state:'classified',actor:'runner',timestamp:'2026-09-11T05:52:21Z'})
+  comments.push(ownerComment(formatEventComment(duplicate)))
+  const io={
+    issueComments:()=>comments,makeOwnerCommit:()=> 'repair-owner',
+    readRef:(ref)=>refs.get(ref)??null,
+    createRef:(ref,sha)=>{labels.push('lock');if(refs.has(ref))return false;refs.set(ref,sha);return true},
+    deleteRef:(ref)=>{labels.push('unlock');refs.delete(ref)},wait:()=>{},
+    commentIssue:(_n,body)=>{assert.equal(refs.size,1,'repair must be written only while the mutex is held');labels.push('repair');comments.push(ownerComment(body))},
+  }
+  let printed='';const old=console.log;console.log=(value)=>{printed=String(value)}
+  try{assert.equal(managerMain(['--repair-outcome-history','41','--owner','albert','--reason','duplicate classified from the #2847 read-back race'],new Date('2026-09-12T00:00:00Z'),io),0)}finally{console.log=old}
+  assert.deepEqual(labels,['lock','repair','unlock'])
+  assert.deepEqual(JSON.parse(printed).supersedes,[duplicate.event_id])
+  assert.equal(outcomeHistory(comments,41).valid,true);assert.equal(refs.size,0)
+  let message='';const olderr=console.error;console.error=(value)=>{message=String(value)}
+  try{assert.equal(managerMain(['--repair-outcome-history','41','--owner','albert'],new Date('2026-09-12T00:02:00Z'),io),2)}finally{console.error=olderr}
+  assert.match(message,/--repair-outcome-history requires --reason/)
 })
 
 test('outcome status ignores trusted lifecycle events for a different issue',()=>{

@@ -43,7 +43,7 @@ import { REVIEW_VERDICT_REF_PREFIX, REVIEW_VERDICT_REPLACEMENT_REF_PREFIX, REVIE
 import { changedPathsFromPullRequestFiles, classifyChangedPaths, classifyLightweightMergePullRequestFiles } from './lib/documents-only-change.mjs'
 import { HISTORICAL_RESTORATIONS, validateHistoricalRestorationFile } from './historical-migration-restorations.mjs'
 import { AdmissionError, SERVICE_CLASSES, CHANGE_TYPES, NON_STRUCTURAL_CHANGE_TYPES, parseImpactBlock, evaluateAdmission, inspectPrStructuralChange } from './orchestrator-flow/admission.mjs'
-import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
+import { OUTCOME_STATES, OutcomeError, advanceOutcome, completeOutcome, outcomeEvent, outcomeHistory, repairOutcomeHistory } from './orchestrator-flow/outcome-lifecycle.mjs'
 import { isContentPreservingRefresh } from './lib/pr-content-equivalence.mjs'
 
 export const REPO = 'u2giants/shared-db'
@@ -6674,6 +6674,7 @@ function parseArgs(argv) {
     else if (a === '--resolve-admitted-issue-for-pr') out.resolveAdmittedIssueForPr = Number(next(i++))
     else if (a === '--outcome-status') out.outcomeStatus = Number(next(i++))
     else if (a === '--advance-outcome') out.advanceOutcome = next(i++)
+    else if (a === '--repair-outcome-history') out.repairOutcomeHistory = Number(next(i++))
     else if (a === '--complete-outcome') out.completeOutcome = Number(next(i++))
     else if (a === '--audit') out.audit = true
     else if (a === '--queue-audit') out.queueAudit = true
@@ -6736,12 +6737,12 @@ function parseArgs(argv) {
 export function main(argv, now = new Date(), io = githubIo) {
   try {
     const o = parseArgs(argv)
-    const primaryKeys=['authorizeRepositoryMaintenanceStatus','resolveAdmittedIssueForPr','outcomeStatus','advanceOutcome','completeOutcome','recoverMutex','reconcileFlow','preparePreviewDispatch','repairPreviewReady','terminalizeHistoricalPreviewReady','flowAudit','recoverSplit','expandClaim','expandClaimFromIssue','renewClaim','recoverExpiredClaim','relinquishAuthorLease','resumeAuthorLease','reissueMergedClaim','reversionClaim','replaceFailedReviewer','releaseFailedReviewer','probeSilentReviewer','reclaimSilentReviewer','reviewerCapacity','excludeReviewer','reinstateReviewerExclusion','reviewerPreflight','assignReviewer','activateReviewCutover','acquireExclusive','releaseExclusive','claim','returnIssue','queueAudit','assertExclusive','recoverExclusive','completeWork','releaseClaim','releaseDuplicateClaim','cleanup','audit']
+    const primaryKeys=['authorizeRepositoryMaintenanceStatus','resolveAdmittedIssueForPr','outcomeStatus','advanceOutcome','repairOutcomeHistory','completeOutcome','recoverMutex','reconcileFlow','preparePreviewDispatch','repairPreviewReady','terminalizeHistoricalPreviewReady','flowAudit','recoverSplit','expandClaim','expandClaimFromIssue','renewClaim','recoverExpiredClaim','relinquishAuthorLease','resumeAuthorLease','reissueMergedClaim','reversionClaim','replaceFailedReviewer','releaseFailedReviewer','probeSilentReviewer','reclaimSilentReviewer','reviewerCapacity','excludeReviewer','reinstateReviewerExclusion','reviewerPreflight','assignReviewer','activateReviewCutover','acquireExclusive','releaseExclusive','claim','returnIssue','queueAudit','assertExclusive','recoverExclusive','completeWork','releaseClaim','releaseDuplicateClaim','cleanup','audit']
     const selectedPrimary=primaryKeys.filter((key)=>Object.prototype.hasOwnProperty.call(o,key))
     const hasAdmission=Object.prototype.hasOwnProperty.call(o,'admitIssue')
     if(selectedPrimary.length>1)throw new LaneError(`choose exactly one primary operation; received ${selectedPrimary.join(', ')}`)
     if(hasAdmission&&(!Number.isInteger(o.admitIssue)||o.admitIssue<=0))throw new LaneError('--admit-issue requires a positive issue number')
-    const numericPrimary=new Set(['resolveAdmittedIssueForPr','outcomeStatus','completeOutcome','preparePreviewDispatch','returnIssue'])
+    const numericPrimary=new Set(['resolveAdmittedIssueForPr','outcomeStatus','repairOutcomeHistory','completeOutcome','preparePreviewDispatch','returnIssue'])
     if(selectedPrimary.length===1&&numericPrimary.has(selectedPrimary[0])&&(!Number.isInteger(o[selectedPrimary[0]])||o[selectedPrimary[0]]<=0))throw new LaneError(`--${selectedPrimary[0].replace(/[A-Z]/g,(value)=>`-${value.toLowerCase()}`)} requires a positive number`)
     const admissionCombined=new Set(['claim','assignReviewer','replaceFailedReviewer','preparePreviewDispatch','acquireExclusive','advanceOutcome'])
     if(hasAdmission&&selectedPrimary.length===1&&!admissionCombined.has(selectedPrimary[0]))throw new LaneError(`--admit-issue cannot be combined with --${selectedPrimary[0].replace(/[A-Z]/g,(value)=>`-${value.toLowerCase()}`)}`)
@@ -6757,6 +6758,17 @@ export function main(argv, now = new Date(), io = githubIo) {
         requireAdmission(o,io,{pr:o.pr??null,mutexOwner:ownerSha})
         requireOwnedRef(MUTEX_REF,ownerSha,io)
         return advanceOutcome({issue:Number(o.issue),state:o.advanceOutcome,actor:o.owner??'manage-migration-author-lanes',timestamp:now.toISOString(),evidenceUrls:[o.evidence]},io)
+      })
+      console.log(JSON.stringify(result,null,2));return 0
+    }
+    if(o.repairOutcomeHistory){
+      if(!o.owner)throw new LaneError('--repair-outcome-history requires --owner <actor>')
+      if(!o.reason)throw new LaneError('--repair-outcome-history requires --reason "<why this ledger is being repaired>"')
+      const result=withAuthorMutex('outcome-repair',io,o,(ownerSha)=>{
+        requireOwnedRef(MUTEX_REF,ownerSha,io)
+        return repairOutcomeHistory({issue:o.repairOutcomeHistory,actor:o.owner,reason:o.reason,timestamp:now.toISOString(),evidenceUrls:o.evidence?[o.evidence]:[]},{...io,
+          commentIssue:(...args)=>{requireOwnedRef(MUTEX_REF,ownerSha,io);return io.commentIssue(...args)},
+        })
       })
       console.log(JSON.stringify(result,null,2));return 0
     }
@@ -7069,7 +7081,7 @@ export function main(argv, now = new Date(), io = githubIo) {
       for(const problem of malformed)console.error(`MALFORMED ${problem}`)
       return malformed.length ? 2 : 0
     }
-    throw new LaneError('choose --admit-issue, --claim, --audit, --queue-audit, --outcome-status, --complete-outcome, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
+    throw new LaneError('choose --admit-issue, --claim, --audit, --queue-audit, --outcome-status, --repair-outcome-history, --complete-outcome, --return-issue, --cleanup-stale, --activate-review-cutover, or an exclusive-lane command')
   } catch (error) { console.error(`REFUSED: ${error.message}`); return 2 }
 }
 
