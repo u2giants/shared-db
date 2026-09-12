@@ -6,9 +6,8 @@
   "migration_versions": [],
   "contract_ref": "refs/db-contracts/2843/1",
   "contract_sha256": "41f448e13bda0f323015d0881b249b0b90f995169c84308cfd6d6bba674ad186",
-  "head_sha": "cdfd3091d1c16c415368c5870d4479d4a78883fe",
+  "head_sha": "8e189f42a09528e62bc47a9d8944fd13ea2bbe03",
   "files_changed": [
-    ".agent/contract.json",
     "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
     "scripts/manage-migration-author-lanes.mjs",
     "scripts/manage-migration-author-lanes.test.mjs"
