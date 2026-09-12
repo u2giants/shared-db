@@ -1,46 +1,58 @@
 {
   "schema_version": 1,
-  "work_issue": 2817,
+  "work_issue": 2611,
   "outcome": "ready-for-merge",
-  "pr": 2822,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2817/1",
-  "contract_sha256": "870d560334dd2fad505a0f20cabcedd584618b4001d07e728dd7a4393ad5625f",
-  "head_sha": "c0012ecd2e0704396b326384e3efda2e4469e30b",
+  "pr": 2823,
+  "migration_versions": [
+    "20260911230553"
+  ],
+  "contract_ref": "refs/db-contracts/2611/2",
+  "contract_sha256": "efcc3f89a0c3400c9231652edefdc9c2fbe94004e5c9f61ce235972d793afd98",
+  "head_sha": "f7037b8444ca8d873693a3894bf28b01d7a9f7ab",
   "files_changed": [
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs"
+    ".github/workflows/prepack-exclusion.yml",
+    "docs/business-rules/product-items-and-identifiers.md",
+    "docs/verification/prepack-exclusion-20260911.md",
+    "docs/verification/throughput-guard-truth-audit-20260828.json",
+    "scripts/check-prepack-exclusion.mjs",
+    "scripts/check-prepack-exclusion.test.mjs",
+    "supabase/migrations/20260911230553_prepack_exclusion.sql"
   ],
   "db_reads": [],
-  "db_writes": [],
+  "db_writes": [
+    "function plm.prepack_role",
+    "view plm.item_missing_attribution",
+    "table plm.item_missing_attribution"
+  ],
   "checks": [
-    {
-      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
-      "exit_code": 0,
-      "evidence": "42 tests, 42 pass, 0 fail, 0 skipped, including the new 20260911221304 pin test."
-    },
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static checks passed."
+      "evidence": "Static checks passed: Guard B found no migration sorting before the base branch's newest version 20260911214438; the #1235 expected-count guard, the verify-cost guard (1 added migration, no prohibited verification read) and the #1684 EOL reference guard all passed."
     },
     {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
+      "command": "node scripts/check-prepack-exclusion.test.mjs",
       "exit_code": 0,
-      "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."
+      "evidence": "Guard verified green on the tree AND red on seven known-dirty variants: filter removed, role called but result ignored, member role dropped, head source swapped back to public.erp_items_current, transaction-attested head source lost, both non-licensed divisions dropped, and a commented-out filter. A guard never shown to fail is not evidence."
     },
     {
-      "command": "git diff --check",
+      "command": "node scripts/check-migration-pr-lease.mjs",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "Initially REFUSED with 'migration writes undeclared objects: table plm.item_missing_attribution'. The refusal was correct: granting and revoking on a view registers as a write against 'table <name>' as well as 'view <name>'. Confirmed by running dispatchObjectKeys directly over the migration - removing the grants drops the table key, and spelling them 'on table' does not. Claim #2819 was expanded to declare all three objects rather than stripping the view's permission hardening or weakening the extractor."
     }
   ],
   "assumptions_resolved": [
-    "Run 34655606553 confirmed from its own log: workflow_dispatch at headSha 916b8005f4588ece389f1f137faf651bd78ef0a2, conclusion success, PREVIEW_PROJECT_REF mvpkijzfmfcxhnzqogzs, PREVIEW_ALLOWLIST 20260911221304, and the version present in the preview migration record.",
-    "Digests recomputed independently from the file at 916b8005 using the registry's own normalization (CRLF to LF, trailing newline stripped for the statement): fileSha256 ecc847f602358edb27829cc49faba86b58e3788b6cf98c702eaccf8b8527904d, statementBytes 55149, statementSha256 a9171a6023e724b677655db8d89e572f4394ad8c1b4db41d37a52438b492d20e. All three match issue #2817.",
-    "The migration bytes are identical at the applied commit 916b8005 and at PR #2808 head 234647f3 (same sha256).",
-    "sourcePr and sourceMergeCommit are omitted, so validateHistoricalProductionProvenance still refuses this version and no production eligibility is granted."
+    "Version 20260911230553 is the version reserved by author claim #2819, and the permanent reservation ref was verified present by the lease check.",
+    "The issue's core claim was verified before any file was written and is still TRUE: no SQL implements the exclusion. A production scan of every non-system function body, view and materialized view matching prepack|pre_pack|assortment returns only DAM-order objects and api.plm_item_list, none of which filters a missing-attribution population. One issue detail is inaccurate - its pg_proc scan does not return empty, it returns unrelated matches.",
+    "The issue's named head source is WRONG rather than stale. public.erp_items_current is a frozen DesignFlow snapshot last synced 2026-05-21; of its 1,454 prepack rows, 1,437 are live prepack MEMBERS and exactly 1 is a live head. The implementation therefore sources from ColdLion and references neither erp_items_current nor api.plm_item_list, both of which open claim #2778 holds.",
+    "coldlion.prod_history_component was re-derived rather than assumed: every head-bearing row is self-referencing, so it is a flag meaning 'this ordered item is a prepack head', not a head-to-member explosion. An earlier reading as an explosion would have produced a confident but false 'the head/member labels are inverted' finding, and was discarded.",
+    "The re-derivation reproduced unmapped-licensor-population.md's licensed-division figure of 2,016 exactly, an independent validation of that settled document.",
+    "Re-scope, recorded for the reviewer: #2611 is framed entirely around heads, but within licensed divisions heads contribute 7 of the 1,770 rows the exclusion removes and members contribute 1,763, because 954 of 961 apparent heads sit in EH001/EP001 which the division rule removes first. Both roles are excluded behind one function and the regression guard covers both.",
+    "Two errors in docs/business-rules/product-items-and-identifiers.md that this work disproved were corrected: the head/member table mislabelled erp_items_current.prepack_code as heads, and a paragraph claimed an inventory row's prepack code identifies an assortment head when coldlion.inventory.prepack_code is empty on every production row.",
+    "The public-data-venue test failure is pre-existing and outside this contract: it fails identically on untouched origin/main and on other open pull requests, over eight docs/verification/database-efficiency CSVs this lane did not author. It is already owned by issues #2390 and #2391. No evidence file was deleted and no guard was relaxed.",
+    "The throughput truth audit refused this branch with 'found 288, recorded 277'. Verified NOT pre-existing: a pristine-main probe passes at 277. All 11 new sites are genuine prose about a missing-attribution population, so each received a hand-written 'excluded' disposition rather than being reworded to dodge the pattern, which would have left the guard green while defeating it. The count and digest were recomputed mechanically from the guard's own discover(), never hand-incremented. origin/main still read 277 immediately before the write, so no rival lane's edit was overwritten.",
+    "Refreshed from main by MERGE, never a rebase, after #2822 landed and flipped the PR to CONFLICTING. The only overlap was the shared .agent evidence pair, which main carried for lane #2817; that collision was resolved in favour of this lane's own #2611 evidence. head_sha is the merge commit because its tree already holds all seven implementation files unchanged, and 9eb1d587..f7037b84 yields exactly those seven."
   ],
   "stop_conditions_hit": [],
-  "evidence_note": "Registry-only change; ready for exact-head governed review, CI, and guarded merge."
+  "evidence_note": "Structural change implementing an owner ruling that had never been implemented in SQL. Two database objects plus an offline regression guard, a verification note recording every probe with its query per AGENTS.md 4.3, and two business-rule corrections. Awaiting two governed reviews at the final head, then preview apply, guarded merge and production promotion."
 }
