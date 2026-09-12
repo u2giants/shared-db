@@ -31,7 +31,6 @@ export function projectCurrentRows(spec, sourceRows, { runId, fetchedAt, exclude
     // The schema contract requires a complete-record hash before projection so
     // changes to declined fields remain detectable without retaining their values.
     row.source_hash = sourceHash(source);
-    row.source_raw = source;
     row.run_id = runId;
     row.fetched_at = fetchedAt;
     const key = spec.key.map((column) => row[column] ?? "").join("\u001f");

@@ -5,13 +5,13 @@ const emitters = { text: sqlText, keytext: sqlText, num: sqlNumber, date: sqlDat
 const BATCH = 300;
 
 function stageSql(name, spec, rows) {
-  const columns = [...spec.fields.map((x) => [x.column, PG[x.type]]), ["source_hash","text"], ["source_raw","jsonb"], ["run_id","uuid"], ["fetched_at","timestamptz"]];
+  const columns = [...spec.fields.map((x) => [x.column, PG[x.type]]), ["source_hash","text"], ["run_id","uuid"], ["fetched_at","timestamptz"]];
   const create = `create temp table ${name} (\n  ${columns.map(([c,t]) => `${c} ${t}`).join(",\n  ")}\n) on commit drop;`;
   const statements = [];
   for (let start = 0; start < rows.length; start += BATCH) {
     const batch = rows.slice(start, start + BATCH);
     statements.push(`insert into ${name} (${columns.map(([c]) => c).join(", ")}) values\n${batch.map((row) => `  (${[
-      ...spec.fields.map((field) => emitters[field.type](row[field.column])), sqlText(row.source_hash), `${sqlText(JSON.stringify(row.source_raw))}::jsonb`, sqlUuid(row.run_id), sqlTimestamp(row.fetched_at),
+      ...spec.fields.map((field) => emitters[field.type](row[field.column])), sqlText(row.source_hash), sqlUuid(row.run_id), sqlTimestamp(row.fetched_at),
     ].join(", ")})`).join(",\n")};`);
   }
   return [create, ...statements].join("\n");
@@ -24,9 +24,11 @@ function currentTableSql(table, spec, rows) {
   const all = [...data, "run_id", "fetched_at", "source_hash", "first_seen_at", "last_seen_at"];
   const join = keys.map((key) => `t.${key} = s.${key}`).join(" and ");
   const naturalKey = `jsonb_build_object(${keys.flatMap((key) => [sqlText(key), `s.${key}`]).join(", ")})`;
-  const projected = `(to_jsonb(s) - array['run_id','fetched_at','source_raw']::text[])`;
+  const projected = `(to_jsonb(s) - array['run_id','fetched_at']::text[])`;
   const previous = `(to_jsonb(t) - array['run_id','fetched_at','first_seen_at','last_seen_at']::text[])`;
-  const priorRaw = `coalesce((select cl.new_raw from coldlion.change_log cl where cl.table_name=${sqlText(table)} and cl.natural_key=${naturalKey} order by cl.changed_at desc limit 1), ${previous})`;
+  const comparableProjected = `(to_jsonb(s) - array['run_id','fetched_at','source_hash']::text[])`;
+  const comparablePrevious = `(to_jsonb(t) - array['run_id','fetched_at','source_hash','first_seen_at','last_seen_at']::text[])`;
+  const auditProjection = `${projected} || jsonb_build_object('_source_hash_scope','complete fetched record; declined values not retained','_change_basis',case when t.${keys[0]} is null then 'new source row' when ${comparablePrevious}=${comparableProjected} then 'declined field changed; value intentionally not retained' else 'approved projection changed' end)`;
   const updates = [...data.filter((c) => !keys.includes(c)).map((c) => `${c} = excluded.${c}`), "run_id = excluded.run_id", "fetched_at = excluded.fetched_at", "source_hash = excluded.source_hash", "last_seen_at = excluded.last_seen_at"].join(",\n      ");
   return `${stageSql(stage, spec, rows)}
 create temp table _counts_${table} as
@@ -38,8 +40,8 @@ select count(*) filter (where t.${keys[0]} is null) as inserted,
 insert into coldlion.change_log
   (table_name, natural_key, change_kind, previous_source_hash, new_source_hash, previous_raw, new_raw, run_id)
 select ${sqlText(table)}, ${naturalKey}, case when t.${keys[0]} is null then 'inserted' else 'updated' end,
-       t.source_hash, s.source_hash, case when t.${keys[0]} is null then null else ${priorRaw} end,
-       s.source_raw, s.run_id
+       t.source_hash, s.source_hash, case when t.${keys[0]} is null then null else ${previous} end,
+       ${auditProjection}, s.run_id
   from ${stage} s left join coldlion.${table} t on ${join}
  where t.${keys[0]} is null or t.source_hash <> s.source_hash;
 
