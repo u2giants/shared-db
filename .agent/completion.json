@@ -1,46 +1,54 @@
 {
-  "schema_version": 1,
-  "work_issue": 2817,
-  "outcome": "ready-for-merge",
-  "pr": 2822,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2817/1",
-  "contract_sha256": "870d560334dd2fad505a0f20cabcedd584618b4001d07e728dd7a4393ad5625f",
-  "head_sha": "c0012ecd2e0704396b326384e3efda2e4469e30b",
-  "files_changed": [
-    "scripts/historical-migration-restorations.mjs",
-    "scripts/historical-migration-restorations.test.mjs"
+  "assumptions_resolved": [
+    "api.db_data_admin_scraped_properties is byte-for-byte unchanged: it is not in files_changed, and the contract test asserts it still exists and still carries its review fields.",
+    "The Property arm reuses the existing licensor authority derivation, so the two functions cannot disagree about row attribution.",
+    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are excluded; the contract test fails if any appears in the function definition.",
+    "Each capture-backed family reads one latest complete capture, so issue #2744's performance repair is untouched.",
+    "app.require_licensing_manager_access() is called before any read and is otherwise unmodified."
   ],
-  "db_reads": [],
-  "db_writes": [],
   "checks": [
     {
-      "command": "node --test scripts/historical-migration-restorations.test.mjs scripts/check-applied-migration-edit.test.mjs",
-      "exit_code": 0,
-      "evidence": "42 tests, 42 pass, 0 fail, 0 skipped, including the new 20260911221304 pin test."
-    },
-    {
       "command": "bash scripts/check-sql.sh",
-      "exit_code": 0,
-      "evidence": "Static checks passed."
+      "evidence": "Static checks passed. Guard B compared against base newest version 20260911210709; Guard B2 disclosed no live-ledger source configured.",
+      "exit_code": 0
     },
     {
-      "command": "node --test scripts/agent-work-contract.test.mjs scripts/agent-work-contract-activation.test.mjs scripts/agent-work-contract-git-evidence.test.mjs",
-      "exit_code": 0,
-      "evidence": "44 tests, 44 pass, 0 fail, 0 skipped."
+      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "evidence": "{\"status\":\"OK\",\"sidecars\":49} - version 20260911221304 requires no production verification sidecar.",
+      "exit_code": 0
+    },
+    {
+      "command": "node scripts/check-migration-pr-lease.mjs",
+      "evidence": "Migration claim verified: #2807, version 20260911221304.",
+      "exit_code": 0
     },
     {
       "command": "git diff --check",
-      "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors and no conflict markers reported in the diff.",
+      "exit_code": 0
     }
   ],
-  "assumptions_resolved": [
-    "Run 34655606553 confirmed from its own log: workflow_dispatch at headSha 916b8005f4588ece389f1f137faf651bd78ef0a2, conclusion success, PREVIEW_PROJECT_REF mvpkijzfmfcxhnzqogzs, PREVIEW_ALLOWLIST 20260911221304, and the version present in the preview migration record.",
-    "Digests recomputed independently from the file at 916b8005 using the registry's own normalization (CRLF to LF, trailing newline stripped for the statement): fileSha256 ecc847f602358edb27829cc49faba86b58e3788b6cf98c702eaccf8b8527904d, statementBytes 55149, statementSha256 a9171a6023e724b677655db8d89e572f4394ad8c1b4db41d37a52438b492d20e. All three match issue #2817.",
-    "The migration bytes are identical at the applied commit 916b8005 and at PR #2808 head 234647f3 (same sha256).",
-    "sourcePr and sourceMergeCommit are omitted, so validateHistoricalProductionProvenance still refuses this version and no production eligibility is granted."
+  "contract_ref": "refs/db-contracts/2797/1",
+  "contract_sha256": "bd9cca28ae5bae161a346f00a25d5f6743af26f7ecdfd23819e5810222795b45",
+  "db_reads": [
+    "function api.db_data_admin_scraped_properties",
+    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
+    "character and style-guide source landing tables in the same approved captures"
   ],
+  "db_writes": [
+    "function api.db_data_admin_scraped_source_inventory"
+  ],
+  "files_changed": [
+    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
+    "supabase/tests/db_data_admin_scraped_source_inventory.sql"
+  ],
+  "head_sha": "5adc5eebe857a6f69352edee23c022153d0acdd1",
+  "migration_versions": [
+    "20260911221304"
+  ],
+  "outcome": "ready-for-merge",
+  "pr": 2808,
+  "schema_version": 1,
   "stop_conditions_hit": [],
-  "evidence_note": "Registry-only change; ready for exact-head governed review, CI, and guarded merge."
+  "work_issue": 2797
 }
