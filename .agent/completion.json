@@ -1,47 +1,43 @@
 {
   "schema_version": 1,
-  "work_issue": 2716,
+  "work_issue": 2662,
   "outcome": "ready-for-merge",
-  "pr": 2736,
-  "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2716/4",
-  "contract_sha256": "1d0e80edc35e9fd891a9df7c65cbf2e39cc551dfa618a1dc7336736dfbb73537",
-  "head_sha": "c29cdfa5ab3df82f600ae70489d76caf04f39466",
-  "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    ".github/workflows/shared-supabase-migrations.yml",
-    "AGENTS.md",
-    "docs/production-promotion-procedure.md",
-    "scripts/production_apply_review_evidence.py",
-    "scripts/production_business_risk_gate.py",
-    "scripts/test_production_apply_review_evidence.py",
-    "scripts/test_production_business_risk_gate.py"
+  "pr": 2815,
+  "migration_versions": [
+    "20260911225108"
   ],
-  "db_reads": [],
-  "db_writes": [],
+  "contract_ref": "refs/db-contracts/2662/10",
+  "contract_sha256": "f68f06959b812820eaa463e1f7fa4917ab8956a65a4abcd5a0908adc9f2f20cd",
+  "head_sha": "f6ab0b6a1e71fafa90037cfadc6d7542cd5d6aa8",
+  "files_changed": [
+    "supabase/migrations/20260911225108_revoke_api_role_grants_zero_policy_tables.sql"
+  ],
+  "db_reads": [
+    "catalog pg_class",
+    "catalog pg_namespace",
+    "catalog pg_policy"
+  ],
+  "db_writes": [
+    "table public.ai_sentinel_cleanup_log",
+    "table public.dam_search_documents",
+    "table public.dam_search_synonyms",
+    "table public.scanner_ai_ignores"
+  ],
   "checks": [
     {
-      "command": "python -m unittest scripts.test_production_apply_review_evidence scripts.test_production_business_risk_gate",
+      "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Ran 163 tests, OK, exit 0, observed at merge commit c29cdfa5 on base 4da62786."
-    },
-    {
-      "command": "python production-policy regression suite",
-      "exit_code": 0,
-      "evidence": "python -m unittest discover -s scripts -p 'test_*.py': Ran 995 tests in 63.249s, OK (skipped=8), exit 0. Counts re-measured at this head, not carried forward from generation 3."
-    },
-    {
-      "command": "YAML parse and git diff --check",
-      "exit_code": 0,
-      "evidence": "yaml.safe_load of shared-supabase-migrations.yml succeeded and git diff --check 4da62786..HEAD reported no whitespace errors. Exactly two --admit-issue occurrences remain, both bound to $ADMITTED_ISSUE; AST confirms one definition and one call site of enforce_automatic_risk_decision."
+      "evidence": "Re-run at the refreshed implementation head f6ab0b6a on base c7465a75, including the derived-from header guard, the issue #1235 expected-count guard and the verify-cost guard for the one added migration. Final line: \"Static checks passed. Set DATABASE_URL to run migrations against a disposable database.\""
     }
   ],
   "assumptions_resolved": [
-    "Live issue and pull-request inventory found no existing owner or duplicate implementation for #2716.",
-    "Owner authority activates only this exact automatic shared-db workflow path; no preview or production database write occurred.",
-    "The #2727 admission interface is pinned as --resolve-admitted-issue-for-pr and --admit-issue; absence fails before dispatch."
+    "Confirmed against production pg_class on 2026-09-11: all four tables have relrowsecurity true and zero rows in pg_policy, while has_table_privilege reports full arwdDxtm for both anon and authenticated. information_schema.role_table_grants reports no grants at all for these roles and is a false negative; it must not be used to check this work.",
+    "Confirmed no behavioural change: 24 hours of production edge logs show the only Data API traffic to any of the four tables is five HTTP 201 inserts into public.scanner_ai_ignores from a Supabase Edge Function on the service role. A successful insert against an RLS-enabled table with no policies is only possible by bypassing RLS, so the writer is service-role and this migration does not touch it. The other three tables saw no traffic.",
+    "An independent source-code scan of popcrm-web, popdam3, poppim-web, dflow_plm and apps/db-data-admin found every reference to these four tables is service-role; no browser anon or authenticated caller exists.",
+    "No shared database writes were performed from this session; production was read only.",
+    "Production promotion was not performed and is not claimed: it is a separate governed gate that requires the owner to name the exact resource and action, and the owner is asleep. The PR is ready for merge and preview only.",
+    "Refresh onto main c7465a75 (PR #2736 merged): merge-tree reported exactly two conflicting paths, .agent/completion.json and .agent/contract.json, which every lane writes at the repo root, so main carried the issue #2716 lane's pair. Both were resolved WHOLESALE to this lane's own evidence with no hunk-level merging, then re-sealed as contract generation 10. files_changed is now the single migration file, set-equal to git diff c7465a75..f6ab0b6a; the two .agent files are the only paths following the implementation head, as the evidence checker requires.",
+    "DISCLOSURE: during this refresh a reset to the implementation commit briefly left main's foreign .agent pair in the tree, and one publish was issued from it, creating the stray ref refs/db-contracts/2716/10 on origin plus a corresponding comment on issue #2716. That ref belongs to the issue #2716 lane's namespace and is NOT this lane's contract; it was not deleted because ref deletion was outside this task's authority. The 2716 lane's real generations are 1 through 4 and none of them was altered or overwritten."
   ],
-  "stop_conditions_hit": [],
-  "evidence_note": "Second refresh of this lane. Main moved to 4da62786 when PR #2842 merged, returning #2736 to CONFLICTING/DIRTY. Refreshed by MERGE from main (not rebase), so history is extended rather than rewritten. git merge-tree against real main showed the only conflicting paths were .agent/contract.json and .agent/completion.json; no code file conflicted. Both were resolved wholesale to this lane's own evidence pair (main carried PR #2842 / work_issue 2843 evidence, another lane's artifact, not shared state) and are re-sealed here at contract generation 4. Verified the merged tree is byte-identical to the pre-refresh head 07913fc3 for all seven code files, and byte-identical to main 4da62786 for the three files main contributed, so the merge regressed nothing in either direction. Re-verified the duplicate --admit-issue trap that merged clean and silent three times on the previous pass: exactly two occurrences remain, both $ADMITTED_ISSUE, and AST reports exactly one definition and one call site of enforce_automatic_risk_decision. head_sha is the merge commit c29cdfa5, the implementation commit; this evidence commit sits on top of it and cannot describe itself."
+  "stop_conditions_hit": []
 }
