@@ -1,6 +1,7 @@
 import test from 'node:test';import assert from 'node:assert/strict'
 import { readyRecord,persistInitialReady,preparePreviewDispatch,terminalizeReady,repairPreviewReady,reconcileFlow,ReconcileError,MODE_SEQUENCE } from './reconcile.mjs'
 import { githubIo, main as managerMain } from '../manage-migration-author-lanes.mjs'
+import { sha256, canonicalJson } from './evidence-bundle.mjs'
 const h='a'.repeat(40),b='b'.repeat(64),base={issue:7,pr:8,head_sha:h,bundle_id:b,route:'ordinary_preview_apply',route_context:'',manifest:{target:'preview',preview_allowlist:'v',claim_pr:'8',claim_head_sha:h}}
 function fake(){const refs=new Map(),eventLog=[],state={current:base,ready:[]};return{state,refs,eventLog,resolveMarker:()=>({live:true,task:'t',calling_task:'t'}),actor:()=> 't',now:()=>new Date(0).toISOString(),appendEvent:e=>eventLog.push(e),createRef:(r,d,record)=>refs.has(r)?false:(refs.set(r,{digest:d,record}),true),readRef:r=>refs.get(r),listReady:()=>state.ready,selectCurrent:()=>state.current,withMutex:f=>f(),events:()=>eventLog}}
 test('ready identity changes with every safety identity input',()=>{const one=readyRecord(base);for(const [key,value] of [['issue',9],['head_sha','c'.repeat(40)],['bundle_id','d'.repeat(64)],['route','merged_rehearsal'],['route_context','e'.repeat(40)]]){const candidate={...base,[key]:value};if(key==='route')candidate.route_context='e'.repeat(40);if(key==='route_context')candidate.route='merged_rehearsal';if(candidate.route==='merged_rehearsal')candidate.manifest={target:'preview',preview_allowlist:'v',commit_sha:'f'.repeat(40),merged_preview_source_pr:'8'};assert.notEqual(readyRecord(candidate).ready_id,one.ready_id)}})
@@ -54,3 +55,4 @@ test('the dispatch mode is a per-run phase, never part of ready identity',()=>{
   assert.equal(readyRecord({...base,mode_sequence:['apply']}).ready_id,one.ready_id)
   assert.equal(readyRecord({...base,mode_sequence:['apply']}).manifest_digest,one.manifest_digest)
 })
+test('stored ready digest ignores mode_sequence so pre-change refs stay consistent',()=>{const io=fake();const {record}=persistInitialReady(base,io);const ref=io.refs.get(`refs/db-preview-ready/${record.ready_id}`);const {mode_sequence,...identity}=record;assert.ok(mode_sequence,'record must carry mode_sequence');assert.equal(ref.digest,sha256(canonicalJson(identity)));const legacy={...io,readRef:()=>({digest:sha256(canonicalJson(identity))}),createRef:()=>false};assert.doesNotThrow(()=>persistInitialReady(base,legacy))})

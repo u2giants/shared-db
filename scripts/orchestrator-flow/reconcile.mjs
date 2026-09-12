@@ -54,7 +54,12 @@ function outcomeRef(id){return `${OUTCOME_PREFIX}/${id}`}
 function readyRef(id){return `${READY_PREFIX}/${id}`}
 
 export function persistInitialReady(input,io){
-  assertMarker(io);const record=readyRecord(input),ref=readyRef(record.ready_id),digest=sha256(canonicalJson(record))
+  assertMarker(io);const record=readyRecord(input),ref=readyRef(record.ready_id)
+  // The stored digest covers ready IDENTITY only. mode_sequence is a per-run phase that
+  // readyRecord attaches after the digests; folding it in here would give every ready ref
+  // written before it existed a different digest for the SAME ready_id, so re-preparing any
+  // pre-change identity would fail the inconsistent-data check below. Identity excludes it.
+  const {mode_sequence:_modeSequence,...identity}=record,digest=sha256(canonicalJson(identity))
   const event=previewReadyEvent({workIssue:record.issue,actor:io.actor(),timestamp:io.now(),pr:record.pr,head_sha:record.head_sha,ready_id:record.ready_id,bundle_id:record.bundle_id,route:record.route,route_context:record.route_context,manifest_digest:record.manifest_digest})
   io.appendEvent(event)
   if(!io.createRef(ref,digest,record)&&io.readRef(ref)?.digest!==digest)throw new ReconcileError('preview-ready ref is occupied by inconsistent data')
