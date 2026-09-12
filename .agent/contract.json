@@ -4,7 +4,7 @@
   "work_type": "repo-maintenance",
   "route": "shared-db-orchestrator",
   "goal": "Book an `alter table ... set schema ...` removal at the END of its own statement so archiving a table stops self-flagging as a missing reference, without weakening the guard's genuine missing-reference detection.",
-  "base_sha": "4da62786926c64fcc71e169aeae915d1958a227c",
+  "base_sha": "c7465a7598fb2191e2df549ec63ba255360c484a",
   "dispatcher": "Claude orchestrator #2758",
   "worker": "claude-2758-2809",
   "branch": "claude/issue-2809-guard-set-schema-ordering",
@@ -38,14 +38,14 @@
   ],
   "assumptions": [
     "The identical self-flag shape in `alter table ... rename to ...` is deliberately out of scope and is recorded in the pull request body as deserving its own issue.",
-    "Generation 3 records base 4da62786. Main moved again while this branch waited, so the branch was brought forward onto it. Three paths conflicted, none of them logic: the two .agent evidence files, which every lane writes at the repo root and which were resolved wholesale to this lane's own evidence rather than hand-merged between lanes, and the throughput truth audit, which is an append-style registry resolved as a union of main's 282 dispositions plus the single entry this branch authored.",
+    "Generation 4 records base c7465a75. Main moved twice while this branch waited, 485a0ba5 to 4da62786 to c7465a75. On the first step three paths conflicted: the two .agent evidence files, which every lane writes at the repo root and which were resolved wholesale to this lane's own evidence rather than hand-merged between lanes, and the throughput truth audit, an append-style registry resolved as a union of main's 282 dispositions plus the single entry this branch authored. On the second step only the .agent pair conflicted; main c7465a75 touched none of this lane's three paths, so the registry union stands unchanged at 283 sites.",
     "This branch's registered call site moved from scripts/production_migration_guard.py:1969 to :2093 because main changed the same file. The site was recomputed from the merged tree; its line_sha256 is unchanged because the line content is unchanged. call_site_count 283 and call_site_sha256 were regenerated from the checker's own discover() inventory rather than hand-edited.",
-    "One entry present in the branch's previous copy of the registry, scripts/check-migration-ledger-drift.mjs:247, was not authored by this branch; it came from the superseded base and main has since changed that line away. It is dropped rather than resurrected."
+    "One entry present in the branch's previous copy of the registry, scripts/check-migration-ledger-drift.mjs:247, was not authored by this branch; it came from the superseded base 485a0ba5 and main has since changed that line away. It is dropped rather than resurrected."
   ],
   "stop_conditions": [
     "Stop if the one-line ordering change cannot be made without altering any other guard behaviour.",
     "Stop if either negative control stops refusing, since that would mean the capability was lost rather than repaired.",
     "Stop and report the exact refusal if a required tool refuses, rather than working around it."
   ],
-  "generation": 3
+  "generation": 4
 }
