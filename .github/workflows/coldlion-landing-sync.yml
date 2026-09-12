@@ -1,4 +1,4 @@
-# Scheduled ColdLion history sync.
+# Scheduled ColdLion masters and history sync.
 #
 # Re-reads the most recent grid windows every run. A window already proven loaded
 # is skipped; a window that is not is completed. Trailing more than one window is
@@ -25,7 +25,7 @@ on:
         required: false
         default: '3'
       dry_run:
-        description: 'Report outstanding work without fetching or writing'
+        description: 'Validate masters live; report history work; write nothing'
         type: boolean
         required: false
         default: false
@@ -42,7 +42,7 @@ concurrency:
 
 jobs:
   sync:
-    name: Sync recent history windows
+    name: Sync masters and recent history windows
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -56,7 +56,7 @@ jobs:
         run: psql --version
 
       - name: Run the offline contract tests before touching anything
-        run: node --test tools/coldlion-landing-history.test.mjs
+        run: node --test tools/coldlion-landing-history.test.mjs tools/coldlion-landing-masters.test.mjs
 
       - name: Refuse to run without an explicit target
         env:
@@ -80,5 +80,7 @@ jobs:
         run: |
           set -euo pipefail
           ARGS=(--windows "$WINDOWS")
-          if [ "${DRY_RUN:-false}" = "true" ]; then ARGS+=(--dry-run); fi
+          MASTER_ARGS=()
+          if [ "${DRY_RUN:-false}" = "true" ]; then ARGS+=(--dry-run); MASTER_ARGS+=(--dry-run); fi
           node tools/coldlion-landing/sync-history.mjs "${ARGS[@]}"
+          node tools/coldlion-landing/sync-masters.mjs "${MASTER_ARGS[@]}"
