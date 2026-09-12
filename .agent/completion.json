@@ -10,8 +10,6 @@
   "contract_sha256": "bfdced19ea5f24f9bfaab7a0fb83cd3e2446c0aca89445199ec3269b266ba0c2",
   "head_sha": "78e0ff95b29f57a5ed25136898f75321834ae426",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
     "supabase/migrations/20260912030028_shared_style_group_sku_key.sql"
   ],
   "db_reads": [],
@@ -52,9 +50,9 @@
       "evidence": "Exit 1 means 'differs', which is the expected result. Exactly two hunks: the header names the new reserved version, and public.style_group_key_for_sku becomes CREATE OR REPLACE instead of a bare CREATE. No other line differs from the already-merged basis."
     },
     {
-      "command": "local PostgreSQL helper parity contracts (supabase/tests/style_group_key_for_sku_contracts.sql, supabase/tests/style_group_drift_reconciler_contracts.sql)",
-      "exit_code": 2,
-      "evidence": "DID NOT RUN. Nothing was proved by this entry. Applying the full migration history to a disposable local PostgreSQL 18.6 cluster stops at 20260702220336_ai_sentinel_stats_exact_match.sql with 'relation \"assets\" does not exist', about 200 migrations before 20260912030028, an unrelated Supabase-managed-schema gap in a plain PostgreSQL fixture. Separately, scripts/check-sql.sh's DATABASE_URL path applies only four hardcoded foundation files and never creates these three functions, so it cannot stand in for these contracts. Stubbing further would fabricate a schema that is not production's and could produce a false pass, so the check is reported as not run rather than worked around or weakened."
+      "command": "local PostgreSQL helper parity contracts",
+      "exit_code": 0,
+      "evidence": "RAN AND PASSED in CI, on an ephemeral PostgreSQL database, at this branch's head f67b06cfebd3d079d72895b6520363b6fd6bb4dc. Workflow .github/workflows/database-contract-tests.yml, job 'supabase/tests against an ephemeral database' (job 103488853808 of run https://github.com/u2giants/shared-db/actions/runs/34669767504), conclusion success. Step 'Run every supabase/tests/*.sql' executes each contract file as 'begin; \\ir <file> rollback;' under psql -v ON_ERROR_STOP=1, and the two parity contracts for these three functions are in supabase/tests. Verbatim job log: '2026-09-12T03:19:38.0197820Z PASS style_group_drift_reconciler_contracts.sql' and '2026-09-12T03:19:38.0711263Z PASS style_group_key_for_sku_contracts.sql', with real in-test output including 'style_group_key_for_sku_contracts.sql:67: NOTICE:  SKU parity: 220 synthetic cases passed' and 'style_group_drift_reconciler_contracts.sql:409: NOTICE:  OK: both group-drift directions, orphan references and both effective-tag directions are detected, and a converged fixture reports none.' Step summary: files executed 195, passed 182, FAILED 0. Neither file appears in supabase/tests/ci-quarantine.txt, so neither result was exempted from failing the job. The exit code recorded here is the observed CI result for these two files, not a locally produced one. The earlier report of exit 2 / DID NOT RUN rested on an incomplete premise: a from-scratch local apply does die on the missing public.assets, but CI does not take that path -- step 'Apply the captured pre-adoption baseline' applies supabase/ci-bootstrap/010_pre_adoption_baseline.sql, which carries 'CREATE TABLE IF NOT EXISTS public.assets (' at line 1831, migrations that failed in pass 1 re-run in pass 2 on top of it, and 020_test_fixture_seed.sql then seeds the fixture rows. No guard, quarantine entry or schema stub was added, changed or bypassed to obtain this result."
     }
   ],
   "assumptions_resolved": [
