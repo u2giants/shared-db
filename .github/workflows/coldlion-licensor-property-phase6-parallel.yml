@@ -6,7 +6,8 @@
 #   1) Phase 6 migration applied to the CURRENT preview branch (repository variable
 #      PREVIEW_PROJECT_REF; the old rjyboqwcdzcocqgmsyel was deleted on 2026-08-18)
 #   2) forced-failure health+comparison drills succeeded
-#   3) at least one successful manual DesignFlow + ColdLion + compare run
+#   3) at least one successful manual ColdLion + compare run
+#      (the DesignFlow lane was removed by #2794; see "Host PLM Import" in README.md)
 #
 # Readiness is INVARIANT-BASED, never elapsed-time-based. The old 14-day / 2026-08-09
 # waiting rule was retired on 2026-07-26 and is not an exit condition anywhere. These
@@ -20,7 +21,6 @@
 #   SUPABASE_ACCESS_TOKEN          — Supabase CLI Personal Access Token
 #   SUPABASE_DB_PASSWORD_PREVIEW   — preview branch DB password
 #   COLDLION_API_KEY               — Coldlion ERP API key x5.coldlion.com
-#   DESIGNFLOW_API_KEY             — DesignFlow PLM Canonical Master Data API
 #
 # Optional repository variable:
 #   PHASE6_SCHEDULE_ENABLED=true   — unlocks schedule-triggered jobs (default off)
@@ -36,7 +36,6 @@ on:
         required: true
         default: health
         options:
-          - designflow
           - coldlion
           - compare
           - health
@@ -49,7 +48,6 @@ on:
         default: false
   # Schedules stay registered but each job no-ops unless PHASE6_SCHEDULE_ENABLED=true.
   schedule:
-    - cron: "30 3 * * *"   # DesignFlow lane candidate
     - cron: "0 4 * * *"    # ColdLion mirror_only candidate
     - cron: "0 5 * * *"    # Daily comparison candidate
     - cron: "15 * * * *"   # Health check candidate (HOURLY since 2026-07-28)
@@ -125,7 +123,6 @@ jobs:
             # Keep in lockstep with tools/phase6-schedule-map.mjs.
             SCHEDULE='${{ github.event.schedule }}'
             case "$SCHEDULE" in
-              "30 3 * * *") JOB=designflow ;;
               "0 4 * * *") JOB=coldlion ;;
               "0 5 * * *") JOB=compare ;;
               "15 * * * *") JOB=health ;;
@@ -156,7 +153,6 @@ jobs:
             tools/coldlion-licensor-property-phase6.test.mjs \
             tools/compare-coldlion-designflow-daily.test.mjs \
             tools/check-coldlion-designflow-sync-health.test.mjs \
-            tools/sync-plm-master-data.test.mjs \
             tools/sync-coldlion-licensors-properties.test.mjs \
             tools/evaluate-coldlion-licensor-property-cutover-readiness.test.mjs \
             tools/dispatch-coldlion-taxonomy-alerts.test.mjs
@@ -194,22 +190,8 @@ jobs:
             exit 1
           fi
 
-      - name: Run DesignFlow sync (preview)
-        if: env.skip != 'true' && steps.plan.outputs.job == 'designflow'
-        env:
-          DESIGNFLOW_API_KEY: ${{ secrets.DESIGNFLOW_API_KEY }}
-          PHASE6_PREVIEW_ONLY: "1"
-        run: |
-          set -euo pipefail
-          if [ "${{ steps.plan.outputs.apply }}" = "true" ]; then
-            if [ -z "${DESIGNFLOW_API_KEY:-}" ]; then
-              echo "Missing secret DESIGNFLOW_API_KEY" >&2
-              exit 1
-            fi
-            node tools/sync-plm-master-data.mjs --apply --linked --preview-only
-          else
-            node tools/sync-plm-master-data.mjs --preview-only
-          fi
+      # The DesignFlow sync lane was removed by #2794 together with the importer
+      # plm.import_master_data(jsonb,jsonb) and tools/sync-plm-master-data.mjs.
 
       - name: Run ColdLion mirror_only sync (preview)
         if: env.skip != 'true' && steps.plan.outputs.job == 'coldlion'
