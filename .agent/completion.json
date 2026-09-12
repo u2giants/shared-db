@@ -3,9 +3,9 @@
   "work_issue": 2796,
   "outcome": "ready-for-merge",
   "pr": 2825,
-  "contract_ref": "refs/db-contracts/2796/3",
-  "contract_sha256": "baa73b7b49c71816d31ba324e4db77fae37155ddad4cb4d5d3d047938b38554f",
-  "head_sha": "7cad7283501093c415d3dc528765f924439de0cc",
+  "contract_ref": "refs/db-contracts/2796/4",
+  "contract_sha256": "2d7006b73f51ca9d31537ebdd29e3d83d46cf8c860f1f50395f641d2cf4b443a",
+  "head_sha": "6b2a906d99608d25b12e64e55e37f629a34178d1",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
@@ -23,22 +23,22 @@
     {
       "command": "node scripts/check-throughput-truth-audit.mjs",
       "exit_code": 0,
-      "evidence": "Ran at 7cad7283 against the rebased tree: \"truth audit OK: call_sites=282\", exit 0. The 282 count and its semantic digest were DERIVED by calling the checker's own discover() over the rebased tree, not chosen; the tool then confirmed both."
+      "evidence": "Run directly and unpiped at 6b2a906d: \"truth audit OK: call_sites=282\", exit 0. The 282 count and its semantic digest were DERIVED by calling the checker's own discover() over the rebased tree, not chosen; the tool then confirmed both."
     },
     {
       "command": "node scripts/orchestrator-flow/reconcile.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 14, pass 14, fail 0, skipped 0, todo 0, exit 0 at 7cad7283 (invoked via node --test). Includes the new digest-identity test. That test was also run against a sabotaged copy with the old one-line digest restored, where it FAILS, so it pins the fix in both directions."
+      "evidence": "tests 14, pass 14, fail 0, skipped 0, todo 0, exit 0 at 6b2a906d, run directly and unpiped. The replacement test was then MUTATION-PROVEN rather than trusted: with the stored digest narrowed back to identity it exits 1; with the occupancy check loosened to a tautology it exits 1; with both mutations reverted it exits 0. The test it replaces exercised the writer against itself and therefore passed under either convention, which is how the defect reached a reviewer."
     },
     {
       "command": "node scripts/manage-migration-author-lanes.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 534, pass 534, fail 0, skipped 0, todo 0, exit 0 at 7cad7283 (invoked via node --test)."
+      "evidence": "tests 534, pass 534, fail 0, skipped 0, todo 0, exit 0 at 6b2a906d, run directly and unpiped. Includes the historical-terminalization fixture, which now builds its preview-ready ref with the real writer instead of a hand-copied digest, so a producer/consumer divergence breaks the suite rather than hiding inside it."
     },
     {
       "command": "node scripts/check-workflow-preview-mode-guard.test.mjs",
       "exit_code": 0,
-      "evidence": "tests 8, pass 8, fail 0, skipped 0, todo 0, exit 0 at 7cad7283 (invoked via node --test). Runs the workflow guard block under a real shell in both directions with inversion and deletion sabotage cases. It asserts the historical step gate, not a refusal of merged_preview_source_pr."
+      "evidence": "tests 8, pass 8, fail 0, skipped 0, todo 0, exit 0 at 6b2a906d, run directly and unpiped. Runs the workflow guard block under a real shell in both directions with inversion and deletion sabotage cases. It asserts the historical step gate, not a refusal of merged_preview_source_pr."
     }
   ],
   "assumptions_resolved": [
@@ -49,7 +49,8 @@
     "No migration is carried by this PR, so no version reservation or author lease is at stake and no open claim covers its files.",
     "Issue #2796 had no db-work-scope block at all, which is why it was never dispatchable. The orchestrator classified it repo-maintenance / reviewer-tooling before landing this work, rather than leaving the work to land against an unclassified issue.",
     "An independent reviewer found the published generation 1 contract described behaviour this change does not ship (a manifest-digest recording and a reconcile refusal). Verified in the tree: mode_sequence has no consumer outside its producers and tests, and reconcile.mjs states it is attached after both digests deliberately. Contract generation 2 was published with a corrected goal and two overstated evidence strings were rewritten.",
-    "An independent slot-2 review raised a High finding that persistInitialReady digested the record readyRecord returns, which now carries mode_sequence. I confirmed it in the source rather than accepting it on the reviewer's word: ready_id is taken before the field is attached, but the stored digest was taken after, so the same identity would hash differently once this shipped and re-preparing any pre-change ref would fail the inconsistent-data check. The blast radius was verified against the remote as 117 live refs/db-preview-ready/* refs, the reviewer's own figure. Fixed by digesting the identity record with mode_sequence omitted, which reproduces the pre-change digest exactly because canonicalJson sorts keys. Contract generation 3 was published to record this second enforced behaviour; generations 1 and 2 remain immutable and superseded."
+    "An independent slot-2 review raised a High finding that persistInitialReady digested the record readyRecord returns, which now carries mode_sequence. I confirmed it in the source rather than accepting it on the reviewer's word: ready_id is taken before the field is attached, but the stored digest was taken after, so the same identity would hash differently once this shipped and re-preparing any pre-change ref would fail the inconsistent-data check. The blast radius was verified against the remote as 117 live refs/db-preview-ready/* refs, the reviewer's own figure.",
+    "CORRECTED, and this is the substance of generation 4. Generation 3 fixed that High by narrowing the STORED digest to ready identity. That was wrong, and both slots returned REVISE on it at head 20dabc75 (durable verdicts d7b36fff slot 1, 65d5945b slot 2). Consumers re-derive sha256(canonicalJson(<stored record>)) from the record they read back -- manage-migration-author-lanes.mjs:2094 does exactly this inside terminalizeHistoricalPreviewReady -- so narrowing the writer repaired the 117 pre-change refs by making every NEWLY written historical_rebind ref unreadable and fail-closing terminalization. I verified the reader on the branch rather than on origin/main, having previously misread it at the wrong ref. The shipped fix keeps the stored digest over the whole record and moves the compatibility concession into the OCCUPANCY check, which now compares identity with mode_sequence stripped on both sides; a pre-change ref carries no such key, so stripping yields a genuine identity match. This is safe because no consumer reads mode_sequence back off a stored record: the only non-test references are its producers, reconcile.mjs and manage-migration-author-lanes.mjs:2084. Generations 1 through 3 remain immutable and superseded."
   ],
   "stop_conditions_hit": [],
   "evidence_note": "Repository tooling fix adopted from a cold lane. The implementation is the original lane's; this session added only the merge from current main, the conflict resolution in the global throughput truth audit, and this evidence pair. Awaiting two governed reviews at the final head, then guarded merge.",
