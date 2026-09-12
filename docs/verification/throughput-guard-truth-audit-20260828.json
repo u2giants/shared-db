@@ -764,13 +764,6 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
-      "site": "scripts/lib/documents-only-change.mjs:100",
-      "semantic_key": "scripts/lib/documents-only-change.mjs:59b3cbf2519d9937a18c077956f4328dd978a7a28681bc93c44e6a4845d7ea69:1",
-      "line_sha256": "59b3cbf2519d9937a18c077956f4328dd978a7a28681bc93c44e6a4845d7ea69",
-      "disposition": "excluded",
-      "reason": "This comment describes a missing or truncated Markdown patch that must fail closed; it makes no database-object truth claim."
-    },
-    {
       "site": "scripts/lib/exclusive-lease.mjs:67",
       "semantic_key": "scripts/lib/exclusive-lease.mjs:69e45ccdf5566ec57dc68c464ca98ed9d71e34063e6d1b17372f420a4a73b7a9:1",
       "line_sha256": "69e45ccdf5566ec57dc68c464ca98ed9d71e34063e6d1b17372f420a4a73b7a9",
@@ -1947,6 +1940,34 @@
       "reason": "This existing call site keeps its established refusal behavior and is outside this no-behavior-change implementation."
     },
     {
+      "site": "scripts/orchestrator-flow/outcome-lifecycle.mjs:122",
+      "semantic_key": "scripts/orchestrator-flow/outcome-lifecycle.mjs:9de2dd292b4305e031e31fafb886b8427cd829cb11c2f4efebc385a08e26075a:1",
+      "line_sha256": "9de2dd292b4305e031e31fafb886b8427cd829cb11c2f4efebc385a08e26075a",
+      "disposition": "enriched",
+      "reason": "Outcome completion directly reads the current issue and refuses an unreadable state before considering merge, production, or live evidence."
+    },
+    {
+      "site": "scripts/lib/documents-only-change.mjs:102",
+      "semantic_key": "scripts/lib/documents-only-change.mjs:59b3cbf2519d9937a18c077956f4328dd978a7a28681bc93c44e6a4845d7ea69:1",
+      "line_sha256": "59b3cbf2519d9937a18c077956f4328dd978a7a28681bc93c44e6a4845d7ea69",
+      "disposition": "enriched",
+      "reason": "The comment documents a fail-closed classifier rule: a missing or truncated patch is rejected, not treated as evidence that an instruction change is safe."
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:854",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:fc5dbd3411165633fff781b72e2e50b072c8134f5ea05a3a39f2ae78125cbc07:1",
+      "line_sha256": "fc5dbd3411165633fff781b72e2e50b072c8134f5ea05a3a39f2ae78125cbc07",
+      "disposition": "enriched",
+      "reason": "The queue explicitly excludes an issue missing the required admission fields, so it cannot advertise work that the claim gate must refuse."
+    },
+    {
+      "site": "scripts/manage-migration-author-lanes.mjs:1867",
+      "semantic_key": "scripts/manage-migration-author-lanes.mjs:a506dd54ce0a675ce62b60933700254ff523561f16a7abdd7e91a1615f095238:1",
+      "line_sha256": "a506dd54ce0a675ce62b60933700254ff523561f16a7abdd7e91a1615f095238",
+      "disposition": "enriched",
+      "reason": "A missing required production-proof artifact file refuses outcome completion, so absent evidence cannot be read as successful application."
+    },
+    {
       "site": ".github/workflows/shared-supabase-migrations.yml:1154",
       "semantic_key": ".github/workflows/shared-supabase-migrations.yml:5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4:1",
       "line_sha256": "5fd92e821d3c2ec01d3a92482d4bca5354e6cd62f4dd1acd2f488a1c127ab9a4",
@@ -1954,7 +1975,7 @@
       "reason": "Issue 2789 early refusal: with the automatic risk policy active, a production apply review dispatched without a numeric source_pr is refused by name before any credential is used. It adds a refusal and changes no existing check."
     }
   ],
-  "call_site_count": 277,
-  "call_site_sha256": "a66e4c5db54972afa39365d18921e73821459712fe918ca3242a272495ff7206",
+  "call_site_count": 280,
+  "call_site_sha256": "92f775a4f3f548a33c0be80532e0e90849e6e2671d4ea4de47dcf23dbbde8f14",
   "disposition": "Every discovered site has an explicit reviewed disposition bound to its source-line content; line movement alone does not require regeneration, while a content change requires review."
 }
