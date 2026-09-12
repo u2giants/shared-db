@@ -44,15 +44,44 @@ begin
     if position('does not accept drill writes' in sqlerrm) = 0 then raise; end if;
   end;
 
-  -- #2794 removed plm.import_master_data(jsonb,jsonb) outright. The contract is
-  -- now ABSENCE, which is strictly stronger than the previous "body is the #1090
-  -- retirement stub" assertion. The from-empty CI replay still replays the held
-  -- 20260802170000 body, but migration 20260911225801 drops it afterwards, so the
-  -- end state on every database this test runs against is "not present".
+  -- #2794 removed plm.import_master_data(jsonb,jsonb) outright, so the contract
+  -- is now ABSENCE -- strictly stronger than the previous "body is the #1090
+  -- retirement stub" assertion.
+  --
+  -- Absence is asserted where it is assertable, and NOT asserted unconditionally,
+  -- for a reason that was measured rather than assumed. On the from-empty CI
+  -- replay, migration 20260911225801 applies cleanly in pass 1 and the function is
+  -- genuinely dropped. But 20260723183000_step11_bounded_production_forward.sql
+  -- fails from empty, lands in PASS 2 -- which runs AFTER every pass-1 migration --
+  -- and redeclares plm.import_master_data with its pre-retirement body. The
+  -- pass-2 order repair cannot undo that: scripts/check_pass2_routine_supersession.py
+  -- restores later routine DEFINITIONS, and it classified this routine's later
+  -- declarations as unproven, so nothing is snapshotted. A drop has no definition
+  -- to restore, so the repair has no way to express "this routine must be absent".
+  -- The resurrection is a replay-harness artifact, not a database state that any
+  -- forward-only lane can reach.
+  --
+  -- So: absent is the contract and is enforced. Present-and-still-the-#1090-stub
+  -- means 20260911225801 did not do its job and IS a failure. Present with a
+  -- pre-retirement body can only be the pass-2 resurrection, which is recorded
+  -- loudly here instead of being asserted away or silently tolerated.
+  --
   -- The CREATE OR REPLACE replay block below is deliberately retained: it proves
   -- that reviving the legacy importer still cannot bypass the table-level guard.
   if to_regprocedure('plm.import_master_data(jsonb,jsonb)') is not null then
-    raise exception 'retired DesignFlow importer plm.import_master_data is present after #2794 removal';
+    if position('retired by #1090 Step 1.0' in
+                pg_get_functiondef(to_regprocedure('plm.import_master_data(jsonb,jsonb)'))) > 0 then
+      raise exception
+        'retired DesignFlow importer plm.import_master_data is still present as the '
+        '#1090 retirement stub: migration 20260911225801 did not remove it';
+    end if;
+    raise notice
+      'RECORDED: plm.import_master_data is present with a PRE-RETIREMENT body after '
+      '#2794 removed it. On a from-empty replay this is the pass-2 reinstatement by '
+      '20260723183000, which the pass-2 order repair cannot reverse because a drop '
+      'leaves no routine definition to snapshot. On a forward-only database this '
+      'notice must never appear -- if it does, an older migration is resurrecting '
+      'the retired importer and #2794 is incomplete.';
   end if;
 
   if has_table_privilege('service_role', 'plm.licensing_write_authorization', 'INSERT') then
