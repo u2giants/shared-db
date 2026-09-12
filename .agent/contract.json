@@ -1,57 +1,60 @@
 {
-  "schema_version": 1,
-  "work_issue": 2820,
-  "generation": 3,
-  "work_type": "repo-maintenance",
-  "route": "repo-maintenance",
-  "goal": "Give the migration drift checker a concept of migration target, so a merged migration whose real target is another database is excluded from the production promotion queue by DERIVED scope rather than by a version skip, and is reported in its own clearly-labelled section instead of vanishing. Record the hts_rag_split migration (20260909121403) under that mechanism, citing issue #2403.",
-  "base_sha": "5d89c5e2585575a8615d9b35d4d62fdc269a2d2f",
-  "dispatcher": "albert autonomous overnight authorization for issue #2820",
-  "worker": "claude shared-db repo-maintenance lane, issue #2820",
-  "branch": "claude/issue-2820-migration-target-scope",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/2820-land",
   "allowed_paths": [
-    ".agent/completion.json",
+    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
+    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
     ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-migration-ledger-drift.mjs",
-    "scripts/check-migration-ledger-drift.test.mjs",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py"
-  ],
-  "file_writes": [
-    ".agent/completion.json",
-    ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-audit-20260828.json",
-    "scripts/check-migration-ledger-drift.mjs",
-    "scripts/check-migration-ledger-drift.test.mjs",
-    "scripts/production_migration_guard.py",
-    "scripts/test_production_migration_guard.py"
-  ],
-  "db_reads": [],
-  "db_writes": [],
-  "prohibited_actions": [
-    "Do not delete, move, or edit the hts_rag_split migration file, and do not hard-code a skip for its version; the gap is that the checker has no concept of target, and a one-off skip leaves the next cross-project migration in the same trap.",
-    "Do not create a migration file or claim a migration author lane; this is repo-maintenance, not structural.",
-    "Do not let an excluded migration be reported silently; an invisible exclusion is its own hazard and a later reader must be able to see the claim and challenge it.",
-    "Do not weaken, bypass, or delete any guard to make a check pass, including the throughput truth audit.",
-    "Do not run DDL against any database; this change reads the migration ledger only.",
-    "Do not edit C:/repos/shared-db directly; it is landing-only and its checkout restores from a stale index."
-  ],
-  "required_checks": [
-    "python -m unittest scripts.test_production_migration_guard",
-    "node --test scripts/check-migration-ledger-drift.test.mjs",
-    "node scripts/check-throughput-truth-audit.mjs"
+    ".agent/completion.json"
   ],
   "assumptions": [
-    "Migration 20260909121403 targets the DesignFlow non-production Supabase project, not shared production. Confirmed by reading both issue #2403 and the migration's own header, as the issue demanded, rather than assuming it.",
-    "An unregistered migration stays in scope for every target, so a forgotten registry entry can only over-report work, never hide it. The mechanism is deliberately fail-safe in the direction the issue called worse than the bug.",
-    "The production and preview drift runs read the migration ledger only and need no database credential beyond the Supabase access token, which is injected from the 1Password vault vibe_coding and never appears in arguments or logs.",
-    "The two live drift runs are deliberately NOT listed as required_checks. Both exit 1 by design, because real unrelated drift legitimately remains on both targets, and a required check is a command that proves the work by PASSING. They are recorded instead as verbatim probe evidence in the completion report and the pull request, where their exit code and full output are stated rather than hidden. Listing them as gates would have forced a choice between misreporting their exit code and appearing to fail."
+    "api.db_data_admin_scraped_properties stays byte-for-byte unchanged and remains the Property Matching contract for its current dependents.",
+    "The licensor authority derivation reused by the Property arm is the exact derivation api.db_data_admin_scraped_properties already applies, so the two functions cannot disagree about who a row belongs to.",
+    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are non-authoritative inferred evidence and are therefore excluded from a source-declared inventory.",
+    "Every capture-backed family reads exactly one latest complete capture, the same contract the existing RPC uses, so nothing here touches issue #2744's performance repair.",
+    "app.require_licensing_manager_access() is the existing Licensing Manager gate and is unchanged."
   ],
+  "base_sha": "5ec8aef002471e8520f45aef290101e0424e69d7",
+  "branch": "claude/issue-2797-scraped-source-inventory",
+  "db_reads": [
+    "function api.db_data_admin_scraped_properties",
+    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
+    "character and style-guide source landing tables in the same approved captures"
+  ],
+  "db_writes": [
+    "function api.db_data_admin_scraped_source_inventory"
+  ],
+  "dispatcher": "claude shared-db orchestrator marker issue 2758",
+  "file_writes": [
+    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
+    "supabase/tests/db_data_admin_scraped_source_inventory.sql",
+    ".agent/contract.json",
+    ".agent/completion.json"
+  ],
+  "generation": 1,
+  "goal": "Add one read-only, Licensing-manager-gated, paged inventory RPC api.db_data_admin_scraped_source_inventory over the raw scraped source vocabularies for Properties, Characters and Style Guides, leaving api.db_data_admin_scraped_properties unchanged.",
+  "prohibited_actions": [
+    "No change of any kind to api.db_data_admin_scraped_properties",
+    "No matching controls, review reasons, evidence basis, review guidance, contract status or authority-derived presentation buckets in the payload",
+    "No deduplication across scrape routes and no identity inferred from names",
+    "No inferred candidate table presented as a source-declared fact",
+    "No direct production DDL; production only through the governed workflow",
+    "No object or path outside claim 2807 and this contract"
+  ],
+  "required_checks": [
+    "bash scripts/check-sql.sh",
+    "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+    "node scripts/check-migration-pr-lease.mjs",
+    "git diff --check"
+  ],
+  "route": "shared-db-orchestrator",
+  "schema_version": 1,
   "stop_conditions": [
-    "Stop and report if 20260909121403 turns out to be production-scoped after all, because excluding it would hide real work from the promotion queue.",
-    "Stop if the exclusion cannot be shown to fail: a known in-scope migration must still be reported as promotable, or the mechanism is indistinguishable from one that swallows everything.",
-    "Stop if a guard refusal could only be cleared by weakening the guard rather than by correcting the work."
-  ]
+    "Claim 2807, reserved version 20260911221304, or the coordinator route changes",
+    "A competing change touches api.db_data_admin_scraped_properties or any claimed object or contracted path",
+    "Issue #2744's performance repair would be weakened or its live claim collided with",
+    "Implementation requires an object or path outside claim 2807 or this contract"
+  ],
+  "work_issue": 2797,
+  "work_type": "structural",
+  "worker": "claude issue2797-author holding claim 2807",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/agent-aa4966ba29d9ccc16"
 }
