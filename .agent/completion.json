@@ -7,8 +7,6 @@
   "contract_sha256": "b3f63c8c6432ee8e4edd3080321426bdab17723434d6c8fc6724e88f98f8d296",
   "head_sha": "48457a207929c08afa77b1f851549400adead84f",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
     ".github/workflows/shared-supabase-migrations.yml",
     "docs/verification/throughput-guard-truth-audit-20260828.json",
     "scripts/check-workflow-preview-mode-guard.test.mjs",
