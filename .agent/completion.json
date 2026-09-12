@@ -1,54 +1,48 @@
 {
-  "assumptions_resolved": [
-    "api.db_data_admin_scraped_properties is byte-for-byte unchanged: it is not in files_changed, and the contract test asserts it still exists and still carries its review fields.",
-    "The Property arm reuses the existing licensor authority derivation, so the two functions cannot disagree about row attribution.",
-    "plm.sega_character_candidate, plm.sega_style_guide_candidate and plm.wwe_character_candidate are excluded; the contract test fails if any appears in the function definition.",
-    "Each capture-backed family reads one latest complete capture, so issue #2744's performance repair is untouched.",
-    "app.require_licensing_manager_access() is called before any read and is otherwise unmodified."
+  "schema_version": 1,
+  "work_issue": 2843,
+  "outcome": "ready-for-merge",
+  "pr": 2842,
+  "migration_versions": [],
+  "contract_ref": "refs/db-contracts/2843/1",
+  "contract_sha256": "41f448e13bda0f323015d0881b249b0b90f995169c84308cfd6d6bba674ad186",
+  "head_sha": "cdfd3091d1c16c415368c5870d4479d4a78883fe",
+  "files_changed": [
+    "docs/verification/reviewer-assignment-api-budget-2026-08-28.md",
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/manage-migration-author-lanes.test.mjs"
   ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
-      "command": "bash scripts/check-sql.sh",
-      "evidence": "Static checks passed. Guard B compared against base newest version 20260911210709; Guard B2 disclosed no live-ledger source configured.",
-      "exit_code": 0
+      "command": "node scripts/manage-migration-author-lanes.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 536, pass 536, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
-      "evidence": "{\"status\":\"OK\",\"sidecars\":49} - version 20260911221304 requires no production verification sidecar.",
-      "exit_code": 0
+      "command": "node scripts/orchestrator-flow/admission-outcome.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 57, pass 57, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
     },
     {
-      "command": "node scripts/check-migration-pr-lease.mjs",
-      "evidence": "Migration claim verified: #2807, version 20260911221304.",
-      "exit_code": 0
+      "command": "node scripts/orchestrator-flow/coordination-audit.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 1, pass 1, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
     },
     {
-      "command": "git diff --check",
-      "evidence": "No whitespace errors and no conflict markers reported in the diff.",
-      "exit_code": 0
+      "command": "node scripts/orchestrator-flow/reviewer-allocation.test.mjs",
+      "exit_code": 0,
+      "evidence": "tests 6, pass 6, fail 0, skipped 0, todo 0 at cdfd3091d1c16c415368c5870d4479d4a78883fe (invoked via node --test)"
     }
   ],
-  "contract_ref": "refs/db-contracts/2797/1",
-  "contract_sha256": "bd9cca28ae5bae161a346f00a25d5f6743af26f7ecdfd23819e5810222795b45",
-  "db_reads": [
-    "function api.db_data_admin_scraped_properties",
-    "licensed source landing tables already admitted by api.db_data_admin_scraped_properties",
-    "character and style-guide source landing tables in the same approved captures"
+  "assumptions_resolved": [
+    "Admission's GitHub reads were billed to the reviewer operation's derived 25-request budget; suspending accounting around the admission call in place keeps requireOwnedRef mutex-ownership proof intact, which moving the call site would have destroyed.",
+    "REVIEW_OPERATION_REQUEST_LIMIT is unchanged and REVIEW_MUTEX_SECTION_RESERVE is unchanged; the defect was the accounting boundary, not the size of the ceiling.",
+    "Admission still runs, still refuses identically, and still runs before the reviewer draw.",
+    "docs/verification/throughput-guard-truth-audit-20260828.json was not edited; nine open pull requests contend for its global count and digest.",
+    "The four required checks were re-run at the exact head cdfd3091 rather than recalled from the earlier head 8dd6a8f7.",
+    "The .agent evidence pair is excluded from files_changed because the work contract check derives that list from the pull request diff with the evidence pair removed."
   ],
-  "db_writes": [
-    "function api.db_data_admin_scraped_source_inventory"
-  ],
-  "files_changed": [
-    "supabase/migrations/20260911221304_db_data_admin_scraped_source_inventory.sql",
-    "supabase/tests/db_data_admin_scraped_source_inventory.sql"
-  ],
-  "head_sha": "b4ad90b8c2715192195cc636501697fd86de65e2",
-  "migration_versions": [
-    "20260911221304"
-  ],
-  "outcome": "ready-for-merge",
-  "pr": 2808,
-  "schema_version": 1,
-  "stop_conditions_hit": [],
-  "work_issue": 2797
+  "stop_conditions_hit": []
 }
