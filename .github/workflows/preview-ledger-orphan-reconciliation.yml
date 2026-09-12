@@ -17,7 +17,7 @@ on:
 permissions:
   contents: write
   actions: read
-  issues: read
+  issues: write # admission may reopen the validated merge-closed source issue
   pull-requests: read
 
 concurrency:
@@ -141,8 +141,8 @@ jobs:
             test -z "$(find supabase/migrations -maxdepth 1 -name "${ORPHAN}_*.sql" -print -quit)"
           fi
       - name: Acquire exclusive preview recovery lock
-        env: {MAIN_SHA: "${{ inputs.main_sha }}", SOURCE_PR: "${{ inputs.source_pr }}"}
-        run: node scripts/manage-migration-author-lanes.mjs --acquire-preview-recovery --owner "github-actions:${GITHUB_RUN_ID}" --pr "$SOURCE_PR" --head-sha "$MAIN_SHA" > "$RUNNER_TEMP/preview-lock.json"
+        env: {MAIN_SHA: "${{ inputs.main_sha }}", SOURCE_PR: "${{ inputs.source_pr }}", ISSUE: "${{ inputs.issue }}"}
+        run: node scripts/manage-migration-author-lanes.mjs --acquire-preview-recovery --admit-issue "$ISSUE" --owner "github-actions:${GITHUB_RUN_ID}" --pr "$SOURCE_PR" --head-sha "$MAIN_SHA" > "$RUNNER_TEMP/preview-lock.json"
       - name: Fetch immutable GitHub evidence
         env:
           ISSUE: ${{ inputs.issue }}

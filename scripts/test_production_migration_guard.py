@@ -2055,6 +2055,15 @@ def _job(name: str) -> str:
     return "\n".join(lines)
 
 
+def _effective_permission(workflow: str, job_name: str, permission: str) -> str | None:
+    header = workflow.split("\njobs:", 1)[0]
+    top = re.search(rf"(?m)^  {re.escape(permission)}:\s*(\w+)", header)
+    job = _job(job_name) if workflow is WORKFLOW_TEXT else workflow.split(f"\n  {job_name}:\n", 1)[1]
+    job_header = job.split("\n    steps:", 1)[0]
+    override = re.search(rf"(?m)^      {re.escape(permission)}:\s*(\w+)", job_header)
+    return (override or top).group(1) if (override or top) else None
+
+
 class ApplyLaneTests(unittest.TestCase):
     def test_phase_2_preserves_shared_workflow_dispatch_and_serialization_contract(self) -> None:
         header = WORKFLOW_TEXT.split("\njobs:", 1)[0]
@@ -2063,9 +2072,27 @@ class ApplyLaneTests(unittest.TestCase):
         for required_input in ("target", "mode", "production_allowlist", "preview_allowlist", "claim_pr", "claim_head_sha", "commit_sha", "confirmation"):
             self.assertRegex(header, rf"(?m)^      {re.escape(required_input)}:$")
         self.assertIn("permissions:\n  contents: read", header)
+        self.assertIn("issues: read", header)
         self.assertIn("github.event_name == 'pull_request'", header)
         self.assertIn("|| 'shared-supabase-migrations'", header)
         self.assertIn("cancel-in-progress: false", header)
+
+    def test_admission_workflows_can_reopen_only_the_validated_linked_issue(self) -> None:
+        for workflow, job in (("guarded-migration-merge.yml", "merge"), ("preview-ledger-orphan-reconciliation.yml", "reconcile")):
+            text = (REPO / ".github" / "workflows" / workflow).read_text(encoding="utf-8")
+            self.assertEqual(_effective_permission(text, job, "issues"), "write", workflow)
+            if workflow == "guarded-migration-merge.yml":
+                self.assertIn("--acquire-merge", text)
+                self.assertNotIn("--admit-issue", text)
+            else:
+                self.assertIn("--admit-issue", text, workflow)
+        self.assertIn("--resolve-admitted-issue-for-pr", WORKFLOW_TEXT)
+        for job_name in ("preview", "production-apply"):
+            self.assertEqual(_effective_permission(WORKFLOW_TEXT, job_name, "issues"), "write", job_name)
+        for job_name in ("validate", "production-dry-run", "production-apply-review"):
+            self.assertEqual(_effective_permission(WORKFLOW_TEXT, job_name, "issues"), "read", job_name)
+        overridden = "permissions:\n  issues: write\njobs:\n  preview:\n    permissions:\n      issues: read\n    steps:\n      - run: true\n"
+        self.assertEqual(_effective_permission(overridden, "preview", "issues"), "read")
 
     def test_phase_2_preserves_required_job_graph_and_deliberately_first_checks(self) -> None:
         self.assertIn("needs: validate", _job("preview"))

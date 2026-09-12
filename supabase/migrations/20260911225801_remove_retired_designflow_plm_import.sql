@@ -1,6 +1,16 @@
 -- 20260911225801_remove_retired_designflow_plm_import.sql
 -- issue: #2794 - Remove retired DesignFlow PLM sync and all runtime vestiges
--- derived-from: 20260817124545_licensing_write_authority_guard.sql (#1090 Step 1.0)
+-- derived-from: none
+--
+-- The declaration is `none` because this file DROPS an object; it does not
+-- re-derive any body. scripts/migration_derivation.py requires each declared
+-- base to be a bare 14-digit version (VERSION_RE), and declaration_required()
+-- covers only `create or replace` whole-object replacements, which this is not.
+-- `none` is the grammar's POSITIVE statement of independence, so the promotion
+-- lane parses it instead of raising DerivationError. The prior text named
+-- 20260817124545_licensing_write_authority_guard.sql (#1090 Step 1.0), which is
+-- prose plus a filename: it passes check-sql.sh but would raise at production
+-- classify time, after a preview apply has already frozen these bytes.
 --
 -- WHY THIS DROPS RATHER THAN ARCHIVES
 -- ----------------------------------------------------------------------------

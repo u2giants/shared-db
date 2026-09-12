@@ -45,8 +45,15 @@ begin
   end;
 
   -- #2794 removed plm.import_master_data(jsonb,jsonb) outright, so the contract
-  -- is now ABSENCE -- strictly stronger than the previous "body is the #1090
-  -- retirement stub" assertion.
+  -- here is about ABSENCE. State precisely what this block does and does not do:
+  -- absence is the SILENT SUCCESS PATH below, not an assertion. There is no
+  -- `else raise` for "the function is gone", so this block cannot fail because
+  -- the drop happened. What it does catch is the two ways absence is violated.
+  --
+  -- The unconditional absence check lives in the migration itself
+  -- (20260911225801), whose post-drop block RAISEs if to_regprocedure still
+  -- resolves the importer. That runs at apply time on a forward-only database
+  -- and is the enforcement; this file is a conditioned corroboration of it.
   --
   -- Absence is asserted where it is assertable, and NOT asserted unconditionally,
   -- for a reason that was measured rather than assumed. On the from-empty CI
@@ -61,7 +68,8 @@ begin
   -- The resurrection is a replay-harness artifact, not a database state that any
   -- forward-only lane can reach.
   --
-  -- So: absent is the contract and is enforced. Present-and-still-the-#1090-stub
+  -- So: absent is the contract, and it is enforced by the migration's own
+  -- post-drop RAISE rather than by this block. Present-and-still-the-#1090-stub
   -- means 20260911225801 did not do its job and IS a failure. Present with a
   -- pre-retirement body can only be the pass-2 resurrection, which is recorded
   -- loudly here instead of being asserted away or silently tolerated.
