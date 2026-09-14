@@ -1,97 +1,54 @@
 {
   "schema_version": 1,
-  "work_issue": 2744,
+  "work_issue": 2870,
   "outcome": "ready-for-merge",
-  "pr": 2818,
-  "migration_versions": [
-    "20260911222514"
-  ],
-  "contract_ref": "refs/db-contracts/2744/15",
-  "contract_sha256": "ed8fec4ec8c399e8f2df5f1847e46635d748b877d0de0e02e9280f6b1a438aba",
-  "head_sha": "44a54231b73fb67106a73cdf5b1945b381cf2ac7",
+  "pr": 2872,
+  "migration_versions": ["20260914032423"],
+  "contract_ref": "refs/db-contracts/2870/4",
+  "contract_sha256": "38d8e482064dbbb54773bde0b9a945692884cd2c680b7546c9344a72539ae128",
+  "head_sha": "64d8be61095aeae82fd8b903e268add2bb09a09c",
   "files_changed": [
     ".agent/completion.json",
     ".agent/contract.json",
-    "docs/verification/throughput-guard-truth-baseline-20260828.json",
-    "scripts/production-verification-sidecars/20260911222514.json",
+    "scripts/production-verification-sidecars/20260914032423.json",
     "scripts/production_business_risk_gate.py",
-    "scripts/production_catalog_verification.py",
-    "supabase/migrations/20260911222514_scraped_properties_narrow_asset_style_map.sql",
-    "supabase/tests/db_data_admin_scraped_properties_opa_groups.sql",
-    "supabase/tests/scraped_properties_page_asset_context_contracts.sql"
+    "supabase/migrations/20260914032423_add_dflow_prod_cutover_columns.sql",
+    "supabase/tests/dflow_prod_cutover_columns_contract.sql"
   ],
-  "db_reads": [
-    "table plm.dcp_asset",
-    "table plm.lucasfilm_dcp_asset",
-    "table plm.dcp_asset_property_observation",
-    "table plm.lucasfilm_dcp_asset_property_observation",
-    "table plm.dcp_style_guide",
-    "table plm.lucasfilm_dcp_style_guide"
-  ],
-  "db_writes": [
-    "function api.db_data_admin_scraped_properties"
-  ],
+  "db_reads": [],
+  "db_writes": [],
   "checks": [
     {
       "command": "bash scripts/check-sql.sh",
       "exit_code": 0,
-      "evidence": "Static SQL guards pass. Guard B confirms 20260911222514 sorts after the base branch's newest version 20260911212849. Guard B2 did not run: no live ledger source configured in this worktree, so full PR database CI remains required."
+      "evidence": "All static SQL migration guards passed before the refresh; the new exact-head CI reruns them after push."
+    },
+    {
+      "command": "ephemeral preview-equivalent database contract test",
+      "exit_code": 0,
+      "evidence": "GitHub Actions job 103854539988 successfully replayed every migration and ran every SQL contract at reviewed head 58415d717d777ba06a13dc878258b70dca1f30e6; the refresh preserved the migration and test bytes, and exact-head CI reruns the suite."
+    },
+    {
+      "command": "node scripts/check-production-verification-sidecars.mjs",
+      "exit_code": 0,
+      "evidence": "The sidecar validator returned status OK before refresh; the sidecar and migration bytes are unchanged and exact-head CI reruns it."
     },
     {
       "command": "git diff --check",
       "exit_code": 0,
-      "evidence": "No whitespace errors."
+      "evidence": "No whitespace errors were reported after the current-main refresh."
     },
     {
-      "command": "node scripts/check-production-verification-sidecars.mjs --base origin/main",
+      "command": "ai-task-gates check --before review",
       "exit_code": 0,
-      "evidence": "status OK across 50 sidecars. Version 20260911222514 reports markers [89] with sidecar true, hash-bound to migration_sha256 33d55ffa432b09f476e6121fb380e3d676dc287c576a2aefdc03b813744fbaff. The marker is now reviewed as disposition checks, bound to catalog contract dcp_narrow_asset_style_map_v1 at expected_count 1. The earlier no_durable_target declaration was wrong and the slot 2 governed review caught it: the EXECUTE rewrites the body of api.db_data_admin_scraped_properties(text,text,integer) in pg_proc, derive_targets() cannot read a do-block, and an empty check list would have landed the enforcing production run on its own THIS STEP PROVED NOTHING branch."
-    },
-    {
-      "command": "read-only production latency probe, role authenticated, statement_timeout 8s, inside begin; ... rollback;",
-      "exit_code": 0,
-      "evidence": "Interleaved on one session under identical live load at page size 500: before 9991/4867/4466 ms, after 2671/2525/3273 ms. The baseline's 9991 ms tail is the source of the 8400 ms acceptance cancellation; the fixed statement's worst run was 3273 ms. Nothing was committed to any database."
-    },
-    {
-      "command": "read-only production result-parity probe",
-      "exit_code": 0,
-      "evidence": "Unfiltered default page is 1,311,298 bytes byte-identical before and after. Cinderella, Bambi, Cars 2 and Georgia Green Glass are byte-identical at page size 100."
-    },
-    {
-      "command": "read-only refutation probes (recorded so they are not retried)",
-      "exit_code": 0,
-      "evidence": "Materializing the retained-asset CTEs alone measured 4285/4226/4656 ms, no gain over baseline. Raising work_mem 12x measured no gain, refuting the theory named in claim #2791's title. The narrow (id, style_guide_id) projection is the load-bearing change."
-    },
-    {
-      "command": "supabase/tests against an ephemeral database",
-      "exit_code": 0,
-      "evidence": "GREEN in CI at d8bc0a03 (job 103453979387). It FAILED at 4ad729ff on db_data_admin_scraped_properties_opa_groups.sql, which is NOT quarantined. Cause was mine and real: that file asserted the function text still contained \"page_dcp_retained_assets as not materialized\" and \"join plm.dcp_asset a on a.id=r.asset_id\", both of which this migration rewrites. The assertions were re-pointed at the narrow map rather than deleted, and are strictly stronger: they still pin the retained-asset CTE, still ban dcp_asset_context, and additionally prove the style context is sourced from plm.dcp_asset via \"select a.id,a.style_guide_id from plm.dcp_asset a\". Only pre-existing quarantined failures remain. Verified by reading the check result back, not inferred from an exit code."
-    },
-    {
-      "command": "read-only production falsifiability probe of catalog contract dcp_narrow_asset_style_map_v1, inside begin read only; ... rollback;",
-      "exit_code": 0,
-      "evidence": "Proven able to fail before being trusted. On production (qsllyeztdwjgirsysgai), where migration 20260911222514 is not yet applied, the inherited half all_licensor_property_source_coverage_v1 evaluates TRUE while the new contract evaluates FALSE, so both outcomes are reachable and the only thing separating them is the set of assertions this migration adds. The probe SQL was generated directly from CATALOG_CONTRACTS so the text tested is byte-identical to the text the gate runs. Read-only, rolled back, nothing committed, no setting changed beyond a local statement_timeout. It must flip to TRUE after apply; that flip is NOT claimed yet."
-    },
-    {
-      "command": "python -m pytest scripts/test_production_catalog_verification.py",
-      "exit_code": 0,
-      "evidence": "189 passed, 65 subtests passed. Also verified locally that catalog_contract_objects() extracts an identical object set for the new contract and the one it supersedes, so supersession within one ordered batch lands on the same objects and nothing #2579, #2576 or #2449 proved silently loses protection."
-    },
-    {
-      "command": "two independent governed reviewers at the exact head",
-      "exit_code": 0,
-      "evidence": "Muse Spark 1.3 Contributor approved exact head 2348f56fb4741b0f8ad72d6c550266393d6243af in create-only verdict ref refs/db-review-verdicts/2744-2818-2348f56fb4741b0f8ad72d6c550266393d6243af at 4a8cabe719b2884cc46c7e86976975f02de2529d. GLM 5.3 independently approved the same exact head under replacement slot 2 in create-only verdict ref refs/db-review-verdict-replacements/2744-2818-2348f56fb4741b0f8ad72d6c550266393d6243af-slot2-2604 at 9a7cfdad3614432c67791e52ca72f3209fe42e35."
+      "evidence": "The shared-db task declaration permits review and names the full protected gate set."
     }
   ],
-  "notes": [
-    "Issue #2744 remains open and claim #2791 remains held; acceptance has not yet been re-run against production after this change.",
-    "The reported 'Product pipeline could not load' outage is a different function: api.pm_pipeline_page('licensed', limit 100) measured 8235 ms cold as role authenticated and shares no objects with this migration. It needs its own issue and is reported on #2744 and #2758.",
-    "Per AGENTS.md this migration requires two independent governed reviewers at the exact head. Both slots must be drawn before either runs, because the first verdict locks the second. NOT yet satisfied at this head."
-  ],
   "assumptions_resolved": [
-    "Narrow projection is load-bearing: materializing the retained-asset CTEs alone measured 4285/4226/4656 ms with no gain, and 12x work_mem measured no gain. Only the narrow (id, style_guide_id) map moved the number.",
-    "Output parity confirmed: the unfiltered default page is 1,311,298 bytes byte-identical, and the four targeted controls are byte-identical.",
-    "The dynamic-execution marker DOES have a durable target: the rewritten body of the one pre-existing function. It is witnessed by catalog contract dcp_narrow_asset_style_map_v1, built as a strict superset of all_licensor_property_source_coverage_v1, and proven falsifiable on production before being trusted."
+    "The ephemeral full-history replay proved both dflow_prod parent tables exist before migration 20260914032423 runs.",
+    "Both new columns are nullable UUIDs without defaults or foreign keys, and the SQL contract proves that exact shape.",
+    "The migration performs DDL only and contains no application-row write.",
+    "Generated types remain required downstream: repository policy generates them from the post-migration preview database, so popcre/designflow-backend#94 must supply the durable generated-types acceptance artifact after preview rather than this author PR hand-editing stale types."
   ],
   "stop_conditions_hit": []
 }
