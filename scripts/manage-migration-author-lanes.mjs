@@ -1725,6 +1725,15 @@ export const githubIo = {
   },
   prSources() { return gatherOpenPrObjects(REPO) },
   openPulls() { return ghPaginated(`repos/${REPO}/pulls?state=open&per_page=100`) },
+  // #2987 verdict archive: every pull request's state in one paginated listing.
+  readPullStates() { return new Map(ghPaginated(`repos/${REPO}/pulls?state=all&per_page=100`).map((row)=>[Number(row.number),{state:row.state,merged:Boolean(row.merged_at),mergeCommitSha:row.merged_at?row.merge_commit_sha??null:null}])) },
+  // true/false from the local object store; null (kept, never guessed) when the
+  // commit is absent or unreadable here.
+  mergeTouchesMigrations(sha) {
+    if(!/^[0-9a-f]{40}$/i.test(String(sha)))return null
+    try{return execFileSync('git',['diff','--name-only',`${sha}^1`,sha],{encoding:'utf8',stdio:['ignore','pipe','ignore'],maxBuffer:32*1024*1024}).split(/\r?\n/).some((line)=>line.startsWith('supabase/migrations/'))}
+    catch{return null}
+  },
   // AGENTS.md section 4 rule 2 is merge-first: the rehearsal happens AFTER the PR
   // merges, so the lane must still be able to find that PR once it is closed.
   // `openPulls()` cannot see it; this looks the branch up across every state.
@@ -2520,7 +2529,7 @@ export function recoverStaleAuthorMutex({ expectedSha, confirmStale, serializedR
     const message=commit?.message ?? commit?.commit?.message ?? ''
     const dateText=commit?.committer?.date ?? commit?.commit?.committer?.date
     const acquiredAt=new Date(dateText)
-    if(!/^db-coordination (?:admission(?:-operation)?|outcome-(?:advance|complete|repair)|author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|preview-recovery|preview-rehearsal|preview-ready-preparation|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-replacement|reviewer-failure-replacement|reviewer-index-cutover-activation-audit|reviewer-exclusion-lock|reviewer-reinstatement-lock|reviewer-release-lock|reviewer-abandoned-lease-reap-lock|merged-claim-reissue-lock)(?: |$)/.test(message.split('\n')[0]))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
+    if(!/^db-coordination (?:admission(?:-operation)?|outcome-(?:advance|complete|repair)|author-acquisition|author-capacity-relinquish|author-capacity-resume|preview|preview-recovery|preview-rehearsal|preview-ready-preparation|merge|production|repository-maintenance-authorization|claim-release|duplicate-claim-release|claim-split-recovery|claim-object-expansion|claim-reversion|claim-version-supersession|claim-lease-renewal|expired-claim-recovery|reviewer-assignment-lock|reviewer-replacement-lock|reviewer-queue-lock|reviewer-silence-release-lock|reviewer-replacement|reviewer-failure-replacement|reviewer-index-cutover-activation-audit|reviewer-exclusion-lock|reviewer-reinstatement-lock|reviewer-release-lock|reviewer-abandoned-lease-reap-lock|reviewer-verdict-archive-lock|merged-claim-reissue-lock)(?: |$)/.test(message.split('\n')[0]))throw new LaneError('refusing recovery: mutex owner commit is not a recognized coordination lock')
     if(Number.isNaN(acquiredAt.valueOf()))throw new LaneError('refusing recovery: mutex owner time is unreadable')
     const age=now-acquiredAt
     if(age<minAgeMs)throw new LaneError(`refusing recovery: mutex is only ${Math.max(0,Math.floor(age/1000))} seconds old`)
@@ -4085,7 +4094,10 @@ export function findBusyReviewers(io,requested=[],{keepUnreadableLeases=false}={
     }catch{return null}
     if(prRow?.state!=='open'||prRow?.head?.sha!==assignment.headSha){stale.push({ref,sha,assignment});continue}
     let verdict
-    try{verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io,leaseVerdictOptions(assignment))}catch{
+    try{verdict=hasVerdictForHead(assignment.issue,assignment.pr,assignment.headSha,io,leaseVerdictOptions(assignment))}catch(error){
+      // #2987. The verdict namespace at its row ceiling is determinate: no retry
+      // clears it. Swallowed, it read as "active reviewer leases are unreadable".
+      if(isReviewRefListingRefusal(error))throw new LaneError(`durable reviewer verdict namespace cannot be listed: ${error.message}. Preview with --archive-old-review-verdicts, then archive with --archive-old-review-verdicts --apply-recovery (#2987)`)
       // Capacity reporting must retain the readable lease row so it can expose
       // the verdict read error on that row. Mutation callers keep the existing
       // fail-closed whole-probe behavior.
@@ -4264,6 +4276,121 @@ function reapAbandonedReviewLeasesOperation(options,now,io){
   }finally{if(acquired)finalizeReviewMutex(ownerSha,io)}
 }
 export function reapAbandonedReviewLeases(options={},now=new Date(),io=githubIo){return withReviewRequestBudget(()=>reapAbandonedReviewLeasesOperation(options,now,io),REVIEW_REAP_REQUEST_LIMIT,'reap-abandoned-review-leases')}
+
+// Issue #2987. Every durable verdict ever recorded stays under the shared
+// `refs/db-review-verdict` prefix, and `readDurableVerdictRefs` REFUSES once that
+// listing reaches REVIEW_REF_ROW_LIMIT. When it did, every draw, release and
+// replacement stopped. The ceiling says "retire refs, do not raise the number";
+// this is the governed retirement.
+//
+// ARCHIVED, NEVER DELETED. Each chosen verdict object is moved, in one atomic
+// compare-and-swap push that also pins the review mutex, to
+// refs/db-review-archived-verdicts/<original ref without refs/>. The commit stays
+// reachable and its original name is recoverable from the archive name, so an
+// archive can be reversed by the inverse transition.
+//
+// ONLY VERDICTS NOTHING CAN STILL ASK FOR. A verdict is archived only when its pull
+// request is closed and either (a) was never merged, or (b) was merged by a commit
+// that changed nothing under supabase/migrations/. Kept: every open pull request
+// (the merge gate and #2758 carry-forward read prior-head verdicts), every pull
+// request an active reviewer lease names, and every merged migration pull request
+// because production promotion re-runs check-exact-head-approval against the merged
+// source pull request. An unknown pull request or an unreadable merge commit is
+// kept, never guessed. Without --apply-recovery this is a read-only preview.
+export const REVIEW_ARCHIVED_VERDICT_REF_PREFIX='refs/db-review-archived-verdicts'
+export const REVIEW_VERDICT_ARCHIVE_BATCH=40
+const ARCHIVABLE_VERDICT_NAMESPACES=[`${REVIEW_VERDICT_REF_PREFIX}/`,`${REVIEW_VERDICT_REPLACEMENT_REF_PREFIX}/`]
+export function archivedVerdictRef(ref){
+  if(!ARCHIVABLE_VERDICT_NAMESPACES.some((prefix)=>String(ref).startsWith(prefix)))throw new LaneError(`${ref} is not a durable reviewer verdict ref`)
+  return `${REVIEW_ARCHIVED_VERDICT_REF_PREFIX}/${String(ref).slice('refs/'.length)}`
+}
+export function classifyVerdictForArchive(ref,{pulls,leasedPrs,touchesMigrations}){
+  const named=parseVerdictRef(ref)
+  if(!named)return {archive:false,reason:'unparseable-ref'}
+  if(leasedPrs.has(named.pr))return {archive:false,reason:'active-lease'}
+  const pull=pulls.get(named.pr)
+  if(!pull)return {archive:false,reason:'pr-unknown'}
+  if(pull.state!=='closed')return {archive:false,reason:'pr-open'}
+  if(!pull.merged)return {archive:true,reason:'pr-closed-unmerged'}
+  const touches=pull.mergeCommitSha?touchesMigrations(pull.mergeCommitSha):null
+  if(touches===false)return {archive:true,reason:'merged-no-migration'}
+  if(touches===true)return {archive:false,reason:'merged-migration-kept-for-promotion'}
+  return {archive:false,reason:'merge-commit-unreadable'}
+}
+function readArchivableVerdictRows(io){
+  // Each namespace is listed on its own, so each keeps the same loud ceiling
+  // refusal while the combined prefix is over it.
+  if(typeof io.listReviewRefsPaged!=='function')throw new LaneError('verdict archive requires the complete single-listing ref reader')
+  return ARCHIVABLE_VERDICT_NAMESPACES.flatMap((prefix)=>{
+    const rows=io.listReviewRefsPaged(prefix)
+    if(!Array.isArray(rows))throw new LaneError(`${prefix} listing is unreadable; verdict archive refused`)
+    return rows
+  })
+}
+function activeLeasePulls(io){
+  if(typeof io.readActiveReviewLeases!=='function')throw new LaneError('verdict archive requires the active reviewer lease snapshot')
+  const snapshot=io.readActiveReviewLeases()
+  if(!(snapshot instanceof Map))throw new LaneError('active reviewer lease snapshot is unreadable; verdict archive refused')
+  const prs=new Set()
+  for(const [ref,row] of snapshot){
+    let lease
+    try{lease=parseReviewLease(row?.commit)}catch{throw new LaneError(`active reviewer lease ${ref} is unreadable; verdict archive refused`)}
+    prs.add(Number(lease.pr))
+  }
+  return prs
+}
+function verdictArchiveScan(io,pulls){
+  const leasedPrs=activeLeasePulls(io)
+  const memo=new Map()
+  const touchesMigrations=(sha)=>{
+    if(!memo.has(sha)){let value=null;try{value=io.mergeTouchesMigrations(sha)}catch{value=null};memo.set(sha,value===true||value===false?value:null)}
+    return memo.get(sha)
+  }
+  const rows=readArchivableVerdictRows(io),candidates=[],kept={}
+  for(const row of rows){
+    const verdict=classifyVerdictForArchive(row.ref,{pulls,leasedPrs,touchesMigrations})
+    if(verdict.archive)candidates.push({ref:row.ref,sha:row.sha,archiveRef:archivedVerdictRef(row.ref),reason:verdict.reason})
+    else kept[verdict.reason]=(kept[verdict.reason]??0)+1
+  }
+  return {total:rows.length,candidates,kept}
+}
+function readPullStateMap(io){
+  if(typeof io.readPullStates!=='function'||typeof io.mergeTouchesMigrations!=='function')throw new LaneError('verdict archive requires pull request states and merge-commit inspection')
+  const pulls=io.readPullStates()
+  if(!(pulls instanceof Map))throw new LaneError('pull request states are unreadable; verdict archive refused')
+  return pulls
+}
+function countReasons(rows){const out={};for(const row of rows)out[row.reason]=(out[row.reason]??0)+1;return out}
+export function archiveOldReviewVerdicts(options={},now=new Date(),io=githubIo){
+  const pulls=readPullStateMap(io)
+  const scan=verdictArchiveScan(io,pulls)
+  const report={generatedAt:new Date(now).toISOString(),limit:REVIEW_REF_ROW_LIMIT,total:scan.total,candidates:scan.candidates.length,archiveReasons:countReasons(scan.candidates),kept:scan.kept}
+  if(!options.applyRecovery||!scan.candidates.length)return {...report,applied:false,archived:0,remaining:scan.total}
+  if(typeof io.atomicReviewRefs!=='function'||typeof io.readReviewRefs!=='function')throw new LaneError('verdict archive requires atomic compare-and-swap ref support')
+  const ownerSha=io.makeOwnerCommit(`db-coordination reviewer-verdict-archive-lock candidates=${scan.candidates.length} at=${new Date(now).toISOString()}`)
+  let acquired=false
+  try{
+    acquireReviewMutex(ownerSha,io);acquired=true;requireOwnedRef(MUTEX_REF,ownerSha,io)
+    // Re-prove under the mutex: a reopened pull request, a new active lease, or a
+    // verdict ref that moved since the preview is skipped, never archived.
+    // The pull request state map is re-read here, never reused from the preview:
+    // a PR closed unmerged before the lock can be reopened and merged with
+    // migrations before it, and its verdict is then promotion evidence (#2992 review).
+    const reopened=new Set((typeof io.openPulls==='function'?io.openPulls():[]).map((row)=>Number(row.number)))
+    const fresh=new Map([...readPullStateMap(io)].map(([pr,row])=>[pr,reopened.has(pr)?{...row,state:'open'}:row]))
+    const confirmed=new Map(verdictArchiveScan(io,fresh).candidates.map((row)=>[row.ref,row]))
+    const move=scan.candidates.filter((row)=>confirmed.get(row.ref)?.sha===row.sha)
+    const archived=[]
+    for(let index=0;index<move.length;index+=REVIEW_VERDICT_ARCHIVE_BATCH){
+      const batch=move.slice(index,index+REVIEW_VERDICT_ARCHIVE_BATCH)
+      io.atomicReviewRefs([{ref:MUTEX_REF,expected:ownerSha,sha:ownerSha},...batch.flatMap((row)=>[{ref:row.archiveRef,expected:null,sha:row.sha},{ref:row.ref,expected:row.sha,sha:null}])])
+      const after=io.readReviewRefs([MUTEX_REF,...batch.flatMap((row)=>[row.ref,row.archiveRef])])
+      if(after.get(MUTEX_REF)!==ownerSha||batch.some((row)=>after.get(row.ref)!==null||after.get(row.archiveRef)!==row.sha))throw new LaneError(`verdict archive readback mismatch after ${archived.length} archived verdicts; every archived object remains under ${REVIEW_ARCHIVED_VERDICT_REF_PREFIX}`)
+      archived.push(...batch)
+    }
+    return {...report,applied:true,archived:archived.length,skippedChanged:scan.candidates.length-move.length,remaining:scan.total-archived.length}
+  }finally{if(acquired)finalizeReviewMutex(ownerSha,io)}
+}
 
 function reviewerCapacityReportOperation(io,now){
   const busy=findBusyReviewers(io,[],{keepUnreadableLeases:true})
@@ -7060,6 +7187,7 @@ function parseArgs(argv) {
     else if (a === '--request-reviewer') out.assignReviewer = true
     else if (a === '--reviewer-capacity') out.reviewerCapacity = true
     else if (a === '--reap-abandoned-review-leases') out.reapAbandonedReviewLeases = true
+    else if (a === '--archive-old-review-verdicts') out.archiveOldReviewVerdicts = true
     else if (a === '--reviewer-preflight') out.reviewerPreflight = true
     else if (a === '--cleanup-stale') out.cleanup = true
     else if (a === '--release-claim') out.releaseClaim = next(i), i++
@@ -7178,7 +7306,7 @@ export function main(argv, now = new Date(), io = githubIo) {
   try {
     const o = parseArgs(argv)
     if(String(process.env.SHARED_DB_MERGED_PR_ISSUE_BINDING??'').trim())io=withMergedPrIssueBinding(io,process.env.SHARED_DB_MERGED_PR_ISSUE_BINDING)
-    const primaryKeys=['proposeTrain','validateTrain','authorizeTrain','dispatchTrain','closeTrain','verifyTrainDispatch','authorizeRepositoryMaintenanceStatus','resolveAdmittedIssueForPr','outcomeStatus','advanceOutcome','repairOutcomeHistory','completeOutcome','recoverMutex','reconcileFlow','preparePreviewDispatch','repairPreviewReady','terminalizeHistoricalPreviewReady','flowAudit','recoverSplit','expandClaim','expandClaimFromIssue','renewClaim','recoverExpiredClaim','relinquishAuthorLease','resumeAuthorLease','reissueMergedClaim','reversionClaim','replaceFailedReviewer','releaseFailedReviewer','probeSilentReviewer','reclaimSilentReviewer','reapAbandonedReviewLeases','reviewerCapacity','excludeReviewer','reinstateReviewerExclusion','reviewerPreflight','deliveryPreflight','assignReviewer','activateReviewCutover','acquireExclusive','releaseExclusive','claim','returnIssue','queueAudit','assertExclusive','recoverExclusive','completeWork','releaseClaim','releaseDuplicateClaim','cleanup','audit']
+    const primaryKeys=['proposeTrain','validateTrain','authorizeTrain','dispatchTrain','closeTrain','verifyTrainDispatch','authorizeRepositoryMaintenanceStatus','resolveAdmittedIssueForPr','outcomeStatus','advanceOutcome','repairOutcomeHistory','completeOutcome','recoverMutex','reconcileFlow','preparePreviewDispatch','repairPreviewReady','terminalizeHistoricalPreviewReady','flowAudit','recoverSplit','expandClaim','expandClaimFromIssue','renewClaim','recoverExpiredClaim','relinquishAuthorLease','resumeAuthorLease','reissueMergedClaim','reversionClaim','replaceFailedReviewer','releaseFailedReviewer','probeSilentReviewer','reclaimSilentReviewer','reapAbandonedReviewLeases','archiveOldReviewVerdicts','reviewerCapacity','excludeReviewer','reinstateReviewerExclusion','reviewerPreflight','deliveryPreflight','assignReviewer','activateReviewCutover','acquireExclusive','releaseExclusive','claim','returnIssue','queueAudit','assertExclusive','recoverExclusive','completeWork','releaseClaim','releaseDuplicateClaim','cleanup','audit']
     const selectedPrimary=primaryKeys.filter((key)=>Object.prototype.hasOwnProperty.call(o,key))
     const hasAdmission=Object.prototype.hasOwnProperty.call(o,'admitIssue')
     if(selectedPrimary.length>1)throw new LaneError(`choose exactly one primary operation; received ${selectedPrimary.join(', ')}`)
@@ -7282,6 +7410,7 @@ export function main(argv, now = new Date(), io = githubIo) {
     if(o.probeSilentReviewer){console.log(JSON.stringify(probeSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
     if(o.reclaimSilentReviewer){console.log(JSON.stringify(reclaimSilentReviewer({...o,slot:o.reviewSlot!==undefined?Number(o.reviewSlot):1},now,io),null,2));return 0}
     if(o.reapAbandonedReviewLeases){console.log(JSON.stringify(reapAbandonedReviewLeases(o,now,io),null,2));return 0}
+    if(o.archiveOldReviewVerdicts){console.log(JSON.stringify(archiveOldReviewVerdicts(o,now,io),null,2));return 0}
     if(o.reviewerCapacity){console.log(JSON.stringify(reviewerCapacityReport(io,now),null,2));return 0}
     if(o.excludeReviewer){console.log(JSON.stringify(excludeReviewerForPr(o,io),null,2));return 0}
     if(o.reinstateReviewerExclusion){console.log(JSON.stringify(reinstateReviewerExclusion(o,io),null,2));return 0}
