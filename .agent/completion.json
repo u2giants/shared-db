@@ -1,27 +1,48 @@
 {
   "schema_version": 1,
-  "work_issue": 2459,
+  "work_issue": 2301,
   "outcome": "ready-for-merge",
-  "pr": 2991,
+  "pr": 2640,
   "migration_versions": [],
-  "contract_ref": "refs/db-contracts/2459/2",
-  "contract_sha256": "513ce1a7be7da6724ad182c04a24e370190eedcadba0ece998d6eac13931d726",
-  "head_sha": "73e7d83cb02374592a5cef5ca13cb5f3c8812522",
+  "contract_ref": "refs/db-contracts/2301/5",
+  "contract_sha256": "57f64da19a233c0113ff51367d43e7ba958d0a53b3b39b6b88d818e453fb3bd6",
+  "head_sha": "02fc17cf72ee420a473534b65fdfcd7a6daa696b",
   "files_changed": [
-    ".agent/completion.json",
-    ".agent/contract.json",
+    "plan_author_lane_abandonment_lifecycle.md",
+    "scripts/coordination-scenarios.test.mjs",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "scripts/orchestrator-flow/capacity-state.test.mjs"
   ],
   "db_reads": [],
   "db_writes": [],
   "checks": [
-    {"command": "git diff --check", "exit_code": 0, "evidence": "No whitespace errors in the two implementation files."},
-    {"command": "node --test --test-reporter=tap scripts/manage-migration-author-lanes.test.mjs", "exit_code": 0, "evidence": "572 tests, 572 pass, 0 fail, 0 skipped at b2ff0aba and again at merge 73e7d83c, including the structural holder scan and the prefix-refusal test."}
+    {
+      "command": "node --test scripts/orchestrator-flow/capacity-state.test.mjs scripts/orchestrator-flow/reconcile.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/check-migration-pr-lease.test.mjs",
+      "exit_code": 0,
+      "evidence": "Run at implementation head 02fc17cf72ee420a473534b65fdfcd7a6daa696b (main f73bd61037050a310c6634f36470a345bc6a96a3 merged): tests 624, pass 624, fail 0, cancelled 0, skipped 0, todo 0."
+    },
+    {
+      "command": "node --test scripts/lib/exclusive-lease.test.mjs scripts/coordination-scenarios.test.mjs",
+      "exit_code": 0,
+      "evidence": "Run at 02fc17cf72ee420a473534b65fdfcd7a6daa696b: tests 57, pass 57, fail 0, cancelled 0, skipped 0, todo 0."
+    },
+    {
+      "command": "python scripts/test_production_migration_guard.py",
+      "exit_code": 0,
+      "evidence": "Run at 02fc17cf72ee420a473534b65fdfcd7a6daa696b: Ran 252 tests, OK, plus both BOUNDED OK migration manifest controls."
+    },
+    {
+      "command": "git diff --check",
+      "exit_code": 0,
+      "evidence": "No whitespace errors reported for f73bd61037050a310c6634f36470a345bc6a96a3..02fc17cf72ee420a473534b65fdfcd7a6daa696b."
+    }
   ],
   "assumptions_resolved": [
-    "Every mutex holder is recoverable: withAuthorMutex labels (including outcome-repair), exclusive lanes, literal owner commits (including reviewer-replacement and reviewer-failure-replacement); the structural test asserts the scanner sees each shape the #2991 review flagged.",
-    "Kinds now match exactly, so non-mutex kinds such as reviewer-failure-release are refused; lock acquisition behaviour is unchanged."
+    "Takeover verified PR 2640 and its branch had no commits or comments after 2026-09-11T22:08Z (more than 24h idle) before any change.",
+    "Main e317e92a was merged (no force-push); the single lane-manager conflict was resolved by uniting main's --evidence and --database-preview-classification-file with the branch's --worktree-state and --recovery-artifact. No behaviour outside Phase A changed.",
+    "The governed REVISE at head 8e94f114 was addressed at 1907f424; a fresh exact-head governed review is required on this head before merge.",
+    "PR 2640 closes sub-issue 2994 and references parent 2301, matching the one-closing-issue reviewer rule; generation 5 rewords one prohibited action that tripped the cancelled-work guard (local check now OK).",
+    "Issue 2301 remains open for Phase B-D."
   ],
   "stop_conditions_hit": []
 }

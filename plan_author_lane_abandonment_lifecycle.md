@@ -8,8 +8,8 @@ This is repository-maintenance work. It authorizes no database migration, databa
 
 | Step | Deliverable | State | Evidence |
 |---|---|---|---|
-| 1 | Extend relinquished-claim metadata and fail-closed parsing | ⬜ open | Not implemented |
-| 2 | Make capacity relinquishment machine-independent and recovery-gated | ⬜ open | Not implemented |
+| 1 | Extend relinquished-claim metadata and fail-closed parsing | ✅ complete | Phase A PR #2640; implementation commit `c039ca46e21528ef4d2ded2e7f8b5137dfd0aadf`; pre-cut census recorded on issue #2301; 528 focused manager/reconcile/lease tests passed |
+| 2 | Make capacity relinquishment machine-independent and recovery-gated | ✅ complete | Phase A PR #2640; clean/dirty/absent/remote and recovery/rollback scenarios passed; recovery artifacts are dereferenced, not shape-checked; 533 lane/capacity tests, 57 exclusive-lease/scenario tests and 239 production-guard tests passed |
 | 3 | Add immutable terminal-retirement tombstones and resurrection guards | ⬜ open | Not implemented |
 | 4 | Separate capacity reconciliation from preview readiness | ⬜ open | Not implemented |
 | 5 | Add hourly and dispatch-time read-only detection | ⬜ open | Not implemented |
@@ -258,9 +258,40 @@ Behavior:
 - capacity becomes non-active while claim/version/branch/PR/worktree remain untouched;
 - idempotent replay requires an identical blocker, state, and recovery tuple;
 - resume from `clean` follows current guards;
-- resume from `dirty`, `absent`, `remote`, or legacy unknown requires current proven-clean state or validated immutable recovery artifact;
+- resume from `dirty`, `absent`, or legacy unknown requires current proven-clean state or a **dereferenceable** immutable recovery artifact;
+- resume from `remote` requires a dereferenceable recovery artifact **regardless of local observation** — a clean tree at the same literal path on this machine is a different tree and can never stand in for the machine that holds the work;
+- an unreadable or ambiguous worktree observation **blocks resume even when a recovery artifact is present**; an unknown state is never excused by a stored reference;
 - successful resume removes relinquishment-only metadata, renews expiry, rechecks capacity/collisions/version, and records events atomically;
 - no code path deletes, moves, cleans, resets, or writes inside the worktree.
+
+**What "recovery-gated" means here, exactly.** A recovery artifact is accepted
+only if it is an immutable object hash this repository can dereference right
+now, through `githubIo.verifyArtifact()` (`git cat-file -t`). Shape validation
+alone was rejected during review of PR #2640: forty invented hexadecimal
+characters are well-formed, so a shape-only gate is an assertion, not a control.
+Two consequences are deliberate and recorded here rather than left implicit:
+
+- an `artifact:https://…` reference is **refused** for `--recovery-artifact`,
+  because this tool cannot dereference a URL. https references remain valid for
+  `--blocked-on`, which is an informational blocker rather than a recovery gate;
+- the stored reference is **re-verified on every resume**, never trusted because
+  it was accepted once.
+
+**Legacy relinquishment freeze applies to every mutator.** A pre-Phase-A
+relinquished fence (`relinquishmentMetadataLegacy`) is refused by
+`resumeAuthorLease`, `renewExpiredClaim`, `recoverExpiredClaimFromPr`,
+`expandActiveClaimFromPr`, and `expandActiveClaimFromIssue`. Enforcing it on the
+resume path alone would have let a legacy claim be renewed or expanded around
+the freeze.
+
+**Orchestrator flow adapters (`githubFlowAdapter`) call
+`relinquishAuthorLease`/`resumeAuthorLease` without `worktreeState` or
+`recoveryArtifact`.** That is intentional and it fails closed: those adapters can
+only relinquish work whose worktree is observably clean on the calling machine,
+and can only resume work that is observably clean now. **Machine-independent
+relinquishment (`dirty`/`absent`/`remote`) is NOT reachable through the flow
+adapters** and must be driven through the CLI with explicit evidence flags. No
+caller should assume otherwise.
 
 Dependencies: Step 1.
 
@@ -508,6 +539,7 @@ Run any additional package/repository test command required by current `package.
 - **Parser rollout strands legacy records.** Mitigation: explicit legacy classification, fail-closed mutation, fixtures from real historical fence shapes.
 - **A false abandonment record frees capacity.** Mitigation: capacity only; locks/work remain. Mutation requires typed durable evidence and current marker/mutex validation.
 - **A dirty worktree is lost later.** Mitigation: no worktree mutation; record state; recovery-gated resume; dirty/remote retirement requires Albert’s decision.
+- **A recovery artifact names something that does not exist.** Mitigation: the reference is dereferenced through `githubIo.verifyArtifact()` at relinquish AND at every resume; an unverifiable reference, an absent verification hook, and a verification error all refuse.
 - **Retired work resurfaces.** Mitigation: immutable tombstone, tuple guards, audit classification, permanent version reservation, fresh successor tuple.
 - **GitHub API budget grows.** Mitigation: one bounded ref snapshot per command plus budget regression tests.
 - **Hourly workflow creates noise.** Mitigation: one run/check result, concurrency cancellation, no duplicate comments/issues, structured exact claims.

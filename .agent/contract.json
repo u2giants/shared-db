@@ -1,43 +1,57 @@
 {
+  "schema_version": 1,
+  "generation": 5,
+  "work_issue": 2301,
+  "work_type": "repo-maintenance",
+  "route": "repo-maintenance",
+  "goal": "Implement only Phase A Steps 1-2 of the author-lane abandonment lifecycle so capacity can be relinquished from any machine while all work authority remains protected and resume is recovery-gated.",
+  "base_sha": "e317e92ae6e28d7df8c16964d5b94b21f14bfcf9",
+  "dispatcher": "Claude shared-db coordinator (takeover of idle PR 2640, authorized 2026-09-15)",
+  "worker": "Claude Opus 5 issue-2301 Phase A repository-maintenance takeover worker",
+  "branch": "codex/issue-2301-phase-a",
+  "worktree": "C:/repos/shared-db/.claude/worktrees/disney-creative-unmapped-titles-7b4149",
   "allowed_paths": [
-    ".agent/contract.json",
-    ".agent/completion.json",
     "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
+    "scripts/orchestrator-flow/capacity-state.test.mjs",
+    "scripts/coordination-scenarios.test.mjs",
+    "plan_author_lane_abandonment_lifecycle.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
-  "assumptions": [
-    "Authorization is issue 2459, dispatched by the coordinating Claude session acting as dispatcher for PR #2991; repo-maintenance only, no migration lane and no db claim.",
-    "Only the stale-mutex recovery allowlist and its tests change; lock acquisition behaviour is untouched."
+  "file_writes": [
+    "scripts/manage-migration-author-lanes.mjs",
+    "scripts/orchestrator-flow/capacity-state.test.mjs",
+    "scripts/coordination-scenarios.test.mjs",
+    "plan_author_lane_abandonment_lifecycle.md",
+    ".agent/contract.json",
+    ".agent/completion.json"
   ],
-  "base_sha": "1f7dbe47039b0479390e31185f2d30c6b17bea61",
-  "branch": "claude/2459-mutex-recovery-kinds",
   "db_reads": [],
   "db_writes": [],
-  "dispatcher": "Claude coordinating session (dispatcher for PR #2991)",
-  "file_writes": [
-    ".agent/contract.json",
-    ".agent/completion.json",
-    "scripts/manage-migration-author-lanes.mjs",
-    "scripts/manage-migration-author-lanes.test.mjs"
-  ],
-  "generation": 2,
-  "goal": "Make every owner-commit kind that acquires the author mutex recoverable by stale-mutex recovery, with a structural test so a new lock kind cannot ship unrecoverable.",
   "prohibited_actions": [
-    "No database, migration, preview, production, claim or marker mutation.",
-    "No hand deletion of refs; no workflow, repository setting or branch protection change."
+    "No database, preview, production, or infrastructure action",
+    "No claim, branch, pull request, worktree, or coordination-ref deletion",
+    "No live capacity transition merely to prove the feature",
+    "No Phase B-D implementation in this pull request",
+    "No rewrite of the existing Phase A branch commits; update only by merge"
   ],
   "required_checks": [
-    "git diff --check",
-    "node --test --test-reporter=tap scripts/manage-migration-author-lanes.test.mjs"
+    "node --test scripts/orchestrator-flow/capacity-state.test.mjs scripts/orchestrator-flow/reconcile.test.mjs scripts/manage-migration-author-lanes.test.mjs scripts/check-migration-pr-lease.test.mjs",
+    "node --test scripts/lib/exclusive-lease.test.mjs scripts/coordination-scenarios.test.mjs",
+    "python scripts/test_production_migration_guard.py",
+    "git diff --check"
   ],
-  "route": "repo-maintenance",
-  "schema_version": 1,
+  "assumptions": [
+    "Issue 2301 is repo-maintenance owned by a repository session, not the orchestrator",
+    "PR 2640 had no commits or comments after 2026-09-11T22:08Z; the coordinator authorized takeover on 2026-09-15 after verifying more than 24h idle",
+    "Generation 4 rebinds the unchanged generation-3 scope to main e317e92a after a merge (not a force-push); no path, database, or action scope is widened",
+    "The REVISE findings from the governed review at 8e94f114 were addressed at 1907f424; a fresh exact-head governed review is still required",
+    "Generation 5 only rewords one prohibited action that tripped the cancelled-work guard and binds PR 2640 to sub-issue 2994 (closes) with parent 2301 (refs); scope is unchanged"
+  ],
   "stop_conditions": [
-    "Stop if recovery would need to accept a commit kind that does not acquire the author mutex.",
-    "Stop if the full lanes test suite regresses."
-  ],
-  "work_issue": 2459,
-  "work_type": "repo-maintenance",
-  "worker": "Claude Opus 5 subagent",
-  "worktree": "C:/repos/shared-db/.claude/worktrees/agent-aa6c79212374b6e34"
+    "Stop if implementing Phase A would release object or version protection",
+    "Stop if a safe result would require deleting or mutating a worktree or coordination ref",
+    "Stop if current main moves before the final exact-head review-to-merge cycle",
+    "Stop if Phase A cannot preserve existing fail-closed parser and collision behavior"
+  ]
 }
